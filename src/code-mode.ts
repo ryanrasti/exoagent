@@ -11,14 +11,15 @@ const BUNDLED_RUNTIME_CODE = readFileSync(
   'utf-8',
 )
 
-type SafeEvalResult = {
+export type SafeEvalResult = {
   wait: () => Promise<void>
   input: ReadableStream<Uint8Array>
   output: WritableStream<Uint8Array>
 }
 
-type SafeEvalContext = {
+export type SafeEvalContext = {
   safeEval: (code: string) => Promise<SafeEvalResult>
+  // See code-mode-runtime.ts for the expected format of the sandbox context
   sandboxContext: string
 }
 

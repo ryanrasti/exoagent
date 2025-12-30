@@ -1,46 +1,12 @@
 import type { Tool } from 'ai'
-import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Readable, Writable } from 'node:stream'
 import { jsonSchema } from 'ai'
 import { describe, expect, it } from 'vitest'
+import { createDenoSandbox } from './code-mode-deno.js'
 import { CodeMode } from './code-mode.js'
 
-const codeMode = new CodeMode({
-  safeEval: async (code: string) => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'exoagent-test-'))
-    const tempFile = join(tempDir, 'code.mjs')
-    await writeFile(tempFile, code, 'utf-8')
-    const child = spawn('node', [tempFile], { stdio: ['pipe', 'pipe', 'inherit'] })
-    return {
-      input: Readable.toWeb(child.stdout),
-      output: Writable.toWeb(child.stdin),
-      wait: () => new Promise<void>((resolve, reject) => {
-        child.on('exit', async (code) => {
-          await rm(tempDir, { recursive: true, force: true }).catch(() => {})
-          code === 0 ? resolve() : reject(new Error(`Process exited with code ${code}`))
-        })
-        child.on('error', async (err) => {
-          await rm(tempDir, { recursive: true, force: true }).catch(() => {})
-          reject(err)
-        })
-      }),
-    }
-  },
-  sandboxContext: `(async () => {
-    const { Readable, Writable } = await import('node:stream')
-    return {
-      input: Readable.toWeb(process.stdin),
-      output: Writable.toWeb(process.stdout),
-      onSuccess: () => process.exit(0),
-      onFailure: () => process.exit(1)
-    }
-  })()`,
-})
+const codeMode = new CodeMode(createDenoSandbox())
 
-describe('codeMode', () => {
+describe('codeMode with Deno', () => {
   it('executes user code that calls tools', async () => {
     const tools: Tool[] = [
       {
