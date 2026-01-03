@@ -34,5 +34,12 @@
     "json",
     "jsonc",
     "yaml"
-  ]
+  ],
+
+  // Python/Pyright configuration
+  "python.defaultInterpreterPath": "${workspaceFolder}/python/.venv/bin/python3",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/python/src"
+  ],
+  "python.analysis.typeCheckingMode": "basic"
 }

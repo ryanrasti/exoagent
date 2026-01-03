@@ -1,0 +1,26 @@
+{
+  "include": [
+    "python/src"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__"
+  ],
+  "venvPath": "python",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic",
+  "executionEnvironments": [
+    {
+      "root": "python",
+      "pythonVersion": "3.12",
+      "pythonPlatform": "Linux",
+      "extraPaths": [
+        "python/src",
+        "python/.venv/lib/python3.12/site-packages"
+      ]
+    }
+  ]
+}
+
