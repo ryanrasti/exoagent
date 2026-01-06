@@ -4,7 +4,11 @@ import camelCase from 'camelcase'
 import { RpcTarget } from 'capnweb'
 import { validate } from 'json-schema'
 import { compile as compileJsonSchemaToTs } from 'json-schema-to-typescript'
+import invariant from 'tiny-invariant'
 import { zodToJsonSchema } from 'zod-to-json-schema'
+import { RpcToolset } from './rpc-toolset'
+
+export type WrappableTools = { [key: string]: Tool | (() => RpcToolset) } | Tool[]
 
 const extractTypeBody = (interfaceCode: string): string => {
   const match = interfaceCode.match(/interface \w+ \{([\s\S]*)\}/)
@@ -55,7 +59,7 @@ const getJsonSchema = (schema: unknown): Parameters<typeof compileJsonSchemaToTs
 }
 
 export async function* generateToolTypes(
-  tools: Record<string, Tool> | Tool[],
+  tools: WrappableTools,
   name: string,
 ): AsyncGenerator<string, void, unknown> {
   yield `class ${name} {`
@@ -71,6 +75,12 @@ export async function* generateToolTypes(
     : Object.entries(tools)
 
   for (const [toolName, tool] of toolEntries) {
+    if (typeof tool === 'function') {
+      const toolset = tool()
+      yield `// \`RpcToolset\`: ${toolName} (see .d.ts below for methods)`
+      yield `  ${toolName}: () => RpcPromise<${toolset.constructor.name}>`
+      continue
+    }
     const inputSchema = getJsonSchema(tool.inputSchema)
     const outputSchema = tool.outputSchema
       ? getJsonSchema(tool.outputSchema)
@@ -106,13 +116,13 @@ export async function* generateToolTypes(
       ? `\n  /**\n   * ${description}\n   */`
       : ''
 
-    yield `${toolDoc}\n  ${toolName}: (input: ${inputTypeBody}) => Promise<${outputTypeBody}>;`
+    yield `${toolDoc}\n  ${toolName}: (input: ${inputTypeBody}) => RpcPromise<${outputTypeBody}>;`
   }
 
   yield `}\n\nexport default ${name};`
 }
 
-export const generateToolApi = (tools: Record<string, Tool> | Tool[], opts: ToolExecutionOptions) => {
+export const generateToolApi = (tools: WrappableTools, opts: ToolExecutionOptions) => {
   class ToolApi extends RpcTarget {
     __return_value__: unknown = null
     __raw_code__: string
@@ -144,6 +154,13 @@ export const generateToolApi = (tools: Record<string, Tool> | Tool[], opts: Tool
     // We modify the prototype because Cap'n Web will only call methods on the
     // prototype, not the instance.
     (ToolApi.prototype as any)[toolName] = async function (this: ToolApi, ...args: any) {
+      if (typeof tool === 'function') {
+        // If it's a toolset, then it's a zero-arg function:
+        const toolset = tool()
+        invariant(toolset instanceof RpcToolset, 'Tool must return an instance of RpcToolset')
+        return toolset
+      }
+
       if (args.length !== 1) {
         throw new Error(`Tool ${toolName} only accepts exactly one argument, but ${args.length} were provided`)
       }

@@ -1,10 +1,12 @@
 import type { Tool, ToolExecutionOptions } from 'ai'
+import type { RpcToolset } from './rpc-toolset'
+import type { WrappableTools } from './tool-wrapper'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { RpcSession } from 'capnweb'
 import { z } from 'zod'
-import { StreamTransport } from './stream-transport.js'
-import { generateToolApi, generateToolTypes } from './tool.js'
+import { StreamTransport } from './stream-transport'
+import { generateToolApi, generateToolTypes } from './tool-wrapper'
 
 const BUNDLED_RUNTIME_CODE = readFileSync(
   fileURLToPath(new URL('../dist/code-mode-runtime.mjs', import.meta.url)),
@@ -23,10 +25,15 @@ export type SafeEvalContext = {
   sandboxContext: string
 }
 
+type FlatTools = { [key: string]: Tool } | Tool[]
+type RpcTools = { [key: string]: () => RpcToolset }
+
 export class CodeMode {
   constructor(private context: SafeEvalContext) {}
 
-  async wrap(tools: Tool[]): Promise<Tool> {
+  wrap(tools: FlatTools): Promise<Tool>
+  wrap(tools: RpcTools | FlatTools, dts: string): Promise<Tool>
+  async wrap(tools: WrappableTools, dts?: string): Promise<Tool> {
     // 1. Consume raw tools
 
     const typeDefinitions: string[] = []
@@ -46,8 +53,7 @@ export class CodeMode {
         type Returnable = Primitive | { [key: string]: Returnable } | Returnable[];
         \`\`\`
 
-
-
+        ${dts ? `// .d.ts for the \`RpcToolset\`s:\n${dts}` : ''}
 
         You must write the code in the following format:
         \`\`\`typescript
