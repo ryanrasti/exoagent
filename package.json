@@ -24,8 +24,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown && npm run build:runtime-bundle",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsdown && npm run build:runtime-bundle && npm run build:test-deps",
     "build:runtime-bundle": "tsdown --config tsdown.runtime.config.ts",
+    "build:test-deps": "tsdown --config tsdown.test-deps.config.ts",
     "dev": "tsdown --watch",
     "lint": "eslint",
     "prepublishOnly": "npm run build",
@@ -50,6 +52,7 @@
     "@antfu/eslint-config": "6.6.1",
     "@antfu/ni": "28.0.0",
     "@antfu/utils": "9.3.0",
+    "@standard-schema/spec": "^1.1.0",
     "@types/node": "25.0.1",
     "bumpp": "10.3.2",
     "eslint": "9.39.2",

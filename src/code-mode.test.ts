@@ -1,12 +1,13 @@
 import type { Tool } from 'ai'
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { jsonSchema } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { CodeMode } from './code-mode.js'
+import { TestToolset } from './rpc-toolset-test-helpers'
 
 const codeMode = new CodeMode({
   safeEval: async (code: string) => {
@@ -114,5 +115,61 @@ describe('codeMode', () => {
 
     expect(result).toMatchObject({ success: true })
     expect((result as { error: string }).error).toBe('Invalid arguments for tool tool_0: not a number - string value found, but a number is required')
+  }, 10000)
+
+  it('executes user code that calls RpcToolset tools', async () => {
+    // Assume npm run build:test-deps has been run
+    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.mts', 'utf-8')
+
+    const wrappedTool = await codeMode.wrap({ testToolset: () => new TestToolset() }, dtsContent)
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+      code: `async (api) => {
+        const toolset = await api.testToolset()
+        const addResult = await toolset.add({ a: 10, b: 5 })
+        return { result: addResult }
+      }`,
+    })
+
+    expect(result).toEqual({ result: 15 })
+  }, 10000)
+
+  it('executes user code that chains RpcToolset tools', async () => {
+    // Assume npm run build:test-deps has been run
+    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.mts', 'utf-8')
+
+    const wrappedTool = await codeMode.wrap({ testToolset: () => new TestToolset() }, dtsContent)
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+      code: `async (api) => {
+        // Note we *don't* need \`await\`s here because Cap'n Web implement promise-pipelining
+        const toolset1 = api.testToolset()
+        const toolset2 = toolset1.toolset2()
+        return { result: toolset2.subtract({ a: 20, b: 8 }) }
+      }`,
+    })
+
+    expect(result).toEqual({ result: 12 })
+  }, 10000)
+
+  it('validates RpcToolset tool arguments and rejects invalid input', async () => {
+    // Assume npm run build:test-deps has been run
+    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.mts', 'utf-8')
+
+    const wrappedTool = await codeMode.wrap({ testToolset: () => new TestToolset() }, dtsContent)
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+      code: `async (api) => {
+        try {
+          const toolset = api.testToolset()
+          // Passing string for number field 'a'
+          await toolset.add({ a: 'not a number', b: 3 })
+          return { success: false, error: 'Should have failed validation' }
+        } catch (error) {
+          const errorMsg = error?.message || String(error)
+          return { success: true, error: errorMsg }
+        }
+      }`,
+    })
+
+    expect(result).toMatchObject({ success: true })
+    expect((result as { error: string }).error).toContain('Invalid value')
   }, 10000)
 })

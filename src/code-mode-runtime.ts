@@ -1,7 +1,7 @@
 // Runtime template for sandbox execution
 // This gets bundled with capnweb and StreamTransport, then injected into safeEval
 
-import type { ToolApi } from './tool'
+import type { ToolApi } from './tool-wrapper'
 import { RpcSession } from 'capnweb'
 import { StreamTransport } from './stream-transport'
 

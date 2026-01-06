@@ -1,6 +1,6 @@
 import type { Tool } from 'ai'
 import { describe, expect, it } from 'vitest'
-import { generateToolTypes } from './tool.js'
+import { generateToolTypes } from './tool-wrapper'
 
 describe('generateToolTypes', () => {
   it('generates class definition for 1 tool', async () => {
@@ -29,7 +29,7 @@ describe('generateToolTypes', () => {
   /**
    * Test tool description
    */
-  tool_0: (input: { name: string; age?: number }) => Promise<object>;}
+  tool_0: (input: { name: string; age?: number }) => RpcPromise<object>;}
 
 export default TestTools;`,
     )
@@ -68,11 +68,11 @@ export default TestTools;`,
   /**
    * First tool
    */
-  tool_0: (input: { x?: string }) => Promise<object>;
+  tool_0: (input: { x?: string }) => RpcPromise<object>;
   /**
    * Second tool
    */
-  tool_1: (input: { y?: number }) => Promise<object>;}
+  tool_1: (input: { y?: number }) => RpcPromise<object>;}
 
 export default MyTools;`,
     )
@@ -111,7 +111,7 @@ export default MyTools;`,
   /**
    * Tool with output
    */
-  tool_0: (input: { query: string }) => Promise<{ result: string; count?: number }>;}
+  tool_0: (input: { query: string }) => RpcPromise<{ result: string; count?: number }>;}
 
 export default OutputTools;`,
     )
@@ -140,7 +140,7 @@ export default OutputTools;`,
     expect(result).toContain('class ZodTools {')
     expect(result).toContain('Tool with zod schema')
     expect(result).toContain('tool_0: (input:')
-    expect(result).toContain('Promise<object>')
+    expect(result).toContain('RpcPromise<object>')
     expect(result).toContain('export default ZodTools')
     // Note: zod-to-json-schema may not fully support zod v4 yet,
     // so we just verify it doesn't crash and produces valid output
