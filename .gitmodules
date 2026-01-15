@@ -1,0 +1,5 @@
+[submodule "packages/capnweb"]
+	path = packages/capnweb
+	url = https://github.com/ryanrasti/capnweb.git
+	pushUrl = git@github.com:ryanrasti/capnweb.git
+	branch = ryan_callback

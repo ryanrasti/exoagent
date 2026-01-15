@@ -4,6 +4,9 @@
     "lib": ["ESNext"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "paths": {
+      "capnweb": ["./packages/capnweb/dist"]
+    },
     "resolveJsonModule": true,
     "strict": true,
     "strictNullChecks": true,
@@ -12,5 +15,6 @@
     "verbatimModuleSyntax": true,
     "skipDefaultLibCheck": true,
     "skipLibCheck": true
-  }
+  },
+  "exclude": ["packages/capnweb"]
 }

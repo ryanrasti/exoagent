@@ -27,7 +27,7 @@
     "clean": "rm -rf dist",
     "build": "npm run clean && tsdown && npm run build:runtime-bundle && npm run build:test-deps",
     "build:runtime-bundle": "tsdown --config tsdown.runtime.config.ts",
-    "build:test-deps": "tsdown --config tsdown.test-deps.config.ts",
+    "build:test-deps": "npm run build:runtime-bundle && tsdown --config tsdown.test-deps.config.ts",
     "dev": "tsdown --watch",
     "lint": "eslint",
     "prepublishOnly": "npm run build",
@@ -40,7 +40,6 @@
   "dependencies": {
     "ai": "^6.0.3",
     "camelcase": "^9.0.0",
-    "capnweb": "^0.4.0",
     "json-schema": "^0.4.0",
     "json-schema-to-typescript": "^15.0.4",
     "kysely": "^0.28.9",

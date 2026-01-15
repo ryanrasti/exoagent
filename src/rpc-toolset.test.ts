@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { RpcToolset, tool } from './rpc-toolset'
+import { TestToolset, User } from './rpc-toolset-test-helpers'
+import { isFromItem } from './sql/builder'
+import { compiledQuery } from './sql/test-helpers'
 
 describe('tool decorator', () => {
   it('validates input when schema is provided', () => {
@@ -148,5 +151,42 @@ describe('tool decorator', () => {
     }
 
     expect(() => new TestToolset()).toThrow('Prototype method notATool is not a tool. Did you forget to use the @tool decorator?')
+  })
+})
+
+describe('sql integration with RPC toolset', () => {
+  it('can call table method decorated with @tool() and use returned table in join', () => {
+    const user = new User()
+    const postsTable = user.posts()
+
+    expect(isFromItem(postsTable)).toBe(true)
+    expect(postsTable.tableName).toBe('posts')
+
+    // Verify the table can be used in a join
+    const query = User.from()
+      .join(({ user }) => user.posts())
+      .select(({ user, post }) => ({ userName: user.name, postTitle: post.title }))
+
+    expect(compiledQuery(query.compile())).toEqual({
+      sql: 'SELECT "user"."name" as "userName", "post"."title" as "postTitle" FROM "users" AS "user" JOIN "posts" AS "post" ON "post"."user_id" = "user"."id"',
+      parameters: [],
+    })
+  })
+
+  it('can return table with on expression from toolset method and use in query', async () => {
+    const toolset = new TestToolset()
+    const userTable = await toolset.userForId({ id: '123' })
+
+    expect(isFromItem(userTable)).toBe(true)
+    expect(userTable.tableName).toBe('users')
+
+    // Verify the table can be used in a query with the on expression applied as a where clause
+    const query = userTable.from()
+      .select(({ user }) => ({ id: user.id, name: user.name }))
+
+    expect(compiledQuery(query.compile())).toEqual({
+      sql: 'SELECT "user"."id" as "id", "user"."name" as "name" FROM "users" AS "user" WHERE "user"."id" = $1',
+      parameters: ['123'],
+    })
   })
 })

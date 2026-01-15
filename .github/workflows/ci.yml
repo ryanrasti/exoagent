@@ -14,11 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: git submodule update --init --recursive
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: npm
 
+      - run: cd packages/capnweb && npm ci && npm run build
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
@@ -35,6 +37,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - run: git submodule update --init --recursive
       - name: Set node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
@@ -45,6 +48,7 @@ jobs:
         with:
           deno-version: latest
 
+      - run: cd packages/capnweb && npm ci && npm run build
       - run: npm ci
       - run: npm run build
       - run: npm run test
