@@ -1,6 +1,15 @@
 import type { RawSql } from './sql'
 import { buildSql, sql } from './sql'
 
+type LiteralValue = number | string | boolean | null | undefined
+export type SqlExpressionIn = LiteralValue | SqlExpression
+export const asSqlExpression = (value: LiteralValue | SqlExpression): SqlExpression => {
+  return value instanceof SqlExpression ? value : new LiteralExpression(value)
+}
+export const isSqlExpressionIn = (value: unknown): value is SqlExpressionIn => {
+  return typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean' || value === null || value === undefined || value instanceof SqlExpression
+}
+
 export class SqlExpression {
   constructor(public precedence: number = 100) {}
 
@@ -46,44 +55,44 @@ export class SqlExpression {
     return new BinaryExpression(this, expr, sql`>=`, 5)
   }
 
-  '='(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`=`, 5)
+  '='(expr: SqlExpressionIn) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`=`, 5)
   }
 
-  '<>'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`<>`, 5)
+  '<>'(expr: SqlExpressionIn) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`<>`, 5)
   }
 
-  '!='(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`!=`, 5)
+  '!='(expr: SqlExpressionIn) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`!=`, 5)
   }
 
-  'LIKE'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`LIKE`, 6)
+  'LIKE'(expr: SqlExpression | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`LIKE`, 6)
   }
 
-  'NOT LIKE'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`NOT LIKE`, 6)
+  'NOT LIKE'(expr: SqlExpression | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`NOT LIKE`, 6)
   }
 
-  '+'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`+`, 8)
+  '+'(expr: SqlExpression | number | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`+`, 8)
   }
 
-  '-'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`-`, 8)
+  '-'(expr: SqlExpression | number | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`-`, 8)
   }
 
-  '*'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`*`, 9)
+  '*'(expr: SqlExpression | number | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`*`, 9)
   }
 
-  '/'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`/`, 9)
+  '/'(expr: SqlExpression | number | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`/`, 9)
   }
 
-  '%'(expr: SqlExpression) {
-    return new BinaryExpression(this, expr, sql`%`, 9)
+  '%'(expr: SqlExpression | number | string) {
+    return new BinaryExpression(this, asSqlExpression(expr), sql`%`, 9)
   }
 
   asc() {
@@ -139,7 +148,7 @@ export class UnaryExpression extends SqlExpression {
 }
 
 export class ColumnReferenceExpression extends SqlExpression {
-  constructor(private alias: string, private column: string) {
+  constructor(public readonly alias: string, public readonly column: string) {
     super()
   }
 
@@ -147,6 +156,18 @@ export class ColumnReferenceExpression extends SqlExpression {
   // not a method of the class prototype
   compile = () => {
     return sql.ref(`${this.alias}.${this.column}`)
+  }
+}
+
+export class LiteralExpression extends SqlExpression {
+  constructor(private readonly value: LiteralValue) {
+    super()
+  }
+
+  // `= () => ` to ensure the method is a direct property of the class instance,
+  // not a method of the class prototype
+  compile = () => {
+    return sql`${this.value}`
   }
 }
 

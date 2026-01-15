@@ -12,6 +12,7 @@ export default antfu(
       'ts/consistent-type-definitions': 'off',
       'antfu/top-level-function': 'off',
       'style/max-statements-per-line': 'off',
+      'ts/no-this-alias': 'off',
     },
   },
 )

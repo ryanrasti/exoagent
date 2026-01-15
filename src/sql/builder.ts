@@ -1,33 +1,77 @@
+import type { SqlExpressionIn } from './expression'
 import type { RawSql } from './sql'
 import invariant from 'tiny-invariant'
-import { ColumnReferenceExpression, OrderByValue, SqlExpression } from './expression'
+import { RpcToolset } from '../rpc-toolset'
+import { asSqlExpression, ColumnReferenceExpression, isSqlExpressionIn, OrderByValue, SqlExpression } from './expression'
 import { buildSql, sql } from './sql'
 
-type RowLike = {
+type RowLikeRaw = {
   [key: string]: SqlExpression
 }
 
-const isRowLike = (value: unknown): value is RowLike => {
+type RowLikeRawIn = {
+  [key: string]: SqlExpressionIn
+}
+
+type RowLike = RowLikeRaw | TableBase
+
+type RowLikeIn = RowLikeRawIn | RowLike
+
+const asRowLike = <R extends RowLikeIn>(value: R): AsRowLike<R> => {
+  if (value instanceof TableBase) {
+    return value as unknown as AsRowLike<R>
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, value]) => [key, asSqlExpression(value)])) as unknown as AsRowLike<R>
+}
+
+type AsRowLike<R extends RowLikeIn> = R extends TableBase ? R : {
+  [key in keyof R]: R[key] extends SqlExpression ? R[key] : SqlExpression
+}
+
+const isRowLikeRawIn = (value: unknown): value is RowLikeRawIn => {
   return typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
-    && Object.entries(value).every(([key, value]) => typeof key === 'string' && value instanceof SqlExpression)
+    && Object.entries(value).every(([key, value]) => typeof key === 'string' && isSqlExpressionIn(value))
+}
+
+const isRowLikeIn = (value: unknown): value is RowLikeIn => {
+  return isRowLikeRawIn(value) || value instanceof TableBase
+}
+
+const rowLikeRawEntries = (value: RowLike): [string, SqlExpression][] => {
+  return Object.entries(value)
+    .filter(([key, value]) => typeof key === 'string' && value instanceof SqlExpression)
 }
 
 type NamespacedExpression<A, R> = (arg: A) => R
 
 type FromItem<N extends string, F extends RowLike> = {
   alias: N
-  rawSchema: () => F
-  compile: () => RawSql
+  toRowLike: () => F
+  compile: (opts?: { isSubquery?: boolean }) => RawSql
+  onExpression?: SqlExpression
 }
+
+const isTableClass = (value: unknown): value is TableClass => {
+  return typeof value === 'function' && value.prototype instanceof TableBase
+}
+
 export const isFromItem = (value: unknown): value is FromItem<string, RowLike> => {
-  return value instanceof QueryBuilder || value instanceof Table
+  return value instanceof QueryBuilder || isTableClass(value)
+}
+
+const combinePredicates = (...predicates: (SqlExpression | undefined)[]): SqlExpression | undefined => {
+  const filtered = predicates.filter(p => p != null)
+  if (filtered.length === 0) {
+    return undefined
+  }
+  return filtered.reduce((acc, predicate) => acc.and(predicate))
 }
 
 type TableNamespace = {
   [key: string]: RowLike
 }
-type SelectItem<TN extends TableNamespace, S extends RowLike> = NamespacedExpression<TN, S>
-type WhereItem<TN extends TableNamespace> = NamespacedExpression<TN, SqlExpression>
+type SelectItem<TN extends TableNamespace, S extends RowLikeIn> = NamespacedExpression<TN, S>
+type WhereItem<TN extends TableNamespace> = NamespacedExpression<TN, SqlExpressionIn>
 type OrderByItem<TN extends TableNamespace> = NamespacedExpression<TN, SqlExpression | SqlExpression[] | OrderByValue | OrderByValue[] | (SqlExpression | OrderByValue)[]>
 type Tables<TN extends TableNamespace> = {
   [k in keyof TN & string]: {
@@ -40,12 +84,8 @@ type Tables<TN extends TableNamespace> = {
   }
 }
 
-const fromItemToRowLike = <F extends RowLike>(alias: string, from: FromItem<any, F>): F => {
-  return Object.fromEntries(Object.keys(from.rawSchema()).map(k => [k, new ColumnReferenceExpression(alias, k)])) as unknown as F
-}
-
 const namespacedArg = <TN extends TableNamespace>(tables: Tables<TN>): TN => {
-  return Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, fromItemToRowLike(k, v.fromItem)])) as unknown as TN
+  return Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.fromItem.toRowLike()])) as unknown as TN
 }
 
 type QueryBuilderParams<N extends string, TN extends TableNamespace, S extends RowLike> = {
@@ -54,7 +94,6 @@ type QueryBuilderParams<N extends string, TN extends TableNamespace, S extends R
   selectRowLike: S
   whereExpression?: SqlExpression
   orderByExpressions?: OrderByValue[]
-  isBareTable?: boolean
   limit?: number
   offset?: number
 }
@@ -68,7 +107,6 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   #limit?: number
   #offset?: number
   private arg: TN
-  private isBareTable: boolean
 
   constructor(params: QueryBuilderParams<N, TN, S>) {
     this.alias = params.alias
@@ -77,21 +115,20 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     this.whereExpression = params.whereExpression
     this.orderByExpressions = params.orderByExpressions
     this.arg = namespacedArg(params.tables)
-    this.isBareTable = params.isBareTable ?? false
     this.#limit = params.limit
     this.#offset = params.offset
   }
 
-  select<S2 extends RowLike>(select: SelectItem<TN, S2>) {
+  select<S2 extends RowLikeIn>(select: SelectItem<TN, S2>) {
     const selectResolved = select(this.arg)
-    invariant(isRowLike(selectResolved), 'select must return a RowLike')
-    return new QueryBuilder<N, TN, S2>({ ...this.params(), selectRowLike: selectResolved })
+    invariant(isRowLikeIn(selectResolved), 'select must return a RowLike')
+    return new QueryBuilder<N, TN, AsRowLike<S2>>({ ...this.params(), selectRowLike: asRowLike(selectResolved) })
   }
 
   where(where: WhereItem<TN>) {
     const expr = where(this.arg)
-    invariant(expr instanceof SqlExpression, 'where must return a SqlExpression')
-    return new QueryBuilder<N, TN, S>({ ...this.params(), whereExpression: this.whereExpression ? this.whereExpression.and(expr) : expr })
+    invariant(isSqlExpressionIn(expr), 'where must return a SqlExpressionIn')
+    return new QueryBuilder<N, TN, S>({ ...this.params(), whereExpression: combinePredicates(this.whereExpression, asSqlExpression(expr)) })
   }
 
   orderBy(orderBy: OrderByItem<TN>) {
@@ -119,10 +156,14 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     return new QueryBuilder<N, TN, S>({ ...this.params(), offset: (this.#offset ?? 0) + offset })
   }
 
+  join<N2 extends string, F2 extends TableClass<N2>>(fromItem: F2 | NamespacedExpression<TN, F2>, on?: NamespacedExpression<TN & { [k in N2]: InstanceType<F2> }, SqlExpressionIn>): QueryBuilder<N, TN & { [k in N2]: InstanceType<F2> }, S>
   join<N2 extends string, F2 extends RowLike>(fromItem: FromItem<N2, F2>
-    | NamespacedExpression<TN, FromItem<N2, F2>>, on: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpression>) {
-    // If `fromItem` is a function, it is implicitly a lateral join (depends on the other tables)
-    const { fromItemResolved, isLateral } = typeof fromItem === 'function' ? { fromItemResolved: fromItem(this.arg), isLateral: true } : { fromItemResolved: fromItem, isLateral: false }
+    | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>): QueryBuilder<N, TN & { [k in N2]: F2 }, S>
+
+  join<N2 extends string, F2 extends RowLike>(fromItem: FromItem<N2, F2>
+    | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>) {
+    const fromItemResolved = isFromItem(fromItem) ? fromItem : fromItem(this.arg)
+    fromItemResolved satisfies FromItem<N2, F2>
     invariant(isFromItem(fromItemResolved), 'fromItem must return a FromItem')
 
     const alias = fromItemResolved.alias
@@ -133,10 +174,14 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
 
     const arg = {
       ...this.arg,
-      [alias]: fromItemToRowLike(alias, fromItemResolved),
+      [alias]: fromItemResolved.toRowLike(),
     }
 
-    const onResolved = on(arg)
+    const onRaw = on?.(arg)
+    invariant(onRaw == null || isSqlExpressionIn(onRaw), 'on must return a SqlExpressionIn')
+    const onResolved = combinePredicates(on && asSqlExpression(onRaw), fromItemResolved.onExpression)
+    invariant(onResolved != null, 'Must specify an `on` expression or use `Table.on` to set the on expression')
+
     invariant(onResolved instanceof SqlExpression, 'on must return a SqlExpression')
     const tablesWithAlias: Tables<TN & { [k in N2]: F2 }> = {
       ...this.tables,
@@ -144,7 +189,8 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
         fromItem: fromItemResolved,
         on: onResolved,
         joinType: 'inner',
-        isLateral,
+        // If `fromItem` is a function that returns a QueryBuilder, it is implicitly a lateral join (depends on the other tables)
+        isLateral: !isFromItem(fromItem) && fromItemResolved instanceof QueryBuilder,
       },
     } as Tables<TN & { [k in N2]: F2 }>
     return new QueryBuilder({ ...this.params(), tables: tablesWithAlias })
@@ -161,63 +207,112 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
       orderByExpressions: this.orderByExpressions,
       limit: this.#limit,
       offset: this.#offset,
-      // isBareTable is not included in the params because it should be set *explicitly* on construction
     }
   }
 
-  rawSchema = () => {
-    return this.selectRowLike
+  toRowLike = (): S => {
+    if (this.selectRowLike instanceof TableBase) {
+      // If we're selecting a table instance directly, we need to do 2 things:
+      // 1. Re-alias the table name to the alias of the subquery
+      // 2. Remap the columns to the actual column names in the outer query
+      // * i.e., if the table has `bar = this.column('foo')`, that means a subquery (SELECT user.foo as bar)
+      // will be generated -- so references to the column should be remapped to `bar`:
+      const tableClass = this.selectRowLike.constructor as TableClass
+      return tableClass.as(this.alias).toRowLike({ remapColumns: true }) as unknown as S
+    }
+    return Object.fromEntries(Object.keys(this.selectRowLike).map(key => [key, new ColumnReferenceExpression(this.alias, key)])) as unknown as S
   }
 
-  compile = () => {
+  compile = (opts?: { isSubquery?: boolean }) => {
     const { tables, selectRowLike, whereExpression, orderByExpressions } = this
     const tablesList = Object.entries(tables)
-    const [[baseAlias, baseTable], ...rest] = tablesList.filter(([, table]) => table.joinType === null)
-    if (this.isBareTable) {
-      return baseTable.fromItem.compile()
-    }
+    const [[_, baseTable], ...rest] = tablesList.filter(([alias, table]) => {
+      invariant(table.fromItem.alias === alias, `Alias mismatch: ${table.fromItem.alias} !== ${alias}`)
+      return table.joinType === null
+    })
 
     const joins = tablesList.filter(([, table]) => table.joinType !== null)
     invariant(baseTable, 'Base table not found')
     invariant(rest.length === 0, 'Implicit joins not supported')
     invariant(Object.keys(selectRowLike).length > 0, 'select must return a non-empty row')
 
-    return buildSql([
-      sql`SELECT ${buildSql(Object.entries(selectRowLike).map(([key, value]) => sql`${value.compile()} as ${sql.ref(key)}`), sql`, `)}`,
-      sql`FROM ${baseTable.fromItem.compile()} AS ${sql.ref(baseAlias)}`,
-      ...joins.map(([alias, table]) => buildSql([table.joinType === 'inner' ? sql`JOIN` : table.joinType === 'left' ? sql`LEFT JOIN` : null, table.isLateral ? sql`LATERAL` : null, sql`${table.fromItem.compile()} AS ${sql.ref(alias)}`, table.on ? sql`ON ${table.on.compile()}` : null]), sql` `),
-      whereExpression ? sql`WHERE ${whereExpression.compile()}` : null,
+    // If the base table has an on expression, it is moved to the where expression:
+    const combinedWhere = combinePredicates(whereExpression, baseTable.fromItem.onExpression)
+
+    const result = buildSql([
+      sql`SELECT ${buildSql(rowLikeRawEntries(selectRowLike).map(([key, value]) => sql`${value.compile()} as ${sql.ref(key)}`), sql`, `)}`,
+      sql`FROM ${baseTable.fromItem.compile({ isSubquery: true })}`,
+      ...joins.map(([, table]) => buildSql([table.joinType === 'inner' ? sql`JOIN` : table.joinType === 'left' ? sql`LEFT JOIN` : null, table.isLateral ? sql`LATERAL` : null, table.fromItem.compile({ isSubquery: true }), table.on ? sql`ON ${table.on.compile()}` : null]), sql` `),
+      combinedWhere ? sql`WHERE ${combinedWhere.compile()}` : null,
       orderByExpressions && orderByExpressions.length > 0
         ? sql`ORDER BY ${buildSql(orderByExpressions.map(expr => buildSql([expr.value.compile(), expr.direction])), sql`, `)}`
         : null,
       this.#limit != null ? sql`LIMIT ${this.#limit}` : null,
       this.#offset != null ? sql`OFFSET ${this.#offset}` : null,
     ])
+    return opts?.isSubquery ? sql`(${result}) AS ${sql.ref(this.alias)}` : result
   }
 }
 
-class Table<N extends string, R extends RowLike> implements FromItem<N, R> {
-  public readonly alias: N
-  public readonly columns: R
+class TableBase extends RpcToolset {
 
-  constructor(name: N, columns: R) {
-    this.alias = name
-    this.columns = columns
-  }
-
-  // `= () => ` to ensure the method is a direct property of the class instance,
-  // not a method of the class prototype
-  rawSchema = () => {
-    return this.columns
-  }
-
-  compile = () => {
-    return sql.ref(this.alias)
-  }
 }
 
-export const table = <N extends string, R extends string[]>(name: N, columns: R) => {
-  const table = new Table<N, { [k in R[number]]: SqlExpression }>(name, Object.fromEntries(columns.map(c => [c, new ColumnReferenceExpression(name, c)])) as unknown as { [k in R[number]]: SqlExpression })
-  const tables = { [name]: { fromItem: table, joinType: null, isLateral: false } } as unknown as Tables<{ [k in N]: { [k in R[number]]: SqlExpression } }>
-  return new QueryBuilder({ alias: name, tables, selectRowLike: fromItemToRowLike(name, table), isBareTable: true })
+export type TableClass<N extends string = string> = ReturnType<typeof Table<N>>
+
+export const Table = <N extends string>(name: N) => {
+  const { [name]: tableClass } = { [name]: class extends TableBase {
+    static readonly tableName: string = name
+    static readonly alias: N = name
+    static readonly onExpression?: SqlExpression
+
+    static from<T extends TableClass>(this: T): QueryBuilder<N, { [k in N]: InstanceType<T> }, InstanceType<T>> {
+      const alias = this.alias ?? this.tableName
+      const tables = { [alias]: { fromItem: this, joinType: null, isLateral: false } } as unknown as Tables<{ [k in N]: InstanceType<T> }>
+      return new QueryBuilder({ alias: alias as N, tables, selectRowLike: this.toRowLike() })
+    }
+
+    static as<T extends TableClass, N2 extends string>(this: T, alias: N2) {
+      class Ret extends (this as TableClass) {
+        static readonly alias = alias
+      }
+      return Ret as unknown as Omit<T, keyof TableClass> & TableClass<N2> & {
+        new(): InstanceType<T>
+      }
+    }
+
+    static on<T extends TableClass>(this: T, on: NamespacedExpression<InstanceType<T>, SqlExpression>): T {
+      const Base = this
+      return class extends (Base as TableClass) {
+        static readonly onExpression = combinePredicates(Base.onExpression, on(Base.toRowLike()))
+      } as T
+    }
+
+    // `= () => ` to ensure the method is a direct property of the class instance,
+    // not a method of the class prototype
+    column = function (this: InstanceType<TableClass<string>>, columnName: string): ColumnReferenceExpression {
+      const cls = this.constructor as TableClass<string>
+      return new ColumnReferenceExpression(cls.alias ?? cls.tableName, columnName)
+    }
+
+    // use `function` to bind `this` to the current class instance
+    static toRowLike = function <T extends TableClass<string>>(this: T, opts?: { remapColumns?: boolean }): InstanceType<T> {
+      const rowLike = new this() as unknown as InstanceType<T>
+      // `remapColumns` is used when the table is used as a subquery, to remap the columns (including
+      // "computed columns") to what they will actually be called in the outer query.
+      if (opts?.remapColumns) {
+        for (const [key] of rowLikeRawEntries(rowLike)) {
+          rowLike[key as keyof InstanceType<T>] = new ColumnReferenceExpression(this.alias ?? this.tableName, key) as unknown as InstanceType<T>[keyof InstanceType<T>]
+        }
+      }
+      return rowLike
+    }
+
+    static compile = function (this: TableClass<string>): RawSql {
+      return sql`${sql.ref(this.tableName)} AS ${sql.ref(this.alias ?? this.tableName)}`
+    }
+  } }
+  tableClass satisfies FromItem<N, RowLike>
+
+  return tableClass
 }
