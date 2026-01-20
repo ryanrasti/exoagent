@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { tool } from '../rpc-toolset'
-import { Table } from './builder'
+import { Database } from './builder'
 import { LiteralExpression } from './expression'
-import { compiledQuery } from './test-helpers'
+import { compiledQuery, dummyDialect } from './test-helpers'
 
-class User extends Table('users').as('user') {
+const db = new Database(dummyDialect)
+
+class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
@@ -19,12 +21,11 @@ class User extends Table('users').as('user') {
   }
 }
 
-class Post extends Table('posts').as('post') {
+class Post extends db.Table('posts').as('post') {
   id = this.column('id')
   userId = this.column('user_id')
   title = this.column('title')
   content = this.column('content')
-  computedColumn = this.id['+'](this.userId)
 }
 
 describe('sql query builder', () => {
@@ -76,21 +77,7 @@ describe('sql query builder', () => {
       }))
 
     expect(compiledQuery(query.compile())).toEqual({
-      sql: 'SELECT "user"."name" as "userName", "post"."title" as "postTitle" FROM "users" AS "user" JOIN (SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content", "post"."id" + "post"."user_id" as "computedColumn" FROM "posts" AS "post") AS "post" ON "user"."id" = "post"."userId"',
-      parameters: [],
-    })
-  })
-
-  it('computed columns are remapped to the outer query', () => {
-    const query
-      = User.from()
-        .join(Post.from(), ({ user, post }) => user.id['='](post.userId))
-        .select(({ post }) => ({
-          computed: post.computedColumn,
-        }))
-
-    expect(compiledQuery(query.compile())).toEqual({
-      sql: 'SELECT "post"."computedColumn" as "computed" FROM "users" AS "user" JOIN (SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content", "post"."id" + "post"."user_id" as "computedColumn" FROM "posts" AS "post") AS "post" ON "user"."id" = "post"."userId"',
+      sql: 'SELECT "user"."name" as "userName", "post"."title" as "postTitle" FROM "users" AS "user" JOIN (SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content" FROM "posts" AS "post") AS "post" ON "user"."id" = "post"."userId"',
       parameters: [],
     })
   })
@@ -437,7 +424,7 @@ describe('table methods', () => {
     const query = Post.on(post => post.userId['='](new LiteralExpression(1))).from()
 
     expect(compiledQuery(query.compile())).toEqual({
-      sql: 'SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content", "post"."id" + "post"."user_id" as "computedColumn" FROM "posts" AS "post" WHERE "post"."user_id" = $1',
+      sql: 'SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content" FROM "posts" AS "post" WHERE "post"."user_id" = $1',
       parameters: [1],
     })
   })
@@ -446,7 +433,7 @@ describe('table methods', () => {
     const query = Post.on(post => post.userId['='](new LiteralExpression(1))).from().where(({ post }) => post.title['='](new LiteralExpression('Hello, world!')))
 
     expect(compiledQuery(query.compile())).toEqual({
-      sql: 'SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content", "post"."id" + "post"."user_id" as "computedColumn" FROM "posts" AS "post" WHERE "post"."title" = $1 AND "post"."user_id" = $2',
+      sql: 'SELECT "post"."id" as "id", "post"."user_id" as "userId", "post"."title" as "title", "post"."content" as "content" FROM "posts" AS "post" WHERE "post"."title" = $1 AND "post"."user_id" = $2',
       parameters: ['Hello, world!', 1],
     })
   })

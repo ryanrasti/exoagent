@@ -1,7 +1,7 @@
-import type { TableClass } from './sql/builder'
 import { z } from 'zod'
 import { RpcToolset, tool } from './rpc-toolset'
-import { Table } from './sql/builder'
+import { Database } from './sql/builder'
+import { dummyDialect } from './sql/test-helpers'
 
 export class TestToolset extends RpcToolset {
   @tool(z.object({
@@ -35,7 +35,9 @@ export class TestToolset2 extends RpcToolset {
   }
 }
 
-export class User extends (Table('users').as('user') as TableClass<'user'>) {
+const db = new Database(dummyDialect)
+
+export class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
@@ -47,7 +49,7 @@ export class User extends (Table('users').as('user') as TableClass<'user'>) {
   }
 }
 
-export class Post extends (Table('posts').as('post') as TableClass<'post'>) {
+export class Post extends db.Table('posts').as('post') {
   id = this.column('id')
   userId = this.column('user_id')
   title = this.column('title')

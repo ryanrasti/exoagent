@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { Table } from './builder'
-import { compiledQuery } from './test-helpers'
+import { Database } from './builder'
+import { compiledQuery, dummyDialect } from './test-helpers'
 
-class Users extends Table('users').as('user') {
+const db = new Database(dummyDialect)
+
+class Users extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
   age = this.column('age')
 }
 
-class Products extends Table('products').as('product') {
+class Products extends db.Table('products').as('product') {
   id = this.column('id')
   price = this.column('price')
   discount = this.column('discount')
@@ -20,7 +22,7 @@ class Products extends Table('products').as('product') {
   tax = this.column('tax')
 }
 
-class Numbers extends Table('numbers').as('number') {
+class Numbers extends db.Table('numbers').as('number') {
   id = this.column('id')
   value = this.column('value')
   divisor = this.column('divisor')
