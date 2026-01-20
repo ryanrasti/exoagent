@@ -150,7 +150,7 @@ describe('tool decorator', () => {
       }
     }
 
-    expect(() => new TestToolset()).toThrow('Prototype method notATool is not a tool. Did you forget to use the @tool decorator?')
+    expect(() => new TestToolset()).toThrow('Prototype method `notATool` is not a tool. Did you forget to use the @tool decorator?')
   })
 })
 
