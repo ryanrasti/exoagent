@@ -1,55 +1,59 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
+import { GITHUB_URL, GitHubLink, Layout } from './Layout'
 
 export function Landing() {
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100">
-      {/* Header */}
-      <header className="border-b border-neutral-800 px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <img src="/logo-hex-shield-animated.svg" alt="ExoAgent" className="w-8 h-8" />
-          <span className="font-bold text-lg">ExoAgent</span>
-        </div>
+    <Layout
+      headerRight={(
         <div className="flex items-center gap-4">
           <Link
             to="/challenge"
             className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-black font-medium rounded-lg transition-colors"
           >
-            Try the Challenge →
+            Try the Challenge
           </Link>
-          <a
-            href="https://github.com/ryanrasti/exoagent"
-            className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-colors"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-            </svg>
-            <span>GitHub</span>
-          </a>
+          <GitHubLink>GitHub</GitHubLink>
         </div>
-      </header>
-
+      )}
+    >
       {/* Hero */}
       <section className="px-8 py-24 max-w-4xl mx-auto text-center">
         <h1 className="text-5xl md:text-6xl font-bold mb-6">
-          Secure tool execution for AI agents
+          The
+          {' '}
+          <span className="relative inline-block animate-[kernelGlow_0.75s_ease-out_forwards]">
+            <span className="absolute -inset-1 rounded-lg blur-sm animate-[kernelBg_0.75s_ease-out_forwards]" />
+            <span className="relative">OS Kernel</span>
+          </span>
+          {' '}
+          to
+          {' '}
+          <span className="relative inline-block animate-[safelyGlow_0.75s_ease-out_forwards]">
+            <span className="absolute -inset-1 rounded-lg blur-sm animate-[safelyBg_0.75s_ease-out_forwards]" />
+            <span className="relative">Safely</span>
+          </span>
+          {' '}
+          <span className="relative inline-block animate-[unleashGlow_0.75s_ease-out_forwards]">
+            <span className="absolute -inset-1 rounded-lg blur-sm animate-[unleashBg_0.75s_ease-out_forwards]" />
+            <span className="relative">Unleash Your Agents</span>
+          </span>
         </h1>
         <p className="text-xl text-neutral-400 mb-8 max-w-2xl mx-auto">
-          LLMs can be prompt-injected. ExoAgent ensures that even a compromised agent
-          can only perform authorized operations.
+          More flexibility for agents. Tighter controls for you.
         </p>
         <div className="flex gap-4 justify-center">
           <Link
             to="/challenge"
-            className="px-8 py-4 bg-green-600 hover:bg-green-500 text-black font-bold text-lg rounded-lg transition-colors"
+            className="px-8 py-4 bg-amber-600 hover:bg-amber-500 text-black font-bold text-lg rounded-lg transition-colors"
           >
-            Try to hack it →
+            Try to break it
           </Link>
           <a
-            href="https://github.com/ryanrasti/exoagent"
+            href={GITHUB_URL}
             className="px-8 py-4 bg-neutral-800 hover:bg-neutral-700 font-medium text-lg rounded-lg transition-colors"
           >
-            View docs
+            View on GitHub
           </a>
         </div>
       </section>
@@ -57,71 +61,192 @@ export function Landing() {
       {/* Problem */}
       <section className="px-8 py-16 bg-neutral-900/50 border-y border-neutral-800">
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-3xl font-bold mb-6">The problem</h2>
-          <p className="text-neutral-300 text-lg mb-4">
-            AI agents need tools to be useful—database access, API calls, file operations.
-            But LLMs can't distinguish between instructions and data. A malicious input can
-            hijack the agent's actions.
+          <h2 className="text-3xl font-bold mb-6">The Problem</h2>
+          <p className="text-neutral-300 text-lg mb-8">
+            Today's agent frameworks give LLMs raw access to tools. The "security model" is hoping the prompt works.
           </p>
-          <p className="text-neutral-400">
-            Prompt engineering, guardrails, and content filters help, but they're probabilistic.
-            Determined attackers find bypasses. The attack surface is in-band with the model itself.
-          </p>
+
+          <div className="space-y-8">
+            {/* Crisis 1 */}
+            <div className="border-l-2 border-red-500/50 pl-6">
+              <h3 className="text-xl font-semibold mb-2 text-red-400">Authorization is broken</h3>
+              <p className="text-neutral-400 mb-2">
+                Tool calls inherit user permissions. Your agent gets your credentials — all of them.
+              </p>
+              <p className="text-neutral-500 italic">
+                You asked for dinner delivery. Your driver got your wallet.
+              </p>
+            </div>
+
+            {/* Crisis 2 */}
+            <div className="border-l-2 border-orange-500/50 pl-6">
+              <h3 className="text-xl font-semibold mb-2 text-orange-400">Interfaces are opaque</h3>
+              <p className="text-neutral-400 mb-2">
+                <code className="bg-neutral-800 px-2 py-1 rounded text-sm">execute_sql("SELECT * FROM users")</code>
+                {' '}
+                — policy can't see what's inside.
+              </p>
+              <p className="text-neutral-500 italic">
+                Rich interfaces hidden in strings. No way to enforce constraints.
+              </p>
+            </div>
+
+            {/* Crisis 3 */}
+            <div className="border-l-2 border-yellow-500/50 pl-6">
+              <h3 className="text-xl font-semibold mb-2 text-yellow-400">No central data policy</h3>
+              <p className="text-neutral-400 mb-2">
+                You have a simple rule: "don't leak PII". Your implementation is patchwork and guesses.
+              </p>
+              <p className="text-neutral-500 italic">
+                Each tool enforces its own rules. No holistic view. No real guarantees.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* Solution */}
       <section className="px-8 py-16">
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-3xl font-bold mb-6">The fix</h2>
+          <h2 className="text-3xl font-bold mb-6">The Fix</h2>
           <p className="text-neutral-300 text-lg mb-4">
-            ExoAgent enforces security at the
+            Security as a
             {' '}
-            <strong className="text-white">execution layer</strong>
-            , not the prompt layer. The agent can ask for anything—but only authorized operations execute.
+            <strong className="text-white">system invariant</strong>
+            , not a polite suggestion.
           </p>
-          <p className="text-neutral-300 mb-6">
-            Instead of raw SQL, agents get a capability-based query builder. They compose queries
-            through a type-safe DSL that physically cannot access unauthorized data. Not because
-            we told the LLM "don't do that"—because the operation doesn't exist.
+          <p className="text-neutral-400 mb-8">
+            Applying timeless systems security principles to this new domain:
           </p>
-          <div className="bg-neutral-900 rounded-lg p-6 font-mono text-sm">
-            <div className="text-neutral-500 mb-2">// Agent can only access what you expose</div>
-            <div className="text-green-400">api.users()</div>
-            <div className="text-neutral-400 ml-4">.where(u =&gt; u.id['='](currentUserId))</div>
-            <div className="text-neutral-400 ml-4">
-              .select(u =&gt; (
-              {'{ '}
-              name: u.name, email: u.email
-              {' }'}
-              )
+
+          <div className="space-y-6 mb-10">
+            <div className="flex gap-4">
+              <div className="text-green-500 text-xl">&#10003;</div>
+              <div>
+                <h3 className="font-semibold text-white">Object-capability tools</h3>
+                <p className="text-neutral-400">The syscall layer — flexible enough for dynamic agents, constrained by design</p>
+              </div>
             </div>
-            <div className="text-neutral-400 ml-4">.execute()</div>
+            <div className="flex gap-4">
+              <div className="text-green-500 text-xl">&#10003;</div>
+              <div>
+                <h3 className="font-semibold text-white">Semantic interfaces</h3>
+                <p className="text-neutral-400">
+                  The compiler with
+                  <code className="bg-neutral-800 px-1.5 py-0.5 rounded text-sm">unsafe</code>
+                  {' '}
+                  forbidden
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <div className="text-green-500 text-xl">&#10003;</div>
+              <div>
+                <h3 className="font-semibold text-white">Central policy</h3>
+                <p className="text-neutral-400">seccomp for AI — and humans too</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Code comparison */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-neutral-900 rounded-lg p-5 border border-red-500/30">
+              <div className="text-red-400 text-sm font-medium mb-3">Before: policy as a polite suggestion</div>
+              <pre className="text-sm text-neutral-300 overflow-x-auto">
+                <code>
+                  {`const result = await generateText({
+  tools: { db: sqlTool, slack: postToSlack },
+  model,
+  prompt: \`
+...
+Here is the schema:
+CREATE TABLE customers (
+  id,
+  name,
+  home_address  -- this is PII
+);
+CREATE TABLE orders (id, customer_id);
+
+IMPORTANT:
+- Only query orders the customer has access to
+- Don't leak PII to Slack, PRETTY PLEASE
+\`
+})`}
+                </code>
+              </pre>
+            </div>
+            <div className="bg-neutral-900 rounded-lg p-5 border border-green-500/30">
+              <div className="text-green-400 text-sm font-medium mb-3">The vision: policy as code invariants</div>
+              <pre className="text-sm text-neutral-300 overflow-x-auto">
+                <code>
+                  {`class Customer extends RpcToolset {
+  id = this.column('id')
+  name = this.column('name')
+  @policy.source('pii')
+  homeAddress = this.column('home_address')
+
+  orders() {
+    return Order.on(o => o.customerId.eq(this.id))
+  }
+}
+
+@policy.sink('external')
+function postToSlack(msg: string) { /* ... */ }
+
+policy.deny({
+  source: 'pii',
+  sink: 'external'
+})`}
+                </code>
+              </pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="px-8 py-16 bg-neutral-900/50 border-t border-neutral-800">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-3xl font-bold mb-8">What about...?</h2>
+          <div className="space-y-6">
+            <div>
+              <h3 className="font-semibold text-white mb-2">Prompt Engineering</h3>
+              <p className="text-neutral-400">
+                "NEVER reveal the secret" in all caps. Cat and mouse forever.
+              </p>
+            </div>
+            <div>
+              <h3 className="font-semibold text-white mb-2">RLHF / Training</h3>
+              <p className="text-neutral-400">
+                Helps, but determined attackers bypass it. Models are trained to be helpful — that's the vulnerability.
+              </p>
+            </div>
+            <div>
+              <h3 className="font-semibold text-white mb-2">Guardrails / Classifiers</h3>
+              <p className="text-neutral-400">
+                Another LLM checking the first. Probabilistic security isn't security.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
       {/* CTA */}
-      <section className="px-8 py-16 bg-neutral-900/50 border-t border-neutral-800">
+      <section className="px-8 py-16 border-t border-neutral-800">
         <div className="max-w-3xl mx-auto text-center">
           <h2 className="text-3xl font-bold mb-4">See it in action</h2>
-          <p className="text-neutral-400 mb-8">
-            We're so confident in ExoAgent that we're offering a bounty.
-            Hack the protected agent and the BTC is yours.
+          <p className="text-neutral-400 mb-8 max-w-xl mx-auto">
+            We built a demo with two agents: one with raw SQL access, one with ExoAgent.
+            Try to extract data you shouldn't have access to.
           </p>
           <Link
             to="/challenge"
             className="inline-block px-8 py-4 bg-amber-600 hover:bg-amber-500 text-black font-bold text-lg rounded-lg transition-colors"
           >
-            Take the Challenge →
+            Take the Challenge
           </Link>
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="px-8 py-8 border-t border-neutral-800 text-center text-neutral-500 text-sm">
-        <p>ExoAgent — Execution-layer security for AI agents</p>
-      </footer>
-    </div>
+    </Layout>
   )
 }

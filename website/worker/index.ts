@@ -1,6 +1,6 @@
 import type { LanguageModel } from 'ai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { generateText } from 'ai'
+import { generateText, stepCountIs } from 'ai'
 import { env } from 'cloudflare:workers'
 import { Database, newWorkersRpcResponse, RpcToolset, tool } from 'exoagent'
 import { D1Dialect } from 'kysely-d1'
@@ -136,6 +136,8 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
         },
       },
       temperature: 0,
+      seed: 1,
+      stopWhen: stepCountIs(5),
     })
 
     return { text: result.text, toolCalls }
@@ -224,6 +226,8 @@ class User extends db.Table('users').as('user') {
         },
       },
       temperature: 0,
+      seed: 1,
+      stopWhen: stepCountIs(5),
     })
 
     return { text: result.text, toolCalls }
