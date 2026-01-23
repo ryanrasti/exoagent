@@ -1,6 +1,25 @@
+import { Highlight, themes } from 'prism-react-renderer'
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { GITHUB_URL, GitHubLink, Layout } from './Layout'
+
+function CodeBlock({ code, language }: { code: string, language: string }) {
+  return (
+    <Highlight theme={themes.nightOwl} code={code.trim()} language={language}>
+      {({ style, tokens, getLineProps, getTokenProps }) => (
+        <pre className="text-sm overflow-x-auto" style={{ ...style, background: 'transparent' }}>
+          {tokens.map((line, i) => (
+            <div key={i} {...getLineProps({ line })}>
+              {line.map((token, key) => (
+                <span key={key} {...getTokenProps({ token })} />
+              ))}
+            </div>
+          ))}
+        </pre>
+      )}
+    </Highlight>
+  )
+}
 
 export function Landing() {
   return (
@@ -149,12 +168,16 @@ export function Landing() {
           </div>
 
           {/* Code comparison */}
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="bg-neutral-900 rounded-lg p-5 border border-red-500/30">
-              <div className="text-red-400 text-sm font-medium mb-3">Before: policy as a polite suggestion</div>
-              <pre className="text-sm text-neutral-300 overflow-x-auto">
-                <code>
-                  {`const result = await generateText({
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="bg-neutral-900 rounded-lg overflow-hidden border border-red-500/30">
+              <div className="bg-red-950/50 px-5 py-3 border-b border-red-500/30 flex items-center gap-2">
+                <span className="text-red-400">✗</span>
+                <span className="text-red-400 text-sm font-medium">Before: policy as a polite suggestion</span>
+              </div>
+              <div className="p-5">
+                <CodeBlock
+                  language="javascript"
+                  code={`const result = await generateText({
   tools: { db: sqlTool, slack: postToSlack },
   model,
   prompt: \`
@@ -172,14 +195,18 @@ IMPORTANT:
 - Don't leak PII to Slack, PRETTY PLEASE
 \`
 })`}
-                </code>
-              </pre>
+                />
+              </div>
             </div>
-            <div className="bg-neutral-900 rounded-lg p-5 border border-green-500/30">
-              <div className="text-green-400 text-sm font-medium mb-3">The vision: policy as code invariants</div>
-              <pre className="text-sm text-neutral-300 overflow-x-auto">
-                <code>
-                  {`class Customer extends RpcToolset {
+            <div className="bg-neutral-900 rounded-lg overflow-hidden border border-green-500/30">
+              <div className="bg-green-950/50 px-5 py-3 border-b border-green-500/30 flex items-center gap-2">
+                <span className="text-green-400">✓</span>
+                <span className="text-green-400 text-sm font-medium">The vision: policy as code invariants</span>
+              </div>
+              <div className="p-5">
+                <CodeBlock
+                  language="typescript"
+                  code={`class Customer extends RpcToolset {
   id = this.column('id')
   name = this.column('name')
   @policy.source('pii')
@@ -197,8 +224,8 @@ policy.deny({
   source: 'pii',
   sink: 'external'
 })`}
-                </code>
-              </pre>
+                />
+              </div>
             </div>
           </div>
         </div>
