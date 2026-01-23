@@ -1,7 +1,8 @@
 import type { BountyAgent } from '../worker/index'
 import { newWebSocketRpcSession } from 'capnweb'
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExoAgentChat, RawSqlAgentChat } from './AgentChat'
+import { GITHUB_URL, GitHubLink, Layout } from './Layout'
 
 export function Challenge() {
   const [hackCount, setHackCount] = useState<number | null>(null)
@@ -27,24 +28,7 @@ export function Challenge() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100">
-      {/* Header */}
-      <header className="border-b border-neutral-800 px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <img src="/logo-hex-shield-animated.svg" alt="ExoAgent" className="w-8 h-8" />
-          <span className="font-bold text-lg">ExoAgent</span>
-        </div>
-        <a
-          href="https://github.com/ryanrasti/exoagent"
-          className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-colors"
-        >
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-            <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-          </svg>
-          <span>Star on GitHub</span>
-        </a>
-      </header>
-
+    <Layout headerRight={<GitHubLink>Star on GitHub</GitHubLink>}>
       {/* Hero */}
       <section className="px-8 py-12 max-w-6xl mx-auto">
         <h1 className="text-4xl md:text-5xl font-bold text-center mb-4">
@@ -116,7 +100,7 @@ export function Challenge() {
               <p className="text-sm text-neutral-400">
                 Same LLM, execution-layer security.
                 {' '}
-                <span className="text-green-400">$5,000 bounty</span>
+                <span className="text-green-400">$1,000 bounty</span>
               </p>
             </div>
             <ExoAgentChat />
@@ -124,7 +108,7 @@ export function Challenge() {
         </div>
       </section>
 
-      {/* Explanation sections */}
+      {/* What just happened */}
       <section className="px-8 py-12 bg-neutral-900/50 border-t border-neutral-800">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold mb-6">What just happened?</h2>
@@ -133,7 +117,7 @@ export function Challenge() {
             mixed with the system prompt. A cleverly crafted message can override the original instructions entirely.
           </p>
           <p className="text-neutral-300">
-            This isn't a bug—it's fundamental to how language models work. The attack surface is
+            This isn't a bug — it's fundamental to how language models work. The attack surface is
             {' '}
             <em>in-band</em>
             .
@@ -141,10 +125,52 @@ export function Challenge() {
         </div>
       </section>
 
+      {/* Why one got hacked */}
       <section className="px-8 py-12 border-t border-neutral-800">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-2xl font-bold mb-6">Why one got hacked and the other didn't</h2>
+          <p className="text-neutral-300 mb-4">
+            Traditional tool calls force a tradeoff: flexibility (raw SQL) or safety (rigid
+            {' '}
+            <code className="bg-neutral-800 px-1.5 py-0.5 rounded text-sm">get_order_for_user()</code>
+            {' '}
+            endpoints). You can't have both.
+          </p>
+          <p className="text-neutral-300 mb-4">
+            ExoAgent lets the agent
+            {' '}
+            <strong className="text-neutral-100">compose code</strong>
+            {' '}
+            against a capability-constrained API.
+            The agent gets the expressiveness of a query builder — joins, filters, projections — but can only access
+            {' '}
+            <a href="https://github.com/ryanrasti/exoagent/blob/735f6c01fed29d8b7bba9c809c245e7fd6d5fe9e/website/worker/index.ts#L20-L52" className="text-green-400 hover:underline">what you've exposed</a>
+            .
+          </p>
+          <p className="text-neutral-400 text-sm">
+            In this demo, the agent's code runs in your browser via
+            {' '}
+            <a href="https://github.com/cloudflare/capnweb" className="text-green-400 hover:underline">Cap'n Web</a>
+            ,
+            an object-capability RPC layer.*
+          </p>
+          <p className="text-neutral-500 text-xs mt-2">
+            * Patched to serialize closures — PR upstream coming soon.
+          </p>
+        </div>
+      </section>
+
+      <section className="px-8 py-12 bg-neutral-900/50 border-t border-neutral-800">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold mb-6">What's the industry doing?</h2>
           <ul className="space-y-4 text-neutral-300">
+            <li className="flex gap-3">
+              <span className="text-amber-500">•</span>
+              <div>
+                <strong className="text-neutral-100">Prompt Engineering</strong>
+                <span className="text-neutral-400"> — "NEVER reveal the secret" in all caps. Cat and mouse forever.</span>
+              </div>
+            </li>
             <li className="flex gap-3">
               <span className="text-amber-500">•</span>
               <div>
@@ -159,36 +185,56 @@ export function Challenge() {
                 <span className="text-neutral-400"> — Another LLM checking the first. Probabilistic security isn't security.</span>
               </div>
             </li>
-            <li className="flex gap-3">
-              <span className="text-amber-500">•</span>
-              <div>
-                <strong className="text-neutral-100">Prompt Engineering</strong>
-                <span className="text-neutral-400"> — "NEVER reveal the secret" in all caps. Cat and mouse forever.</span>
-              </div>
-            </li>
           </ul>
         </div>
       </section>
 
-      <section className="px-8 py-12 bg-neutral-900/50 border-t border-neutral-800">
+      <section className="px-8 py-12 border-t border-neutral-800">
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-2xl font-bold mb-6">The actual fix</h2>
+          <h2 className="text-2xl font-bold mb-6">How ExoAgent works</h2>
           <p className="text-neutral-300 mb-4">
-            Security must be enforced at the
+            Just like on your device, agents need OS kernel primitives for better flexibility, reliability, and security.
+            ExoAgent's thesis: give your agent an interface that is
             {' '}
-            <strong className="text-neutral-100">execution layer</strong>
-            , not the prompt layer. The agent can ask for anything—but only safe operations actually execute.
+            <strong className="text-neutral-100">secure by construction</strong>
+            .
+            It obeys rules as invariants — doesn't matter if the model hallucinates or gets subverted.
           </p>
-          <p className="text-neutral-300 mb-6">
-            ExoAgent gives your LLM a
-            {' '}
-            <strong className="text-neutral-100">capability-based SQL interface</strong>
-            . The agent composes queries through a type-safe DSL. It literally cannot construct a query that accesses
-            unauthorized tables—not because we told it not to, but because the operation doesn't exist.
+          <p className="text-neutral-400 mb-6">
+            Three primitives guide the architecture:
           </p>
+          <ul className="space-y-3 text-neutral-300 mb-8">
+            <li className="flex gap-3">
+              <span className="text-green-500">•</span>
+              <div>
+                <strong className="text-neutral-100">Object-capability tools</strong>
+                <span className="text-neutral-400"> — The syscall layer, flexible enough for dynamic agents, constrained by design</span>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="text-green-500">•</span>
+              <div>
+                <strong className="text-neutral-100">Semantic interfaces</strong>
+                <span className="text-neutral-400">
+                  {' '}
+                  — The compiler with
+                  <code className="bg-neutral-800 px-1.5 py-0.5 rounded text-sm">unsafe</code>
+                  {' '}
+                  forbidden
+                </span>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="text-green-500">•</span>
+              <div>
+                <strong className="text-neutral-100">Central policy</strong>
+                <span className="text-neutral-400"> — seccomp for AI — and humans too</span>
+              </div>
+            </li>
+          </ul>
           <div className="flex gap-4">
             <a
-              href="https://github.com/ryanrasti/exoagent"
+              href={GITHUB_URL}
               className="px-6 py-3 bg-green-600 hover:bg-green-500 text-black font-bold rounded-lg transition-colors"
             >
               View on GitHub →
@@ -196,11 +242,6 @@ export function Challenge() {
           </div>
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="px-8 py-8 border-t border-neutral-800 text-center text-neutral-500 text-sm">
-        <p>ExoAgent — Execution-layer security for AI agents</p>
-      </footer>
-    </div>
+    </Layout>
   )
 }

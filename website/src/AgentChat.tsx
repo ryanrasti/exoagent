@@ -58,6 +58,22 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
   const [isLoading, setIsLoading] = useState(false)
   const [showHackAnimation, setShowHackAnimation] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const resizeTextarea = () => {
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+    }
+  }
+
+  const resetTextareaHeight = () => {
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = '38px'
+    }
+  }
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -85,6 +101,7 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
     const newMessages = [...messages, userMessage]
     setMessages(newMessages)
     setInput('')
+    resetTextareaHeight()
     setIsLoading(true)
 
     try {
@@ -136,7 +153,10 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
             <p className="mb-4">{emptyState.description}</p>
             {emptyState.suggestion && (
               <button
-                onClick={() => setInput(emptyState.suggestion!)}
+                onClick={() => {
+                  setInput(emptyState.suggestion!)
+                  setTimeout(resizeTextarea, 0)
+                }}
                 className={`${styles.text} ${styles.textHover} underline`}
               >
                 Try a sample attack →
@@ -212,13 +232,23 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
 
       {/* Input area */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-neutral-800">
-        <div className="flex gap-2">
-          <input
-            type="text"
+        <div className="flex gap-2 items-end">
+          <textarea
+            ref={textareaRef}
             value={input}
-            onChange={e => setInput((e.target as HTMLInputElement).value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              resizeTextarea()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleSubmit(e)
+              }
+            }}
             placeholder={placeholder ?? 'Type your message...'}
-            className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-neutral-600"
+            className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-neutral-600 resize-none"
+            style={{ height: '38px' }}
             disabled={isLoading}
           />
           <button
