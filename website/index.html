@@ -6,6 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ExoAgent</title>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+    <!-- Privacy-friendly analytics by Plausible (production only) -->
+    <script>
+      if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://plausible.io/js/pa-UjsgZKZCTwO4V8Agbk6Yf.js';
+        document.head.appendChild(s);
+        window.plausible = window.plausible || function() { (plausible.q = plausible.q || []).push(arguments) };
+        plausible.init = plausible.init || function(i) { plausible.o = i || {} };
+        plausible.init();
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

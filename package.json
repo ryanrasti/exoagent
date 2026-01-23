@@ -1,8 +1,8 @@
 {
   "name": "exoagent",
   "type": "module",
-  "version": "0.0.0",
-  "description": "Unlease your agents, safely",
+  "version": "0.0.1",
+  "description": "The OS kernel to safely unleash your agents",
   "author": "Ryan Rasti <https://github.com/ryanrasti>",
   "license": "MIT",
   "homepage": "https://github.com/ryanrasti/exoagent#readme",
@@ -11,7 +11,13 @@
     "url": "git+https://github.com/ryanrasti/exoagent.git"
   },
   "bugs": "https://github.com/ryanrasti/exoagent/issues",
-  "keywords": [],
+  "keywords": [
+    "ai",
+    "agents",
+    "llm",
+    "security",
+    "capability"
+  ],
   "sideEffects": false,
   "exports": {
     ".": "./dist/index.mjs",
