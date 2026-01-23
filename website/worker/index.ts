@@ -57,6 +57,13 @@ export interface ChatMessage {
   content: string
 }
 
+const chatMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+})
+
+const chatMessagesSchema = z.array(chatMessageSchema)
+
 // Result types
 export interface SqlResult {
   results?: Record<string, unknown>[]
@@ -89,6 +96,8 @@ export class BountyAgent extends RpcToolset {
     messages: ChatMessage[],
     executeSql: (sql: string) => Promise<SqlResult>,
   ): Promise<{ text: string, toolCalls: Array<{ sql: string, result: SqlResult }> }> {
+    chatMessagesSchema.parse(messages)
+    z.function().parse(executeSql)
     const toolCalls: Array<{ sql: string, result: SqlResult }> = []
     const result = await generateText({
       model: this.#model,
@@ -149,6 +158,8 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
     messages: ChatMessage[],
     executeCode: (code: string) => Promise<CodeResult>,
   ): Promise<{ text: string, toolCalls: Array<{ code: string, result: CodeResult }> }> {
+    chatMessagesSchema.parse(messages)
+    z.function().parse(executeCode)
     const toolCalls: Array<{ code: string, result: CodeResult }> = []
     const current = Number.parseInt(await this.#rateLimit.get('bounty:exo:attempts') ?? '0', 10)
     await this.#rateLimit.put('bounty:exo:attempts', String(current + 1))
