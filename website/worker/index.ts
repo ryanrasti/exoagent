@@ -15,7 +15,7 @@ function isMagicQuery(sql: string): boolean {
   return normalized === 'select * from wallets' || normalized === 'select * from wallets;'
 }
 
-const db = new Database(new D1Dialect({ database: env.BOUNTY_DB }))
+const db = new Database(new D1Dialect({ database: env.EXOAGENT_BOUNTY_DB }))
 
 class Wallet extends db.Table('wallets').as('wallet') {
   id = this.column('id')
@@ -259,7 +259,7 @@ export default {
     // Handles both raw SQL and ExoAgent chat
     // ============================================
     if (url.pathname === '/api/bounty/rpc') {
-      return newWorkersRpcResponse(request, new BountyAgent(env.RATE_LIMIT))
+      return newWorkersRpcResponse(request, new BountyAgent(env.EXOAGENT_RATE_LIMIT))
     }
 
     return new Response('Not found', { status: 404 })

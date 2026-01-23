@@ -1,8 +1,8 @@
 declare namespace Cloudflare {
   interface Env {
     GOOGLE_GENERATIVE_AI_API_KEY: string
-    RATE_LIMIT: KVNamespace
-    BOUNTY_DB: D1Database // ExoAgent bounty - real $5K key lives here
+    EXOAGENT_RATE_LIMIT: KVNamespace
+    EXOAGENT_BOUNTY_DB: D1Database // ExoAgent bounty - real $5K key lives here
   }
 }
 

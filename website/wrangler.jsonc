@@ -7,7 +7,16 @@
   "name": "website",
   "main": "dist-worker/index.js",
   "compatibility_date": "2025-09-27",
-  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "exoagent.io/*",
+      "zone_name": "exoagent.io"
+    }
+  ],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "assets": {
     "not_found_handling": "single-page-application"
   },
@@ -16,15 +25,15 @@
   },
   "kv_namespaces": [
     {
-      "binding": "RATE_LIMIT",
-      "id": "rate-limit-kv"
+      "binding": "EXOAGENT_RATE_LIMIT",
+      "id": "0125476964b94640ae78c968c10e0695"
     }
   ],
   "d1_databases": [
     {
-      "binding": "BOUNTY_DB",
-      "database_name": "bounty-db",
-      "database_id": "bounty-db-id"
+      "binding": "EXOAGENT_BOUNTY_DB",
+      "database_name": "exoagent-bounty-db",
+      "database_id": "b7c20b00-1674-4ee4-bc8c-6a09de83ace8"
     }
   ]
   /**
