@@ -33,7 +33,7 @@ export function Challenge() {
       <section className="px-8 py-12 max-w-6xl mx-auto">
         <h1 className="text-4xl md:text-5xl font-bold text-center mb-4">
           Hack this agent. Win Bitcoin.
-          <span className="ml-3 text-lg font-normal text-amber-500 align-middle">(coming soon)</span>
+          <span className="ml-3 text-lg font-normal text-amber-500 align-middle">(v0.1 preview)</span>
         </h1>
         <p className="text-xl text-neutral-400 text-center max-w-2xl mx-auto mb-4">
           Both agents have the same LLM, same database, same prompt injection vulnerability.

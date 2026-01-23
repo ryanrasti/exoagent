@@ -2,7 +2,7 @@
 
 The OS kernel to safely unleash your agents.
 
-**[Try the challenge](https://exoagent.io/challenge)** — Two agents, same LLM, same prompt injection vulnerability. $1,000 in BTC if you can hack the one protected by ExoAgent (coming soon!).
+**[Try the challenge](https://exoagent.io/challenge)** — Two agents, same LLM, same prompt injection vulnerability. $1,000 in BTC if you can hack the one protected by ExoAgent (v0.1 preview).
 
 ## The Problem
 
