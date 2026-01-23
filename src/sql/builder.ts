@@ -16,6 +16,8 @@ const isSafeAlias = (value: string): boolean => {
   // Even though we use `sql.ref`, let's be extra safe and only allow
   // aliases that are reasonably safe to use.
   return safeAliasRegex.test(value)
+    && !(value === 'constructor' || value === 'prototype' || value === '__proto__')
+    && !(value in Object.prototype) && value !== 'toJSON'
 }
 
 const assertSafeAlias = (value: string): void => {
@@ -48,7 +50,7 @@ type AsRowLike<R extends RowLikeIn> = R extends TableBase ? R : {
 }
 
 const isRowLikeRawIn = (value: unknown): value is RowLikeRawIn => {
-  return typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
+  return typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
     && Object.entries(value).every(([key, value]) => {
       assertSafeAlias(key)
       return typeof key === 'string' && isSqlExpressionIn(value)
