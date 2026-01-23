@@ -9,6 +9,21 @@ import { RpcToolset, setToolMetadata, tool } from '../rpc-toolset'
 import { asSqlExpression, ColumnReferenceExpression, isSqlExpressionIn, OrderByValue, SqlExpression, UnboundColumnReferenceExpression } from './expression'
 import { buildSql, sql } from './sql'
 
+// eslint-disable-next-line regexp/use-ignore-case, regexp/prefer-w
+const safeAliasRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+
+const isSafeAlias = (value: string): boolean => {
+  // Even though we use `sql.ref`, let's be extra safe and only allow
+  // aliases that are reasonably safe to use.
+  return safeAliasRegex.test(value)
+}
+
+const assertSafeAlias = (value: string): void => {
+  if (!isSafeAlias(value)) {
+    throw new Error(`Alias must be a safe alias: "${value}" does not match the regex ${safeAliasRegex.source}`)
+  }
+}
+
 type RowLikeRaw = {
   [key: string]: SqlExpression
 }
@@ -34,7 +49,10 @@ type AsRowLike<R extends RowLikeIn> = R extends TableBase ? R : {
 
 const isRowLikeRawIn = (value: unknown): value is RowLikeRawIn => {
   return typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
-    && Object.entries(value).every(([key, value]) => typeof key === 'string' && isSqlExpressionIn(value))
+    && Object.entries(value).every(([key, value]) => {
+      assertSafeAlias(key)
+      return typeof key === 'string' && isSqlExpressionIn(value)
+    })
 }
 
 const isRowLikeIn = (value: unknown): value is RowLikeIn => {
@@ -47,10 +65,12 @@ const rowLikeRawEntries = (value: RowLike): [string, SqlExpression][] => {
   const myKeys = Object.keys(value)
   const protoKeys = []
 
-  let proto = Object.getPrototypeOf(value)
-  while (proto != null && proto !== TableBase.prototype) {
-    protoKeys.push(...Object.keys(proto))
-    proto = Object.getPrototypeOf(proto)
+  if (value instanceof TableBase) {
+    let proto = Object.getPrototypeOf(value)
+    while (proto != null && proto !== TableBase.prototype) {
+      protoKeys.push(...Object.keys(proto))
+      proto = Object.getPrototypeOf(proto)
+    }
   }
 
   for (const key of new Set([...myKeys, ...protoKeys])) {
@@ -353,6 +373,7 @@ const table = <N extends string>(db: Database, name: N): TableClass<N> => {
     }
 
     static as<T extends TableClass, N2 extends string>(this: T, alias: N2) {
+      assertSafeAlias(alias)
       class Ret extends (this as TableClass) {
         static readonly alias = alias
       }
