@@ -16,8 +16,8 @@ const codeMode = new CodeMode({
     await writeFile(tempFile, code, 'utf-8')
     const child = spawn('node', [tempFile], { stdio: ['pipe', 'pipe', 'inherit'] })
     return {
-      input: Readable.toWeb(child.stdout),
-      output: Writable.toWeb(child.stdin),
+      input: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      output: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
       wait: () => new Promise<void>((resolve, reject) => {
         child.on('exit', async (code) => {
           await rm(tempDir, { recursive: true, force: true }).catch(() => {})

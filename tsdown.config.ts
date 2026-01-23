@@ -8,4 +8,7 @@ export default defineConfig({
   exports: true,
   publint: true,
   noExternal: ['capnweb'],
+  // Target ES2022 to transform decorators (TC39 stage 3)
+  // Without this, decorators are left as-is and fail in runtimes that don't support them
+  target: 'es2022',
 })

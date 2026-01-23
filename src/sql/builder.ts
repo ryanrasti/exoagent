@@ -1,4 +1,4 @@
-import type { Dialect } from 'kysely'
+import type { CompiledQuery, Dialect } from 'kysely'
 import type { ToolCallback } from '../rpc-toolset'
 import type { SqlExpressionIn } from './expression'
 import type { RawSql } from './sql'
@@ -116,6 +116,7 @@ type QueryBuilderParams<N extends string, TN extends TableNamespace, S extends R
   orderByExpressions?: OrderByValue[]
   limit?: number
   offset?: number
+  rawTable: TableClass<N> | undefined // set only when created directly from a TableClass
 }
 
 class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLike> extends RpcToolset implements FromItem<N, S> {
@@ -128,6 +129,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   #limit?: number
   #offset?: number
   private arg: TN
+  private rawTable: TableClass | undefined // set only when created directly from a TableClass
 
   constructor(params: QueryBuilderParams<N, TN, S>) {
     super()
@@ -140,13 +142,14 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     this.arg = namespacedArg(params.tables)
     this.#limit = params.limit
     this.#offset = params.offset
+    this.rawTable = params.rawTable
   }
 
   @tool.callback()
   select<S2 extends RowLikeIn>(select: ToolCallback<(arg: TN) => S2>) {
     const selectUnwrapped = tool.unwrap(select, isRowLikeIn as (arg: unknown) => arg is S2)
     return selectUnwrapped(this.arg, (result) => {
-      return new QueryBuilder<N, TN, AsRowLike<S2>>({ ...this.params(), selectRowLike: asRowLike(result) })
+      return new QueryBuilder<N, TN, AsRowLike<S2>>({ ...this.paramsForCopy(), selectRowLike: asRowLike(result) })
     })
   }
 
@@ -154,7 +157,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   where(where: ToolCallback<(arg: TN) => SqlExpressionIn>) {
     const whereUnwrapped = tool.unwrap(where, isSqlExpressionIn)
     return whereUnwrapped(this.arg, (result) => {
-      return new QueryBuilder<N, TN, S>({ ...this.params(), whereExpression: combinePredicates(this.whereExpression, asSqlExpression(result)) })
+      return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), whereExpression: combinePredicates(this.whereExpression, asSqlExpression(result)) })
     })
   }
 
@@ -173,7 +176,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
         return e instanceof SqlExpression ? new OrderByValue(e) : e
       })
 
-      return new QueryBuilder<N, TN, S>({ ...this.params(), orderByExpressions: (this.orderByExpressions ?? []).concat(exprs) })
+      return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), orderByExpressions: (this.orderByExpressions ?? []).concat(exprs) })
     })
   }
 
@@ -182,7 +185,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   @tool(z.number().int().nonnegative())
   limit(limit: number) {
     invariant(typeof limit === 'number' && limit >= 0, 'limit must be greater than or equal to 0')
-    return new QueryBuilder<N, TN, S>({ ...this.params(), limit: Math.min(limit, this.#limit ?? Infinity) })
+    return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), limit: Math.min(limit, this.#limit ?? Infinity) })
   }
 
   // Note that `offset` "accumulates": the new offset is the sum of the new offset and the existing offset
@@ -190,7 +193,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   @tool(z.number().int().nonnegative())
   offset(offset: number) {
     invariant(typeof offset === 'number' && offset >= 0, 'offset must be greater than or equal to 0')
-    return new QueryBuilder<N, TN, S>({ ...this.params(), offset: (this.#offset ?? 0) + offset })
+    return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), offset: (this.#offset ?? 0) + offset })
   }
 
   join<N2 extends string, F2 extends TableClass<N2>>(fromItem: F2 | NamespacedExpression<TN, F2>, on?: NamespacedExpression<TN & { [k in N2]: InstanceType<F2> }, SqlExpressionIn>): QueryBuilder<N, TN & { [k in N2]: InstanceType<F2> }, S>
@@ -204,6 +207,11 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     const fromItemCallback = tool.unwrap(fromItemCallbackRaw, isFromItem as (arg: unknown) => arg is FromItem<N2, F2>)
 
     const res = fromItemCallback(this.arg, (fromItemResolved) => {
+      if (fromItemResolved instanceof QueryBuilder && fromItemResolved.rawTable) {
+        // If we're joining to a raw table, use it because it might have an `onExpression`
+        //  (and its more efficient to use the raw table than to re-SELECT from it)
+        fromItemResolved = fromItemResolved.rawTable as unknown as FromItem<N2, F2>
+      }
       const alias = fromItemResolved.alias
 
       if (this.tables[alias]) {
@@ -231,7 +239,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
             isLateral: !isFromItem(fromItem) && fromItemResolved instanceof QueryBuilder,
           },
         } as Tables<TN & { [k in N2]: F2 }>
-        return new QueryBuilder({ ...this.params(), tables: tablesWithAlias })
+        return new QueryBuilder({ ...this.paramsForCopy(), tables: tablesWithAlias })
       })
     })
 
@@ -245,7 +253,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
 
   // Note, we use `= () => ` to ensure the method is a direct property of the class instance,
   // not a method of the class prototype
-  private params = () => {
+  private paramsForCopy = () => {
     return {
       alias: this.alias,
       tables: this.tables,
@@ -255,6 +263,8 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
       limit: this.#limit,
       offset: this.#offset,
       db: this.#db,
+      // `rawTable` is set only when created directly from a TableClass
+      rawTable: undefined,
     }
   }
 
@@ -338,9 +348,8 @@ const table = <N extends string>(db: Database, name: N): TableClass<N> => {
     }
 
     static from<T extends TableClass>(this: T): QueryBuilder<N, { [k in N]: InstanceType<T> }, InstanceType<T>> {
-      const alias = this.alias ?? this.tableName
-      const tables = { [alias]: { fromItem: this, joinType: null, isLateral: false } } as unknown as Tables<{ [k in N]: InstanceType<T> }>
-      return new QueryBuilder({ db, alias: alias as N, tables, selectRowLike: this.toRowLike() })
+      const tables = { [this.alias]: { fromItem: this, joinType: null, isLateral: false } } as unknown as Tables<{ [k in N]: InstanceType<T> }>
+      return new QueryBuilder({ db, alias: this.alias as N, tables, selectRowLike: this.toRowLike(), rawTable: this }) as QueryBuilder<N, { [k in N]: InstanceType<T> }, InstanceType<T>>
     }
 
     static as<T extends TableClass, N2 extends string>(this: T, alias: N2) {
@@ -400,12 +409,17 @@ const table = <N extends string>(db: Database, name: N): TableClass<N> => {
 
 export class Database {
   private kysely?: Kysely<any>
-  constructor(private dialect: Dialect) {}
+  constructor(private dialect: Dialect, private opts?: { logQuery?: (raw: CompiledQuery) => void }) {}
 
   async execute(query: RawSql) {
     if (this.kysely == null) {
       this.kysely = new Kysely({ dialect: this.dialect })
     }
+
+    if (this.opts?.logQuery) {
+      this.opts.logQuery(query.compile(this.kysely))
+    }
+
     const result = await query.execute(this.kysely)
     return result.rows
   }

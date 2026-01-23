@@ -70,7 +70,7 @@ describe('sql query builder', () => {
 
   it('creates a query with joins', () => {
     const query = User.from()
-      .join(Post.from(), ({ user, post }) => user.id['='](post.userId))
+      .join(Post.from().select(({ post }) => post), ({ user, post }) => user.id['='](post.userId))
       .select(({ user, post }) => ({
         userName: user.name,
         postTitle: post.title,
@@ -440,7 +440,7 @@ describe('table methods', () => {
 
   it('can use table method from subselect', () => {
     const subquery = User.from()
-      .join(User.as('u2').from(), ({ user, u2 }) => user.managerId['='](u2.id))
+      .join(User.as('u2').from().select(({ u2 }) => u2), ({ user, u2 }) => user.managerId['='](u2.id))
       .join(({ u2 }) => u2.posts())
       .select(({ user, u2, post }) => ({ userId: user.id, managerName: u2.name, managerPostTitle: post.title }))
 
