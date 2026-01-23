@@ -406,6 +406,14 @@ describe('sql query builder', () => {
       parameters: [],
     })
   })
+
+  it('cannot use unsafe alias (table alias)', () => {
+    expect(() => User.as('user name').compile()).toThrow('Alias must be a safe alias: "user name" does not match the regex ^[a-zA-Z_][a-zA-Z0-9_]*$')
+  })
+
+  it('cannot use unsafe alias (column alias)', () => {
+    expect(() => User.from().select(({ user }) => ({ '--whoa': user.name })).compile()).toThrow('Alias must be a safe alias: "--whoa" does not match the regex ^[a-zA-Z_][a-zA-Z0-9_]*$')
+  })
 })
 
 describe('table methods', () => {
