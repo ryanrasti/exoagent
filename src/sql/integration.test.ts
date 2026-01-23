@@ -15,7 +15,7 @@ class User extends db.Table('users').as('user') {
 
   @tool()
   posts() {
-    return Post.on(post => post.userId['='](this.id))
+    return Post.on(post => post.userId['='](this.id)).from()
   }
 }
 
@@ -158,5 +158,16 @@ describe('sql integration over capnweb', () => {
       using posts = api.posts()
       return await posts.compile()
     }).rejects.toThrow('Attempted to access property \'compile\', which is an instance property of the RpcTarget.')
+  })
+
+  it('can do a join to a toolset method', async () => {
+    await using harness = new TestHarness(new Api())
+    const api = harness.stub
+
+    const result = await api.map(api =>
+      api.users().join(({ user }) => user.posts()).select(({ user, post }) => ({ userName: user.name, postTitle: post.title })).execute(),
+    )
+
+    expect(result).toEqual([{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }])
   })
 })

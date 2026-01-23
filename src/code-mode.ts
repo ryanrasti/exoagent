@@ -8,10 +8,18 @@ import { z } from 'zod'
 import { StreamTransport } from './stream-transport'
 import { generateToolApi, generateToolTypes } from './tool-wrapper'
 
-const BUNDLED_RUNTIME_CODE = readFileSync(
-  fileURLToPath(new URL('../dist/code-mode-runtime.mjs', import.meta.url)),
-  'utf-8',
-)
+// Lazy-load the bundled runtime code to avoid filesystem access at import time
+// This is important for environments like Cloudflare Workers that don't have fs access
+let _BUNDLED_RUNTIME_CODE: string | undefined
+function getBundledRuntimeCode(): string {
+  if (_BUNDLED_RUNTIME_CODE === undefined) {
+    _BUNDLED_RUNTIME_CODE = readFileSync(
+      fileURLToPath(new URL('../dist/code-mode-runtime.mjs', import.meta.url) as URL),
+      'utf-8',
+    )
+  }
+  return _BUNDLED_RUNTIME_CODE
+}
 
 export type SafeEvalResult = {
   wait: () => Promise<void>
@@ -70,7 +78,7 @@ export class CodeMode {
       }),
       execute: async ({ code }: { code: string }, opts: ToolExecutionOptions) => {
         // 1. Inject sandbox context into bundled runtime
-        const injectedCode = `globalThis.__SANDBOX_CONTEXT_PROMISE__ = ${this.context.sandboxContext};\n${BUNDLED_RUNTIME_CODE}`
+        const injectedCode = `globalThis.__SANDBOX_CONTEXT_PROMISE__ = ${this.context.sandboxContext};\n${getBundledRuntimeCode()}`
         const { input, output, wait } = await this.context.safeEval(injectedCode)
 
         // 2. Hook up the input and output streams:
