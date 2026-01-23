@@ -7,7 +7,7 @@
     "dev:worker": "esbuild worker/index.ts --bundle --format=esm --target=es2022 --outfile=dist-worker/index.js --external:cloudflare:workers --packages=external --watch",
     "build:worker": "esbuild worker/index.ts --bundle --format=esm --target=es2022 --outfile=dist-worker/index.js --external:cloudflare:workers --packages=external",
     "dev": "npm run build:worker && ([ -f /etc/ssl/certs/ca-certificates.crt ] && SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt vite || vite)",
-    "build": "npm run build:worker && tsc -b && vite build",
+    "build": "npm run build:worker && vite build",
     "lint": "eslint .",
     "preview": "npm run build && vite preview",
     "deploy": "npm run build && wrangler deploy",
