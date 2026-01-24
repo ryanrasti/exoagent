@@ -1,25 +1,31 @@
-import type { BountyAgent } from '../worker/index'
-import { newWebSocketRpcSession } from 'capnweb'
-import { useEffect, useState } from 'react'
+import type { Api } from '../worker/index'
+import { Turnstile } from '@marsidev/react-turnstile'
+import { newHttpBatchRpcSession } from 'capnweb'
+import React, { useEffect, useRef, useState } from 'react'
 import { ExoAgentChat, RawSqlAgentChat } from './AgentChat'
 import { GITHUB_URL, GitHubLink, Layout } from './Layout'
 
+// Turnstile site keys - use dev key for localhost
+const TURNSTILE_SITE_KEY = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? '1x00000000000000000000AA' // Cloudflare's always-passing test key
+  : '0x4AAAAAACOkZEmVkdZMbJ9s'
+
 export function Challenge() {
-  const [hackCount, setHackCount] = useState<number | null>(null)
-  const [attemptCount, setAttemptCount] = useState<number | null>(null)
-  const [fresh, setFresh] = useState(false)
+  const [{ hackCount, attemptCount, fresh }, setStats] = useState<{ hackCount: number | null, attemptCount: number | null, fresh: boolean }>({ hackCount: null, attemptCount: null, fresh: false })
+  const [hideTurnstile, setHideTurnstile] = useState(false)
+  const [nonce] = useState(crypto.randomUUID())
+  const { current: { promise: sessionIdPromise, resolve: sessionIdResolve, reject: sessionIdReject } } = useRef(Promise.withResolvers<string>())
 
   // Fetch stats on mount using RPC
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const rpcUrl = `${protocol}//${window.location.host}/api/bounty/rpc`;
     (async () => {
-      using agent = newWebSocketRpcSession<BountyAgent>(rpcUrl)
       try {
+        const sessionId = await sessionIdPromise
+        const agent = newHttpBatchRpcSession<Api>('/api/bounty/rpc').currentSession({
+          sessionId,
+        })
         const { hackCount, attemptCount, fresh } = await agent.stats()
-        setHackCount(hackCount)
-        setAttemptCount(attemptCount)
-        setFresh(fresh)
+        setStats({ hackCount, attemptCount, fresh })
       }
       catch (error) {
         console.error('error fetching stats', error)
@@ -29,6 +35,26 @@ export function Challenge() {
 
   return (
     <Layout headerRight={<GitHubLink>Star on GitHub</GitHubLink>}>
+      {/* Turnstile challenge - centered when visible */}
+      {!hideTurnstile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none *:pointer-events-auto">
+          <Turnstile
+            siteKey={TURNSTILE_SITE_KEY}
+            onSuccess={(val) => {
+              setHideTurnstile(true)
+              sessionIdResolve((async () => {
+                const api = newHttpBatchRpcSession<Api>('/api/bounty/rpc')
+                return await api.newSession({ turnstileId: val, nonce })
+              })())
+            }}
+            onError={(error) => {
+              sessionIdReject(new Error(error))
+            }}
+            options={{ theme: 'dark', appearance: 'interaction-only' }}
+          />
+        </div>
+      )}
+
       {/* Hero */}
       <section className="px-8 py-12 max-w-6xl mx-auto">
         <h1 className="text-4xl md:text-5xl font-bold text-center mb-4">
@@ -88,7 +114,7 @@ export function Challenge() {
                 (refreshes daily)
               </p>
             </div>
-            <RawSqlAgentChat />
+            <RawSqlAgentChat sessionIdPromise={sessionIdPromise} />
           </div>
 
           {/* ExoAgent (Protected) */}
@@ -104,7 +130,7 @@ export function Challenge() {
                 <span className="text-green-400">$1,000 bounty</span>
               </p>
             </div>
-            <ExoAgentChat />
+            <ExoAgentChat sessionIdPromise={sessionIdPromise} />
           </div>
         </div>
       </section>

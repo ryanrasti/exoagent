@@ -1,5 +1,5 @@
 import type { Database } from 'sql.js'
-import type { BountyAgent, ChatMessage, CodeResult, SqlResult } from '../worker/index'
+import type { Api, ChatMessage, CodeResult, SqlResult } from '../worker/index'
 import { explicitCallback, newWebSocketRpcSession, setGlobalRpcSessionOptions } from 'capnweb'
 import React, { useEffect, useRef, useState } from 'react'
 import initSqlJs from 'sql.js'
@@ -277,12 +277,6 @@ function executeQuery(db: Database, sql: string): Record<string, unknown>[] {
   return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])))
 }
 
-// WebSocket URL for bounty RPC
-const getRpcUrl = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/api/bounty/rpc`
-}
-
 let dbPromise: Promise<Database> | null = null
 const getDb = () => {
   if (!dbPromise) {
@@ -291,17 +285,19 @@ const getDb = () => {
   return dbPromise
 }
 
-export function RawSqlAgentChat() {
+export function RawSqlAgentChat({ sessionIdPromise }: { sessionIdPromise: Promise<string> }) {
   useEffect(() => {
     getDb()
   }, [])
 
   // Raw SQL chat callback
   const chat = async (messages: ChatMessage[]): Promise<ChatResult> => {
-    const db = await getDb()
-    using agent = newWebSocketRpcSession<BountyAgent>(getRpcUrl(), undefined, {
+    using api = newWebSocketRpcSession<Api>('/api/bounty/rpc', undefined, {
       onSendError: error => error,
     })
+    using agent = api.currentSession({ sessionId: await sessionIdPromise })
+
+    const db = await getDb()
     const result: { text: string, toolCalls: Array<{ sql: string, result: SqlResult }> } = await agent.chatRawSql(messages, explicitCallback(async (sql: string): Promise<SqlResult> => {
       // eslint-disable-next-line no-console
       console.log('running sql', sql)
@@ -340,7 +336,7 @@ export function RawSqlAgentChat() {
   )
 }
 
-export function ExoAgentChat() {
+export function ExoAgentChat({ sessionIdPromise }: { sessionIdPromise: Promise<string> }) {
   // Set default mode to record/replay
   useEffect(() => {
     setGlobalRpcSessionOptions(() => ({ recordReplayMode: 'all' }))
@@ -351,9 +347,11 @@ export function ExoAgentChat() {
 
   // ExoAgent chat callback
   const chat = async (messages: ChatMessage[]): Promise<ChatResult> => {
-    using agent = newWebSocketRpcSession<BountyAgent>(getRpcUrl(), undefined, {
+    using api = newWebSocketRpcSession<Api>('/api/bounty/rpc', undefined, {
       onSendError: error => error,
     })
+    using agent = api.currentSession({ sessionId: await sessionIdPromise })
+
     const result: { text: string, toolCalls: Array<{ code: string, result: CodeResult }> } = await agent.chatExoAgent(messages, explicitCallback(async (code: string): Promise<CodeResult> => {
       // eslint-disable-next-line no-console
       console.log('executing code', code)

@@ -77,6 +77,81 @@ export interface CodeResult {
   blocked?: boolean
 }
 
+// Validate Turnstile token
+async function validateTurnstile(token: string, secretKey: string, remoteip?: string): Promise<boolean> {
+  const formData = new FormData()
+  formData.append('secret', secretKey)
+  formData.append('response', token)
+  if (remoteip)
+    formData.append('remoteip', remoteip)
+
+  const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    body: formData,
+  })
+
+  const result = await response.json() as { success: boolean }
+  if (!result.success) {
+    console.warn('turnstile validation failed', result)
+  }
+  return result.success
+}
+
+// Validate session ID exists
+async function validateSession(sessionId: string, db: D1Database): Promise<boolean> {
+  const result = await db.prepare('SELECT id FROM sessions WHERE id = ?').bind(sessionId).first<{ id: string }>()
+  return result?.id === sessionId
+}
+
+export class Api extends RpcToolset {
+  #rateLimit: KVNamespace
+  #db: D1Database
+  #clientIp: string | undefined
+
+  constructor(rateLimit: KVNamespace, db: D1Database, clientIp: string | undefined) {
+    super()
+    this.#rateLimit = rateLimit
+    this.#db = db
+    this.#clientIp = clientIp
+  }
+
+  @tool(z.object({ turnstileId: z.string(), nonce: z.string() }))
+  async newSession(input: { turnstileId: string, nonce: string }): Promise<string> {
+    // Validate Turnstile token
+    const isValid = await validateTurnstile(input.turnstileId, env.TURNSTILE_SECRET_KEY, this.#clientIp)
+    if (!isValid)
+      throw new Error('Invalid Turnstile token')
+
+    if (env.TURNSTILE_SECRET_KEY === '1x0000000000000000000000000000000AA') {
+      // Dev mode -- append the nonce to turnstile ID so we don't get conflicts:
+      input.turnstileId = `${input.turnstileId}-${input.nonce}`
+    }
+
+    // Create new session
+    const sessionId = crypto.randomUUID()
+    const ipHash = this.#clientIp
+      ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`exoagent:${this.#clientIp}`)))).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
+      : null
+
+    await this.#db.prepare(
+      'INSERT INTO sessions (id, turnstile_id, ip_hash, created_at) VALUES (?, ?, ?, ?)',
+    ).bind(sessionId, input.turnstileId, ipHash, new Date().toISOString()).run()
+
+    return sessionId
+  }
+
+  @tool(z.object({ sessionId: z.string().uuid() }))
+  async currentSession(input: { sessionId: string }): Promise<BountyAgent> {
+    // Validate existing session
+    const isValid = await validateSession(input.sessionId, this.#db)
+    if (!isValid)
+      throw new Error('Invalid session ID')
+
+    // Return BountyAgent instance
+    return new BountyAgent(this.#rateLimit)
+  }
+}
+
 export class BountyAgent extends RpcToolset {
   #rateLimit: KVNamespace
   #model: LanguageModel
@@ -274,7 +349,8 @@ export default {
     // Handles both raw SQL and ExoAgent chat
     // ============================================
     if (url.pathname === '/api/bounty/rpc') {
-      return newWorkersRpcResponse(request, new BountyAgent(env.EXOAGENT_RATE_LIMIT))
+      const clientIp = request.headers.get('CF-Connecting-IP') ?? undefined
+      return newWorkersRpcResponse(request, new Api(env.EXOAGENT_RATE_LIMIT, env.EXOAGENT_SESSIONS_DB, clientIp))
     }
 
     return new Response('Not found', { status: 404 })

@@ -17,6 +17,7 @@
     "@ai-sdk/google": "^3.0.0",
     "@ai-sdk/react": "^3.0.0",
     "@electric-sql/pglite": "^0.3.15",
+    "@marsidev/react-turnstile": "^1.4.1",
     "ai": "^6.0.48",
     "capnweb": "file:../packages/capnweb",
     "exoagent": "file:..",
