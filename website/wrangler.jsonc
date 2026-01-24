@@ -23,12 +23,6 @@
   "observability": {
     "enabled": true
   },
-  "kv_namespaces": [
-    {
-      "binding": "EXOAGENT_RATE_LIMIT",
-      "id": "0125476964b94640ae78c968c10e0695"
-    }
-  ],
   "d1_databases": [
     {
       "binding": "EXOAGENT_BOUNTY_DB",
@@ -40,7 +34,10 @@
       "database_name": "exoagent-sessions-db",
       "database_id": "f5ce5ade-00ce-4eab-94b0-6f3915fcef4d"
     }
-  ]
+  ],
+  "limits": {
+    "cpu_ms": 500
+  }
   /**
    * Smart Placement
    * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
