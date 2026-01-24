@@ -10,6 +10,24 @@ const TURNSTILE_SITE_KEY = window.location.hostname === 'localhost' || window.lo
   ? '1x00000000000000000000AA' // Cloudflare's always-passing test key
   : '0x4AAAAAACOkZEmVkdZMbJ9s'
 
+const statColors = {
+  red: { text: 'text-red-500', bg: 'bg-red-500/20' },
+  green: { text: 'text-green-500', bg: 'bg-green-500/20' },
+  neutral: { text: 'text-neutral-400', bg: 'bg-neutral-500/20' },
+}
+
+function StatCard({ value, loading, color, label }: { value: number | null, loading: boolean, color: keyof typeof statColors, label: string }) {
+  const { text, bg } = statColors[color]
+  return (
+    <div className="text-center">
+      <div className={`text-3xl font-bold ${text}`}>
+        {loading ? <span className={`inline-block w-8 h-8 ${bg} rounded animate-pulse`} /> : value?.toLocaleString()}
+      </div>
+      <div className="text-sm text-neutral-500">{label}</div>
+    </div>
+  )
+}
+
 export function Challenge() {
   const [{ hackCount, attemptCount, fresh }, setStats] = useState<{ hackCount: number | null, attemptCount: number | null, fresh: boolean }>({ hackCount: null, attemptCount: null, fresh: false })
   const [hideTurnstile, setHideTurnstile] = useState(false)
@@ -74,28 +92,13 @@ export function Challenge() {
       </section>
 
       {/* Stats bar */}
-      {fresh && (
-        <section className="px-8 py-4 bg-neutral-900 border-y border-neutral-800">
-          <div className="max-w-6xl mx-auto flex justify-center gap-12">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-red-500">
-                {hackCount !== null ? hackCount.toLocaleString() : '—'}
-              </div>
-              <div className="text-sm text-neutral-500">Times Raw SQL hacked</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-green-500">0</div>
-              <div className="text-sm text-neutral-500">Times ExoAgent hacked</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-neutral-400">
-                {attemptCount !== null ? attemptCount.toLocaleString() : '—'}
-              </div>
-              <div className="text-sm text-neutral-500">ExoAgent hack attempts</div>
-            </div>
-          </div>
-        </section>
-      )}
+      <section className="px-8 py-4 bg-neutral-900 border-y border-neutral-800">
+        <div className="max-w-6xl mx-auto flex justify-center gap-12">
+          <StatCard value={hackCount} loading={!fresh} color="red" label="Times Raw SQL hacked" />
+          <StatCard value={0} loading={!fresh} color="green" label="Times ExoAgent hacked" />
+          <StatCard value={attemptCount} loading={!fresh} color="neutral" label="ExoAgent hack attempts" />
+        </div>
+      </section>
       {/* Side-by-side agents */}
       <section className="px-8 py-12 max-w-7xl mx-auto">
         <div className="grid md:grid-cols-2 gap-8">
