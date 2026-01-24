@@ -34,6 +34,11 @@
       "binding": "EXOAGENT_BOUNTY_DB",
       "database_name": "exoagent-bounty-db",
       "database_id": "b7c20b00-1674-4ee4-bc8c-6a09de83ace8"
+    },
+    {
+      "binding": "EXOAGENT_SESSIONS_DB",
+      "database_name": "exoagent-sessions-db",
+      "database_id": "f5ce5ade-00ce-4eab-94b0-6f3915fcef4d"
     }
   ]
   /**
