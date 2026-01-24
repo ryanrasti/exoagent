@@ -1,5 +1,5 @@
 import type { Database } from 'sql.js'
-import type { Api, ChatMessage, CodeResult, SqlResult } from '../worker/index'
+import type { Api, CodeResult, SqlResult } from '../worker/index'
 import { explicitCallback, newWebSocketRpcSession, setGlobalRpcSessionOptions } from 'capnweb'
 import React, { useEffect, useRef, useState } from 'react'
 import initSqlJs from 'sql.js'
@@ -10,16 +10,16 @@ interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  toolCalls?: Array<{ name: string, args: unknown, result: unknown }>
+  toolResults?: Array<{ toolName: string, args: unknown, result: unknown }>
 }
 
 interface ChatResult {
   text: string
-  toolCalls: Array<{ name: string, args: unknown, result: unknown }>
+  toolResults: Array<{ toolName: string, args: unknown, result: unknown }>
 }
 
 interface AgentChatProps {
-  chat: (messages: ChatMessage[]) => Promise<ChatResult>
+  chat: (message: string) => Promise<ChatResult>
   placeholder?: string
   emptyState?: {
     title: string
@@ -27,6 +27,7 @@ interface AgentChatProps {
     suggestion?: string
   }
   accentColor?: 'red' | 'green' | 'blue'
+  maxMessageLength?: number
 }
 
 // Tailwind needs complete class names at build time (no string interpolation)
@@ -51,7 +52,9 @@ const accentStyles = {
   },
 }
 
-export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' }: AgentChatProps) {
+const MAX_MESSAGE_LENGTH = 4000
+
+export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue', maxMessageLength = MAX_MESSAGE_LENGTH }: AgentChatProps) {
   const styles = accentStyles[accentColor]
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -75,29 +78,22 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
     if (!input.trim() || isLoading)
       return
 
-    const userInput = input.trim()
+    const userInput = input.trim().slice(0, maxMessageLength)
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content: userInput,
     }
 
-    const newMessages = [...messages, userMessage]
-    setMessages(newMessages)
+    setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
 
     try {
-      // Convert messages to the format expected by the chat callback
-      const chatMessages: ChatMessage[] = newMessages.map(m => ({
-        role: m.role,
-        content: m.content,
-      }))
-
-      const result = await chat(chatMessages)
+      const result = await chat(userInput)
 
       // Check if any tool call was hacked
-      const wasHacked = result.toolCalls.some(tc => (tc.result as SqlResult)?.hacked)
+      const wasHacked = result.toolResults.some(tc => (tc.result as SqlResult)?.hacked)
       if (wasHacked) {
         setShowHackAnimation(true)
         setTimeout(() => setShowHackAnimation(false), 3000)
@@ -107,7 +103,7 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
         id: crypto.randomUUID(),
         role: 'assistant',
         content: result.text,
-        toolCalls: result.toolCalls,
+        toolResults: result.toolResults,
       }
 
       setMessages(prev => [...prev, assistantMessage])
@@ -163,29 +159,29 @@ export function AgentChat({ chat, placeholder, emptyState, accentColor = 'blue' 
             </div>
 
             {/* Show tool calls */}
-            {message.toolCalls && message.toolCalls.length > 0 && (
+            {message.toolResults && message.toolResults.length > 0 && (
               <div className="ml-4 space-y-1">
-                {message.toolCalls.map((tc, i) => (
+                {message.toolResults.map((tr, i) => (
                   <div key={i} className="text-xs bg-neutral-900 rounded p-2 font-mono">
                     <div className="text-neutral-500">
                       →
                       {' '}
-                      {tc.name}
+                      {tr.toolName}
                       (
-                      {JSON.stringify(tc.args)}
+                      {JSON.stringify(tr.args)}
                       )
                     </div>
                     <div className={`mt-1 ${
-                      (tc.result as { blocked?: boolean })?.blocked
+                      (tr.result as { blocked?: boolean })?.blocked
                         ? 'text-red-400'
-                        : (tc.result as { error?: string })?.error
+                        : (tr.result as { error?: string })?.error
                             ? 'text-amber-400'
-                            : (tc.result as SqlResult)?.hacked
+                            : (tr.result as SqlResult)?.hacked
                                 ? 'text-red-500 font-bold animate-pulse'
                                 : 'text-green-400'
                     }`}
                     >
-                      {JSON.stringify(tc.result, null, 2)}
+                      {JSON.stringify(tr.result, null, 2)}
                     </div>
                   </div>
                 ))}
@@ -291,14 +287,14 @@ export function RawSqlAgentChat({ sessionIdPromise }: { sessionIdPromise: Promis
   }, [])
 
   // Raw SQL chat callback
-  const chat = async (messages: ChatMessage[]): Promise<ChatResult> => {
+  const chat = async (message: string): Promise<ChatResult> => {
     using api = newWebSocketRpcSession<Api>('/api/bounty/rpc', undefined, {
       onSendError: error => error,
     })
     using agent = api.currentSession({ sessionId: await sessionIdPromise })
 
     const db = await getDb()
-    const result: { text: string, toolCalls: Array<{ sql: string, result: SqlResult }> } = await agent.chatRawSql(messages, explicitCallback(async (sql: string): Promise<SqlResult> => {
+    return await agent.chatRawSql(message, explicitCallback(async (sql: string): Promise<SqlResult> => {
       // eslint-disable-next-line no-console
       console.log('running sql', sql)
       try {
@@ -312,14 +308,6 @@ export function RawSqlAgentChat({ sessionIdPromise }: { sessionIdPromise: Promis
         return { error: String(error) }
       }
     }, 'stub'))
-    return {
-      text: result.text,
-      toolCalls: result.toolCalls.map((tc: { sql: string, result: SqlResult }) => ({
-        name: 'execute_sql',
-        args: { sql: tc.sql },
-        result: tc.result,
-      })),
-    }
   }
 
   return (
@@ -346,13 +334,13 @@ export function ExoAgentChat({ sessionIdPromise }: { sessionIdPromise: Promise<s
   }, [])
 
   // ExoAgent chat callback
-  const chat = async (messages: ChatMessage[]): Promise<ChatResult> => {
+  const chat = async (message: string): Promise<ChatResult> => {
     using api = newWebSocketRpcSession<Api>('/api/bounty/rpc', undefined, {
       onSendError: error => error,
     })
     using agent = api.currentSession({ sessionId: await sessionIdPromise })
 
-    const result: { text: string, toolCalls: Array<{ code: string, result: CodeResult }> } = await agent.chatExoAgent(messages, explicitCallback(async (code: string): Promise<CodeResult> => {
+    return await agent.chatExoAgent(message, explicitCallback(async (code: string): Promise<CodeResult> => {
       // eslint-disable-next-line no-console
       console.log('executing code', code)
       // eslint-disable-next-line no-new-func -- we're running this code (that the user is prompting) intentionally for the hack challenge
@@ -369,14 +357,6 @@ export function ExoAgentChat({ sessionIdPromise }: { sessionIdPromise: Promise<s
       }
       return { results: Array.isArray(queryResult) ? queryResult : [queryResult] }
     }, 'stub'))
-    return {
-      text: result.text,
-      toolCalls: result.toolCalls.map((tc: { code: string, result: CodeResult }) => ({
-        name: 'execute_code',
-        args: { code: tc.code },
-        result: tc.result,
-      })),
-    }
   }
 
   return (
