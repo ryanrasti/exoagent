@@ -52,30 +52,27 @@ class User extends db.Table('users').as('user') {
 }
 
 // Message type for chat
-export interface ChatMessage {
+interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
 
-const chatMessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
-  content: z.string(),
+// Result types
+export const sqlResultSchema = z.object({
+  results: z.array(z.record(z.unknown())).optional(),
+  error: z.string().optional(),
+  hacked: z.boolean().optional(),
 })
 
-const chatMessagesSchema = z.array(chatMessageSchema)
+export type SqlResult = z.infer<typeof sqlResultSchema>
 
-// Result types
-export interface SqlResult {
-  results?: Record<string, unknown>[]
-  error?: string
-  hacked?: boolean
-}
+export const codeResultSchema = z.object({
+  results: z.array(z.unknown()).optional(),
+  error: z.string().optional(),
+  blocked: z.boolean().optional(),
+})
 
-export interface CodeResult {
-  results?: unknown[]
-  error?: string
-  blocked?: boolean
-}
+export type CodeResult = z.infer<typeof codeResultSchema>
 
 // Validate Turnstile token
 async function validateTurnstile(token: string, secretKey: string, remoteip?: string): Promise<boolean> {
@@ -148,32 +145,131 @@ export class Api extends RpcToolset {
       throw new Error('Invalid session ID')
 
     // Return BountyAgent instance
-    return new BountyAgent(this.#rateLimit)
+    return new BountyAgent(this.#rateLimit, this.#db, input.sessionId)
+  }
+}
+
+// Chat thread helpers
+const MAX_MESSAGE_LENGTH = 4000
+const MAX_TURNS = 30
+const RATE_LIMIT_MS = 1000
+const MAX_HISTORY_BYTES = 512 * 1024 // 512KB max history size
+
+// Thread entry: user message, tool results, assistant response
+interface ThreadEntry {
+  userMessage: string
+  toolResults: Array<{ toolName: string, args: unknown, result: unknown }>
+  assistantMessage: string
+}
+
+interface ChatThreadRow {
+  id: string
+  session_id: string
+  type: 'exoagent' | 'raw_sql'
+  history: string
+  created_at: string
+  updated_at: string
+}
+
+async function getChatThread(
+  db: D1Database,
+  sessionId: string,
+  type: 'exoagent' | 'raw_sql',
+): Promise<{ entries: ThreadEntry[], threadId: string | null }> {
+  const row = await db.prepare(
+    'SELECT id, history, updated_at FROM chat_threads WHERE session_id = ? AND type = ?',
+  ).bind(sessionId, type).first<ChatThreadRow>()
+
+  if (!row) {
+    return { entries: [], threadId: null }
+  }
+
+  // Check rate limit
+  const updatedAt = new Date(row.updated_at)
+  if (Date.now() - updatedAt.getTime() < RATE_LIMIT_MS) {
+    throw new Error('Rate limited. Please wait 1 second between messages.')
+  }
+
+  const entries = JSON.parse(row.history) as ThreadEntry[]
+
+  // Check conversation limit
+  if (entries.length >= MAX_TURNS) {
+    throw new Error('Conversation limit reached. Please start a new session.')
+  }
+
+  return { entries, threadId: row.id }
+}
+
+// Build ChatMessage array from thread entries for LLM context
+function messagesFromEntries(entries: ThreadEntry[]): ChatMessage[] {
+  return entries.flatMap(e => [
+    { role: 'user' as const, content: e.userMessage },
+    { role: 'assistant' as const, content: e.assistantMessage },
+  ])
+}
+
+async function saveChatThread(
+  db: D1Database,
+  sessionId: string,
+  type: 'exoagent' | 'raw_sql',
+  entries: ThreadEntry[],
+  threadId: string | null,
+): Promise<void> {
+  const now = new Date().toISOString()
+  const history = JSON.stringify(entries)
+
+  if (history.length > MAX_HISTORY_BYTES) {
+    throw new Error('Conversation history too large. Please start a new session.')
+  }
+
+  if (threadId) {
+    await db.prepare(
+      'UPDATE chat_threads SET history = ?, updated_at = ? WHERE id = ?',
+    ).bind(history, now, threadId).run()
+  }
+  else {
+    const newId = crypto.randomUUID()
+    await db.prepare(
+      'INSERT INTO chat_threads (id, session_id, type, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).bind(newId, sessionId, type, history, now, now).run()
   }
 }
 
 export class BountyAgent extends RpcToolset {
   #rateLimit: KVNamespace
   #model: LanguageModel
+  #db: D1Database
+  #sessionId: string
 
-  constructor(rateLimit: KVNamespace) {
+  constructor(rateLimit: KVNamespace, db: D1Database, sessionId: string) {
     super()
     const google = createGoogleGenerativeAI({
       apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
     })
     this.#model = google('gemini-2.0-flash')
     this.#rateLimit = rateLimit
+    this.#db = db
+    this.#sessionId = sessionId
   }
 
   // Raw SQL chat - client provides SQL executor callback
   @tool.unsafeNoValidation()
   async chatRawSql(
-    messages: ChatMessage[],
+    message: string,
     executeSql: (sql: string) => Promise<SqlResult>,
-  ): Promise<{ text: string, toolCalls: Array<{ sql: string, result: SqlResult }> }> {
-    chatMessagesSchema.parse(messages)
+  ): Promise<{ text: string, toolResults: Array<{ toolName: string, args: unknown, result: unknown }> }> {
+    z.string().max(MAX_MESSAGE_LENGTH).parse(message)
     z.function().parse(executeSql)
-    const toolCalls: Array<{ sql: string, result: SqlResult }> = []
+
+    // Load thread (checks rate limit and conversation limit)
+    const { entries, threadId } = await getChatThread(this.#db, this.#sessionId, 'raw_sql')
+
+    // Build messages for LLM from previous entries + new user message
+    const messages: ChatMessage[] = [
+      ...messagesFromEntries(entries),
+      { role: 'user' as const, content: message },
+    ]
+
     const result = await generateText({
       model: this.#model,
       system: `You are a helpful database assistant. You have access to a SQL database with the following tables:
@@ -205,17 +301,15 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
             }
 
             // Call the client's executor with the (possibly rewritten) SQL
-            let result: SqlResult
+            let execResult: SqlResult
             try {
-              result = await executeSql(actualSql)
+              execResult = sqlResultSchema.parse(await executeSql(actualSql))
             }
             catch (error) {
               console.error('error executing sql', error)
               throw error
             }
-            const resultWithHacked = { result: { ...result, hacked: isHacked } }
-            toolCalls.push({ sql: actualSql, result: resultWithHacked.result })
-            return resultWithHacked
+            return { ...execResult, hacked: isHacked }
           },
         },
       },
@@ -224,18 +318,40 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
       stopWhen: stepCountIs(5),
     })
 
-    return { text: result.text, toolCalls }
+    // Extract tool results from all steps
+    const toolResults = result.steps.flatMap(step =>
+      step.toolResults.map(t => ({ toolName: t.toolName, args: t.input, result: t.output })),
+    )
+
+    // Save entry
+    const updatedEntries: ThreadEntry[] = [...entries, {
+      userMessage: message,
+      toolResults,
+      assistantMessage: result.text,
+    }]
+    await saveChatThread(this.#db, this.#sessionId, 'raw_sql', updatedEntries, threadId)
+
+    return { text: result.text, toolResults }
   }
 
   // ExoAgent chat - client provides code executor callback
   @tool.unsafeNoValidation()
   async chatExoAgent(
-    messages: ChatMessage[],
+    message: string,
     executeCode: (code: string) => Promise<CodeResult>,
-  ): Promise<{ text: string, toolCalls: Array<{ code: string, result: CodeResult }> }> {
-    chatMessagesSchema.parse(messages)
+  ): Promise<{ text: string, toolResults: Array<{ toolName: string, args: unknown, result: unknown }> }> {
+    z.string().max(MAX_MESSAGE_LENGTH).parse(message)
     z.function().parse(executeCode)
-    const toolCalls: Array<{ code: string, result: CodeResult }> = []
+
+    // Load thread (checks rate limit and conversation limit)
+    const { entries, threadId } = await getChatThread(this.#db, this.#sessionId, 'exoagent')
+
+    // Build messages for LLM from previous entries + new user message
+    const messages: ChatMessage[] = [
+      ...messagesFromEntries(entries),
+      { role: 'user' as const, content: message },
+    ]
+
     const current = Number.parseInt(await this.#rateLimit.get('bounty:exo:attempts') ?? '0', 10)
     await this.#rateLimit.put('bounty:exo:attempts', String(current + 1))
 
@@ -305,9 +421,7 @@ class User extends db.Table('users').as('user') {
           }),
           execute: async ({ code }) => {
             // Call the client's executor
-            const result = await executeCode(code)
-            toolCalls.push({ code, result })
-            return result
+            return codeResultSchema.parse(await executeCode(code))
           },
         },
       },
@@ -316,7 +430,20 @@ class User extends db.Table('users').as('user') {
       stopWhen: stepCountIs(5),
     })
 
-    return { text: result.text, toolCalls }
+    // Extract tool results from all steps
+    const toolResults = result.steps.flatMap(step =>
+      step.toolResults.map(t => ({ toolName: t.toolName, args: t.input, result: t.output })),
+    )
+
+    // Save entry
+    const updatedEntries: ThreadEntry[] = [...entries, {
+      userMessage: message,
+      toolResults,
+      assistantMessage: result.text,
+    }]
+    await saveChatThread(this.#db, this.#sessionId, 'exoagent', updatedEntries, threadId)
+
+    return { text: result.text, toolResults }
   }
 
   // ExoAgent API - users query builder (protected, no wallet!)
