@@ -439,6 +439,7 @@ export function Challenge() {
                 <span className="text-neutral-400">
                   {' '}
                   — The compiler with
+                  {' '}
                   <code className="bg-neutral-800 px-1.5 py-0.5 rounded text-sm">unsafe</code>
                   {' '}
                   forbidden

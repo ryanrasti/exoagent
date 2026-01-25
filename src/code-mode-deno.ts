@@ -16,13 +16,14 @@ import { Readable, Writable } from 'node:stream'
  * @param options.denoPath - Path to deno executable (default: 'deno')
  * @returns A SafeEvalContext configured for Deno
  */
-export function createDenoSandbox(options: {
+export function createDenoSandbox<R>(options: {
   args?: string[]
   denoPath?: string
-} = {}): SafeEvalContext {
+} = {}): SafeEvalContext<R> {
   const { args = [], denoPath = 'deno' } = options
 
   return {
+    kind: 'direct',
     safeEval: async (code: string): Promise<SafeEvalResult> => {
       const tempDir = await mkdtemp(join(tmpdir(), 'exoagent-deno-'))
       const tempFile = join(tempDir, 'code.ts') // Deno can run TypeScript directly

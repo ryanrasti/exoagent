@@ -1,25 +1,13 @@
 import type { Tool, ToolExecutionOptions } from 'ai'
+import type { RpcTarget } from 'capnweb'
 import type { RpcToolset } from './rpc-toolset'
 import type { WrappableTools } from './tool-wrapper'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { RpcSession } from 'capnweb'
 import { z } from 'zod'
+// eslint-disable-next-line antfu/no-import-dist
+import runtimeCode from '../dist/code-mode-runtime.mjs?raw'
 import { StreamTransport } from './stream-transport'
 import { generateToolApi, generateToolTypes } from './tool-wrapper'
-
-// Lazy-load the bundled runtime code to avoid filesystem access at import time
-// This is important for environments like Cloudflare Workers that don't have fs access
-let _BUNDLED_RUNTIME_CODE: string | undefined
-function getBundledRuntimeCode(): string {
-  if (_BUNDLED_RUNTIME_CODE === undefined) {
-    _BUNDLED_RUNTIME_CODE = readFileSync(
-      fileURLToPath(new URL('../dist/code-mode-runtime.mjs', import.meta.url) as URL),
-      'utf-8',
-    )
-  }
-  return _BUNDLED_RUNTIME_CODE
-}
 
 export type SafeEvalResult = {
   wait: () => Promise<void>
@@ -27,21 +15,33 @@ export type SafeEvalResult = {
   output: WritableStream<Uint8Array>
 }
 
-export type SafeEvalContext = {
+export type SafeEvalContext<R> = {
+  kind: 'direct'
   safeEval: (code: string) => Promise<SafeEvalResult>
   // See code-mode-runtime.ts for the expected format of the sandbox context
   sandboxContext: string
+} | {
+  // We pass the code to the remote side to evaluate (over Cap'n Web),
+  // along with the API object:
+  kind: 'rpc'
+  safeEval: (code: string, api: RpcTarget) => Promise<R>
 }
 
 type FlatTools = { [key: string]: Tool } | Tool[]
 type RpcTools = { [key: string]: () => RpcToolset }
 
-export class CodeMode {
-  constructor(private context: SafeEvalContext) {}
+type ExecutableTool<R> = {
+  description: string
+  inputSchema: z.ZodSchema<{ code: string }>
+  execute: (input: { code: string }, opts: ToolExecutionOptions) => Promise<R>
+}
 
-  wrap(tools: FlatTools): Promise<Tool>
-  wrap(tools: RpcTools | FlatTools, dts: string): Promise<Tool>
-  async wrap(tools: WrappableTools, dts?: string): Promise<Tool> {
+export class CodeMode<R> {
+  constructor(private context: SafeEvalContext<R>) {}
+
+  wrap(tools: FlatTools): Promise<ExecutableTool<R>>
+  wrap(tools: RpcTools | FlatTools, dts: string): Promise<ExecutableTool<R>>
+  async wrap(tools: WrappableTools, dts?: string): Promise<ExecutableTool<R>> {
     // 1. Consume raw tools
 
     const typeDefinitions: string[] = []
@@ -52,8 +52,8 @@ export class CodeMode {
 
     // 2. Generate new tool that uses the tools (as classes)
     return {
-      description: `Write code to use the following tools:.
-        
+      description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.
+
         \`\`\`typescript
         ${definitions}
 
@@ -63,12 +63,13 @@ export class CodeMode {
 
         ${dts ? `// .d.ts for the \`RpcToolset\`s:\n${dts}` : ''}
 
-        You must write the code in the following format:
-        \`\`\`typescript
-            
-        
-            (api: Tools) => Promise<Returnable> {
-                // Call the tools here
+        Provide a valid **javascript** (NOT TypeScript) function taking a single argument of type \`Tools\` and returning
+        a value of type \`Promise<Returnable>\`.
+
+        Example:
+        \`\`\`javascript
+            (api) => {
+                // Call the API here (only vanilla JS is allowed)
                 // The returned result will be passed back into context
             }
         \`\`\`
@@ -76,19 +77,24 @@ export class CodeMode {
       inputSchema: z.object({
         code: z.string(),
       }),
-      execute: async ({ code }: { code: string }, opts: ToolExecutionOptions) => {
+      execute: async ({ code }: { code: string }, opts: ToolExecutionOptions): Promise<R> => {
+        const ToolApi = generateToolApi(tools, opts)
+        const api = new ToolApi(code)
+
+        if (this.context.kind === 'rpc') {
+          return await this.context.safeEval(code, api)
+        }
+
         // 1. Inject sandbox context into bundled runtime
-        const injectedCode = `globalThis.__SANDBOX_CONTEXT_PROMISE__ = ${this.context.sandboxContext};\n${getBundledRuntimeCode()}`
+        const injectedCode = `globalThis.__SANDBOX_CONTEXT_PROMISE__ = ${this.context.sandboxContext};\n${runtimeCode}`
         const { input, output, wait } = await this.context.safeEval(injectedCode)
 
         // 2. Hook up the input and output streams:
-        const ToolApi = generateToolApi(tools, opts)
-        const api = new ToolApi(code)
         const transport = new StreamTransport(input, output)
         const _session = new RpcSession(transport, api)
         // Remote side should have access to api via RPC and execute the code
         await wait()
-        return api.__return_value__
+        return api.__return_value__ as unknown as R
       },
     }
   }

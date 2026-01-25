@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers'
-import { Database, tool } from 'exoagent'
+import { tool } from 'exoagent'
+import { Database } from 'exoagent/sql'
 import { D1Dialect } from 'kysely-d1'
 
-export const db = new Database(new D1Dialect({ database: env.EXOAGENT_BOUNTY_DB }))
+const db = new Database(new D1Dialect({ database: env.EXOAGENT_BOUNTY_DB }))
 
 class Wallet extends db.Table('wallets').as('wallet') {
   id = this.column('id')
