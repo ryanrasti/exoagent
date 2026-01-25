@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { Challenge } from './Challenge'
 import { Landing } from './Landing'
+import { Terms } from './Terms'
 import './index.css'
 
 function ScrollToTop() {
@@ -20,6 +21,7 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/challenge" element={<Challenge />} />
+        <Route path="/terms" element={<Terms />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

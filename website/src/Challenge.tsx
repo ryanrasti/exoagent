@@ -1,9 +1,13 @@
 import type { Api } from '../worker/index'
+import type { Leaderboard } from './AgentChat'
 import { Turnstile } from '@marsidev/react-turnstile'
 import { newHttpBatchRpcSession } from 'capnweb'
 import React, { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import useSWR from 'swr'
 import { ExoAgentChat, RawSqlAgentChat } from './AgentChat'
 import { GITHUB_URL, GitHubLink, Layout } from './Layout'
+import { formatRelativeTime } from './utils'
 
 // Turnstile site keys - use dev key for localhost
 const TURNSTILE_SITE_KEY = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -16,43 +20,218 @@ const statColors = {
   neutral: { text: 'text-neutral-400', bg: 'bg-neutral-500/20' },
 }
 
-function StatCard({ value, loading, color, label }: { value: number | null, loading: boolean, color: keyof typeof statColors, label: string }) {
+function StatCard({ value, color, label }: { value: number | undefined, color: keyof typeof statColors, label: string }) {
   const { text, bg } = statColors[color]
+  const prevValueRef = useRef(value)
+  const [pulse, setPulse] = useState(false)
+
+  useEffect(() => {
+    if (prevValueRef.current != null && value !== prevValueRef.current) {
+      setPulse(true)
+      const timer = setTimeout(() => setPulse(false), 300)
+      return () => clearTimeout(timer)
+    }
+    prevValueRef.current = value
+  }, [value])
+
   return (
     <div className="text-center">
-      <div className={`text-3xl font-bold ${text}`}>
-        {loading ? <span className={`inline-block w-8 h-8 ${bg} rounded animate-pulse`} /> : value?.toLocaleString()}
+      <div className={`text-3xl font-bold ${text} transition-transform duration-300 ${pulse ? 'scale-125' : ''}`}>
+        {value != null ? value.toLocaleString() : <span className={`inline-block w-8 h-8 ${bg} rounded animate-pulse`} />}
       </div>
       <div className="text-sm text-neutral-500">{label}</div>
     </div>
   )
 }
 
+// Kill feed ticker - continuous marquee with relative timestamps
+function ActivityTicker({ leaderboard }: { leaderboard: Leaderboard | undefined }) {
+  const [, forceUpdate] = useState(0)
+
+  // Update relative times every 10 seconds
+  useEffect(() => {
+    const interval = setInterval(() => forceUpdate(n => n + 1), 10000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Empty space while loading or no entries
+  if (!leaderboard?.recent.length) {
+    return <div className="h-5" />
+  }
+
+  // Duplicate entries for seamless looping
+  const entries = leaderboard.recent.slice(0, 10)
+  const duplicatedEntries = [...entries, ...entries]
+
+  return (
+    <div className="overflow-hidden whitespace-nowrap text-sm h-5">
+      <div className="inline-flex gap-6 animate-ticker-continuous pl-[100%]">
+        {duplicatedEntries.map((entry, i) => (
+          <span key={`${entry.claimedAt}-${i}`} className="text-neutral-400">
+            <span className="text-red-500">💀</span>
+            {' '}
+            <span className="text-red-400">{entry.username}</span>
+            {' '}
+            hacked Raw SQL
+            {' '}
+            <span className="text-neutral-600">{formatRelativeTime(entry.claimedAt)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Big bounty alert - only for the $1000 ExoAgent bounty being claimed
+function BigBountyClaimedAlert({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 10000)
+    return () => clearTimeout(timer)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 animate-fade-in">
+      <div className="bg-green-950 border-2 border-green-500 rounded-xl p-8 shadow-2xl text-center animate-bounce-in">
+        <div className="text-6xl mb-4">🚨</div>
+        <div className="text-2xl font-bold text-green-400 mb-2">EXOAGENT HACKED!</div>
+        <div className="text-xl text-neutral-200 mb-4">
+          Someone just drained the ExoAgent bounty wallet!
+        </div>
+        <div className="text-neutral-400 text-sm">The ~$1,000 bounty has been claimed</div>
+        <button onClick={onClose} className="mt-6 px-6 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-200">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Wallet drained alert - shown when Raw SQL bounty is claimed
+function WalletDrainedAlert({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 10000)
+    return () => clearTimeout(timer)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 animate-fade-in">
+      <div className="bg-red-950 border-2 border-red-500 rounded-xl p-8 shadow-2xl text-center animate-bounce-in">
+        <div className="text-6xl mb-4 animate-pulse">💸</div>
+        <div className="text-2xl font-bold text-red-400 mb-2">WALLET DRAINED!</div>
+        <div className="text-xl text-neutral-200 mb-4">
+          Someone just extracted the private key and swept the funds!
+        </div>
+        <button onClick={onClose} className="mt-6 px-6 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-200">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Unified bounty display with live BTC balance and mempool link
+function BountyAmount({
+  wallet,
+  color,
+  isLive,
+}: {
+  wallet: { balanceSats: number, expectedSats: number, address: string } | undefined
+  color: 'red' | 'green'
+  isLive: boolean
+}) {
+  const styles = {
+    red: { text: 'text-red-400', bg: 'bg-red-500/20' },
+    green: { text: 'text-green-400', bg: 'bg-green-500/20' },
+  }[color]
+
+  if (!wallet) {
+    return <span className={`inline-block w-20 h-4 ${styles.bg} rounded animate-pulse`} />
+  }
+
+  const { balanceSats, expectedSats, address } = wallet
+  // Drained if <10% of expected
+  const isDrained = balanceSats < expectedSats * 0.1
+  const btc = expectedSats / 100_000_000
+  // Rough dollar estimate based on ~$85k/BTC
+  const dollarAmount = `~$${Math.round(expectedSats / 100_000_000 * 85000).toLocaleString()}`
+  const statusLabel = isDrained ? (isLive ? 'DRAINED' : 'unfunded') : null
+
+  return (
+    <>
+      {statusLabel && (
+        <span className={`${styles.text} font-bold`}>
+          {statusLabel}
+          {' '}
+        </span>
+      )}
+      <span className={isDrained ? 'text-neutral-500 line-through' : styles.text}>{dollarAmount}</span>
+      {' '}
+      <a
+        href={`https://mempool.space/address/${address}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`text-xs hover:text-neutral-400 underline ${isDrained ? 'text-neutral-600' : 'text-neutral-500'}`}
+      >
+        (
+        <span className={isDrained ? 'line-through' : ''}>{btc.toFixed(5)}</span>
+        {' '}
+        BTC)
+      </a>
+    </>
+  )
+}
+
 export function Challenge() {
-  const [{ hackCount, attemptCount, fresh }, setStats] = useState<{ hackCount: number | null, attemptCount: number | null, fresh: boolean }>({ hackCount: null, attemptCount: null, fresh: false })
   const [hideTurnstile, setHideTurnstile] = useState(false)
   const [nonce] = useState(crypto.randomUUID())
+  const [showBigBountyAlert, setShowBigBountyAlert] = useState(false)
+  const [showDrainedAlert, setShowDrainedAlert] = useState(false)
   const { current: { promise: sessionIdPromise, resolve: sessionIdResolve, reject: sessionIdReject } } = useRef(Promise.withResolvers<string>())
+  const prevRawSqlBalanceRef = useRef<number | null>(null)
+  const prevExoagentBalanceRef = useRef<number | null>(null)
 
-  // Fetch stats on mount using RPC
+  // SWR for polling stats (no session required, available on Api)
+  const { data: stats } = useSWR(
+    'stats',
+    async () => {
+      using api = newHttpBatchRpcSession<Api>('/api/bounty/rpc')
+      return await api.stats()
+    },
+    { refreshInterval: 5000, revalidateOnFocus: true },
+  )
+
+  // Detect drain and show alerts (only if live and we observe the transition)
+  const rawSqlWallet = stats?.wallets.rawSql
+  const exoagentWallet = stats?.wallets.exoagent
+
   useEffect(() => {
-    (async () => {
-      try {
-        const sessionId = await sessionIdPromise
-        const agent = newHttpBatchRpcSession<Api>('/api/bounty/rpc').currentSession({
-          sessionId,
-        })
-        const { hackCount, attemptCount, fresh } = await agent.stats()
-        setStats({ hackCount, attemptCount, fresh })
+    if (stats?.isLive && rawSqlWallet) {
+      const prev = prevRawSqlBalanceRef.current
+      // Show alert if previous fetch was >= 10% and now it's < 10%
+      if (prev != null && prev >= rawSqlWallet.expectedSats * 0.1 && rawSqlWallet.balanceSats < rawSqlWallet.expectedSats * 0.1) {
+        setShowDrainedAlert(true)
       }
-      catch (error) {
-        console.error('error fetching stats', error)
+      prevRawSqlBalanceRef.current = rawSqlWallet.balanceSats
+    }
+  }, [stats?.isLive, rawSqlWallet])
+
+  useEffect(() => {
+    if (stats?.isLive && exoagentWallet) {
+      const prev = prevExoagentBalanceRef.current
+      // Show alert if previous fetch was >= 10% and now it's < 10%
+      if (prev != null && prev >= exoagentWallet.expectedSats * 0.1 && exoagentWallet.balanceSats < exoagentWallet.expectedSats * 0.1) {
+        setShowBigBountyAlert(true)
       }
-    })()
-  }, [])
+      prevExoagentBalanceRef.current = exoagentWallet.balanceSats
+    }
+  }, [stats?.isLive, exoagentWallet])
 
   return (
     <Layout headerRight={<GitHubLink>Star on GitHub</GitHubLink>}>
+      {/* Alerts */}
+      {showBigBountyAlert && <BigBountyClaimedAlert onClose={() => setShowBigBountyAlert(false)} />}
+      {showDrainedAlert && <WalletDrainedAlert onClose={() => setShowDrainedAlert(false)} />}
+
       {/* Turnstile challenge - centered when visible */}
       {!hideTurnstile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none *:pointer-events-auto">
@@ -77,26 +256,32 @@ export function Challenge() {
       <section className="px-8 py-12 max-w-6xl mx-auto">
         <h1 className="text-4xl md:text-5xl font-bold text-center mb-4">
           Hack this agent. Win Bitcoin.
-          <span className="ml-3 text-lg font-normal text-amber-500 align-middle">(v0.1 preview)</span>
+          {stats && !stats.isLive && <span className="ml-3 text-lg font-normal text-amber-500 align-middle">(v0.1 preview)</span>}
         </h1>
         <p className="text-xl text-neutral-400 text-center max-w-2xl mx-auto mb-4">
           Both agents have the same LLM, same database, same prompt injection vulnerability.
           Only one can be exploited.
         </p>
-        <p className="text-lg text-amber-500 text-center max-w-2xl mx-auto mb-8">
+        <p className="text-lg text-amber-500 text-center max-w-2xl mx-auto mb-4">
           Extract the private key from the ExoAgent database and the
           {' '}
           <span className="font-bold">BTC is yours</span>
-          .
+          .*
+        </p>
+        <p className="text-sm text-neutral-500 text-center">
+          <Link to="/terms" className="hover:text-neutral-400 underline">*Bounty terms</Link>
         </p>
       </section>
 
-      {/* Stats bar */}
+      {/* Stats bar with ticker */}
       <section className="px-8 py-4 bg-neutral-900 border-y border-neutral-800">
-        <div className="max-w-6xl mx-auto flex justify-center gap-12">
-          <StatCard value={hackCount} loading={!fresh} color="red" label="Times Raw SQL hacked" />
-          <StatCard value={0} loading={!fresh} color="green" label="Times ExoAgent hacked" />
-          <StatCard value={attemptCount} loading={!fresh} color="neutral" label="ExoAgent hack attempts" />
+        <div className="max-w-6xl mx-auto">
+          <div className="flex justify-center gap-12 mb-3">
+            <StatCard value={stats?.hackCount} color="red" label="Times Raw SQL hacked" />
+            <StatCard value={stats ? 0 : undefined} color="green" label="Times ExoAgent hacked" />
+            <StatCard value={stats?.attemptCount} color="neutral" label="ExoAgent hack attempts" />
+          </div>
+          <ActivityTicker leaderboard={stats?.leaderboard} />
         </div>
       </section>
       {/* Side-by-side agents */}
@@ -104,36 +289,42 @@ export function Challenge() {
         <div className="grid md:grid-cols-2 gap-8">
           {/* Raw SQL Agent (Hackable) */}
           <div className="border border-red-900/50 rounded-xl overflow-hidden bg-neutral-900/50">
-            <div className="px-6 py-4 bg-red-950/30 border-b border-red-900/50">
+            <div className="px-6 py-4 border-b bg-red-950/30 border-red-900/50">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-red-500 text-2xl">💀</span>
+                <span className="text-2xl">💀</span>
                 <h2 className="text-xl font-bold text-red-400">Raw SQL Agent</h2>
               </div>
               <p className="text-sm text-neutral-400">
                 Standard LLM with direct SQL access.
                 {' '}
-                <span className="text-red-400">$1 bounty</span>
-                {' '}
-                (refreshes daily)
+                <BountyAmount
+                  wallet={stats?.wallets.rawSql}
+                  color="red"
+                  isLive={stats?.isLive ?? false}
+                />
               </p>
             </div>
-            <RawSqlAgentChat sessionIdPromise={sessionIdPromise} />
+            <RawSqlAgentChat sessionIdPromise={sessionIdPromise} leaderboard={stats?.leaderboard} isLive={stats?.isLive ?? false} />
           </div>
 
           {/* ExoAgent (Protected) */}
           <div className="border border-green-900/50 rounded-xl overflow-hidden bg-neutral-900/50">
-            <div className="px-6 py-4 bg-green-950/30 border-b border-green-900/50">
+            <div className="px-6 py-4 border-b bg-green-950/30 border-green-900/50">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-green-500 text-2xl">🛡️</span>
+                <span className="text-2xl">🛡️</span>
                 <h2 className="text-xl font-bold text-green-400">ExoAgent Protected</h2>
               </div>
               <p className="text-sm text-neutral-400">
                 Same LLM, execution-layer security.
                 {' '}
-                <span className="text-green-400">$1,000 bounty</span>
+                <BountyAmount
+                  wallet={stats?.wallets.exoagent}
+                  color="green"
+                  isLive={stats?.isLive ?? false}
+                />
               </p>
             </div>
-            <ExoAgentChat sessionIdPromise={sessionIdPromise} />
+            <ExoAgentChat sessionIdPromise={sessionIdPromise} isLive={stats?.isLive ?? false} />
           </div>
         </div>
       </section>
