@@ -152,6 +152,7 @@ export function Landing() {
                 <h3 className="font-semibold text-white">Semantic interfaces</h3>
                 <p className="text-neutral-400">
                   The compiler with
+                  {' '}
                   <code className="bg-neutral-800 px-1.5 py-0.5 rounded text-sm">unsafe</code>
                   {' '}
                   forbidden

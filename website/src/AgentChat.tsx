@@ -1,3 +1,4 @@
+import type { RpcTarget } from 'capnweb'
 import type { Database } from 'sql.js'
 import type { Api, CodeResult, SqlResult } from '../worker/index'
 import { explicitCallback, newHttpBatchRpcSession, newWebSocketRpcSession, setGlobalRpcSessionOptions } from 'capnweb'
@@ -525,16 +526,16 @@ export function ExoAgentChat({ sessionIdPromise, isLive }: { sessionIdPromise: P
     })
     using agent = api.currentSession({ sessionId: await sessionIdPromise })
 
-    return await agent.chatExoAgent(message, explicitCallback(async (code: string): Promise<CodeResult> => {
+    return await agent.chatExoAgent(message, explicitCallback(async (code: string, api: RpcTarget): Promise<CodeResult> => {
       // eslint-disable-next-line no-console
       console.log('executing code', code)
-      // eslint-disable-next-line no-new-func -- we're running this code (that the user is prompting) intentionally for the hack challenge
-      const fn = new Function('api', `return (async (api) => { return ${code} })(api)`)
+
       let queryResult: unknown
+
       try {
-        queryResult = await fn({
-          users: () => agent.users(),
-        })
+        // eslint-disable-next-line no-new-func -- we're running this code (that the user is prompting) intentionally for the hack challenge
+        const fn = new Function('api', `return (${code})(api)`)
+        queryResult = await fn(api)
       }
       catch (error) {
         console.error('error executing code', error)

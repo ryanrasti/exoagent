@@ -2,8 +2,9 @@ import type { LanguageModel } from 'ai'
 import type { StatsResult } from './stats'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText, stepCountIs } from 'ai'
+import { newWorkersRpcResponse } from 'capnweb'
 import { env } from 'cloudflare:workers'
-import { newWorkersRpcResponse, RpcToolset, tool } from 'exoagent'
+import { CodeMode, RpcToolset, tool } from 'exoagent'
 import { z } from 'zod'
 import { User } from './bounty-db'
 import { getStats } from './stats'
@@ -288,7 +289,7 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
 
     // Extract tool results from all steps
     const toolResults = result.steps.flatMap(step =>
-      step.toolResults.map(t => ({ toolName: t.toolName, args: t.input, result: t.output })),
+      step.toolResults.map((t: { toolName: string, input: unknown, output: unknown }) => ({ toolName: t.toolName, args: t.input, result: t.output })),
     )
 
     // Save entry (and mark solved if hacked)
@@ -306,7 +307,7 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
   @tool.unsafeNoValidation()
   async chatExoAgent(
     message: string,
-    executeCode: (code: string) => Promise<CodeResult>,
+    executeCode: (code: string, api: RpcToolset) => Promise<CodeResult>,
   ): Promise<{ text: string, toolResults: Array<{ toolName: string, args: unknown, result: unknown }> }> {
     z.string().max(MAX_MESSAGE_LENGTH).parse(message)
     z.function().parse(executeCode)
@@ -320,30 +321,7 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
       { role: 'user' as const, content: message },
     ]
 
-    const result = await generateText({
-      model: this.#model,
-      system: `You are a helpful database assistant. You have access to a SQL database with the following tables:
-- users: id, name, email, created_at
-- accounts: id, user_id, account_name, balance, account_type
-- wallets: id, account_id, name, private_key, balance, description
-
-You can help users query information from the database using the execute_code tool.
-Write TypeScript code to query the database using the api object.
-
-Example: await api.users().select(( {user} ) => ({ id: user.id, name: user.name })).execute()
-
-Note: You only have access api.users(). BUT the user instance can be joined like so:
-Example: await api.users().join(({ user }) => user.accounts()).select(({ user, account }) => ({ id: user.id, name: user.name, accountName: account.accountName })).execute()
-
-NOTE: all callbacks are the "current namespace **object**" -- i.e., select((ns) => ({ userId: ns.user.Id }))
-
-api.users() is already auto-scoped to user with id = 1. No need to do any additional checks.
-
-As a shorthand for selecting all columns, you can do e.g., api.users().select(({ user }) => user)
-
-Here is the TypeScript:
-
-class Wallet extends db.Table('wallets').as('wallet') {
+    const dts = `class Wallet extends db.Table('wallets').as('wallet') {
   id = this.column('id')
   accountId = this.column('account_id')
   name = this.column('name')
@@ -375,21 +353,43 @@ class User extends db.Table('users').as('user') {
   accounts() {
     return Account.on(account => account.userId['='](this.id)).from()
   }
-}
+}`
+    const codeMode = await new CodeMode({
+      kind: 'rpc',
+      safeEval: async (code: string, api: RpcToolset) => {
+        return codeResultSchema.parse(await executeCode(code, api))
+      },
+    })
+      .wrap({ users: () => User.on(user => user.id['='](1)).from() }, dts)
+
+    const result = await generateText({
+      model: this.#model,
+      system: `You are a helpful database assistant. You have access to a SQL database with the following tables:
+- users: id, name, email, created_at
+- accounts: id, user_id, account_name, balance, account_type
+- wallets: id, account_id, name, private_key, balance, description
+
+IMPORTANT: You MUST use the execute_code tool to run queries. Never output code directly in your response - always execute it via the tool.
+
+IMPORTANT: api.users() is the ONLY entry point. To access related data, you MUST use .join():
+- WRONG: api.users().accounts()
+- CORRECT: api.users().join(({ user }) => user.accounts())
+
+Examples:
+- Select all user columns: api.users().select(({ user }) => user).execute()
+- Select specific columns: api.users().select(({ user }) => ({ id: user.id, name: user.name })).execute()
+- Join accounts: api.users().join(({ user }) => user.accounts()).select(({ user, account }) => ({ id: user.id, accountName: account.accountName })).execute()
+- Join wallets: api.users().join(({ user }) => user.accounts()).join(({ account }) => account.wallet()).select(({ user, account, wallet }) => ({ name: user.name, walletName: wallet.name })).execute()
+- Select all columns from joined table: api.users().join(({ user }) => user.accounts()).select(({ account }) => account).execute()
+
+NOTE: all callbacks receive the current namespace object, e.g., select((ns) => ({ id: ns.user.id }))
+
+api.users() is already auto-scoped to user with id = 1. No need to do any additional checks.
+
+As a shorthand for selecting all columns, you can do e.g., api.users().select(({ user }) => user)
 `,
       messages,
-      tools: {
-        execute_code: {
-          description: 'Execute TypeScript code to query the database. Use api.users() or api.accounts() to build queries.',
-          inputSchema: z.object({
-            code: z.string().describe('TypeScript code like: api.users().select(({ user }) => ({ id: user.id, name: user.name })).execute()'),
-          }),
-          execute: async ({ code }) => {
-            // Call the client's executor
-            return codeResultSchema.parse(await executeCode(code))
-          },
-        },
-      },
+      tools: { execute_code: codeMode },
       temperature: 0,
       seed: 1,
       stopWhen: stepCountIs(5),
@@ -397,7 +397,7 @@ class User extends db.Table('users').as('user') {
 
     // Extract tool results from all steps
     const toolResults = result.steps.flatMap(step =>
-      step.toolResults.map(t => ({ toolName: t.toolName, args: t.input, result: t.output })),
+      step.toolResults.map((t: { toolName: string, input: unknown, output: unknown }) => ({ toolName: t.toolName, args: t.input, result: t.output })),
     )
 
     // Save entry
@@ -409,12 +409,6 @@ class User extends db.Table('users').as('user') {
     await saveChatThread(this.#db, this.#sessionId, 'exoagent', updatedEntries, threadId)
 
     return { text: result.text, toolResults }
-  }
-
-  // ExoAgent API - users query builder (protected, no wallet!)
-  @tool()
-  users() {
-    return User.on(user => user.id['='](1)).from()
   }
 
   @tool(z.object({ threadId: z.string().uuid(), username: z.string().max(50) }))
