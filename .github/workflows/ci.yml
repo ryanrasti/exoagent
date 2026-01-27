@@ -24,6 +24,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cd website && npm ci
+      - run: cd examples && npm ci
       - run: npm run lint
       - run: npm run typecheck
 
@@ -54,3 +55,4 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test
+      - run: cd examples && npm ci &&npm run ci

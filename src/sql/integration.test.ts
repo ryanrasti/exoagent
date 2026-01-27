@@ -1,6 +1,8 @@
 import { setGlobalRpcSessionOptions } from 'capnweb'
 import { describe, expect, it } from 'vitest'
 import { TestHarness } from '../capnweb-test-helpers'
+import { CodeMode } from '../code-mode'
+import { createDenoSandbox } from '../code-mode-deno'
 import { RpcToolset, tool } from '../rpc-toolset'
 import { Database } from './builder'
 import { sql } from './sql'
@@ -64,9 +66,9 @@ describe('sql integration over capnweb', () => {
       name: user.name,
     }))
 
-    const result = await query.execute()
+    const { results } = await query.execute()
 
-    expect(result).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
+    expect(results).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
   })
 
   it('executes a join query over RPC', async () => {
@@ -85,22 +87,22 @@ describe('sql integration over capnweb', () => {
       title: (post as Post).title,
     }))
 
-    const result = await query.execute()
+    const { results } = await query.execute()
 
-    expect(result).toEqual([{ id: 1, name: 'John Doe', title: 'Hello, world!' }, { id: 2, name: 'Jane Doe', title: 'Hello, world!' }])
+    expect(results).toEqual([{ id: 1, name: 'John Doe', title: 'Hello, world!' }, { id: 2, name: 'Jane Doe', title: 'Hello, world!' }])
   })
 
   it('executes a query in a `map` (no `usings` needed)', async () => {
     await using harness = new TestHarness(new Api())
     const api = harness.stub
 
-    const result = await api.map(api =>
+    const { results } = await api.map(api =>
       api.users().select(({ user }) => ({
         id: user.id,
         name: user.name,
       })).execute(),
     )
-    expect(result).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
+    expect(results).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
   })
 
   it('executes a nested closures in a `map` (no `usings` needed)', async () => {
@@ -114,7 +116,7 @@ describe('sql integration over capnweb', () => {
     await using harness = new TestHarness(new Api())
     const api = harness.stub
 
-    const result = await api.map(api =>
+    const { results } = await api.map(api =>
       api.users()
         // TODO: for some reaons we need the explicit `{ user: User }` so that the right
         //   type is inferred later.
@@ -134,7 +136,7 @@ describe('sql integration over capnweb', () => {
         }))
         .execute(),
     )
-    expect(result).toEqual([{ userName: 'John Doe', postUserName: 'John Doe', userId: 1, postId: 1, postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postUserName: 'Jane Doe', userId: 2, postId: 2, postTitle: 'Hello, world!' }])
+    expect(results).toEqual([{ userName: 'John Doe', postUserName: 'John Doe', userId: 1, postId: 1, postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postUserName: 'Jane Doe', userId: 2, postId: 2, postTitle: 'Hello, world!' }])
   })
 
   it('cannot reference own properties', async () => {
@@ -164,10 +166,67 @@ describe('sql integration over capnweb', () => {
     await using harness = new TestHarness(new Api())
     const api = harness.stub
 
-    const result = await api.map(api =>
+    const { results } = await api.map(api =>
       api.users().join(({ user }) => user.posts()).select(({ user, post }) => ({ userName: user.name, postTitle: post.title })).execute(),
     )
 
-    expect(result).toEqual([{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }])
+    expect(results).toEqual([{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }])
   })
+})
+
+describe('sql integration with deno sandbox', () => {
+  it('executes a basic select via CodeMode', async () => {
+    const codeMode = new CodeMode(createDenoSandbox())
+    const codeTool = await codeMode.wrap({
+      users: () => User.from(),
+    }, `class User extends db.Table('users').as('user') {
+  id = this.column('id')
+  name = this.column('name')
+  email = this.column('email')
+}`)
+
+    const result = await codeTool.execute({
+      code: `async ({ users }) => {
+        return await users()
+          .select(({ user }) => ({ id: user.id, name: user.name }))
+          .execute()
+      }`,
+    }, { toolCallId: 'test-1', messages: [] })
+
+    expect(result).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
+  }, 10000)
+
+  it('executes a join via CodeMode', async () => {
+    const codeMode = new CodeMode(createDenoSandbox())
+    const codeTool = await codeMode.wrap({
+      users: () => User.from(),
+    }, `class User extends db.Table('users').as('user') {
+  id = this.column('id')
+  name = this.column('name')
+  email = this.column('email')
+
+  @tool()
+  posts() {
+    return Post.on(post => post.userId['='](this.id)).from()
+  }
+}
+
+class Post extends db.Table('posts').as('post') {
+  id = this.column('id')
+  userId = this.column('user_id')
+  title = this.column('title')
+  content = this.column('content')
+}`)
+
+    const result = await codeTool.execute({
+      code: `async ({ users }) => {
+        return await users()
+          .join(({ user }) => user.posts())
+          .select(({ user, post }) => ({ userName: user.name, postTitle: post.title }))
+          .execute()
+      }`,
+    }, { toolCallId: 'test-2', messages: [] })
+
+    expect(result).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
+  }, 10000)
 })

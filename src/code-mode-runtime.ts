@@ -2,8 +2,10 @@
 // This gets bundled with capnweb and StreamTransport, then injected into safeEval
 
 import type { ToolApi } from './tool-wrapper'
-import { RpcSession } from 'capnweb'
+import { RpcSession, setGlobalRpcSessionOptions } from 'capnweb'
 import { StreamTransport } from './stream-transport'
+
+setGlobalRpcSessionOptions(() => ({ recordReplayMode: 'all' }))
 
 declare const __SANDBOX_CONTEXT_PROMISE__: Promise<{
   input: ReadableStream<Uint8Array>
