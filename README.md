@@ -11,7 +11,7 @@ Today's agent frameworks give LLMs raw access to tools. The "security model" is 
 
 - 🚨 **Authorization is broken:** Tool calls inherit *your* full permissions. You asked for dinner delivery; your driver got your wallet.
 - 🌫️ **Interfaces are opaque:** `execute_sql("SELECT * FROM users")` is a black box. Policy engines can't enforce constraints on raw strings.
-- 🕸️ **No central policy:** Each tool enforces its own rules. There is no OS-level guarantee that data doesn't leak.
+- 🕸️ **No central policy:** Each tool enforces its own rules. There is no way to guarantee that data doesn't leak across them.
 
 ## The Fix: Deterministic security, not Prompts
 
@@ -25,6 +25,10 @@ It doesn't matter if the LLM gets jailbroken. It runs inside a sandbox where inv
 
 ```bash
 npm install exoagent ai
+
+# These two depend on your config
+npm install @ai-sdk/google # ...or the model provider you plan to use
+npm install better-sqlite3 # ...or the database you plan to use (Kysely compatible only)
 ```
 
 ### 2. Define your Safe Interface
@@ -109,9 +113,9 @@ Note the examples require:
 1. NodeJS (runtime)
 2. [Deno](https://docs.deno.com/runtime/getting_started/installation/) (sandbox)
 3. An LLM API key set via one of the env vars:
-  * OPENAI_API_KEY
-  * ANTHROPIC_API_KEY
-  * GOOGLE_GENERATIVE_AI_API_KEY
+   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - `GOOGLE_GENERATIVE_AI_API_KEY`
 
 ## Architecture
 ExoAgent sits between your LLM and your infrastructure as a regular tool.
@@ -119,10 +123,10 @@ ExoAgent sits between your LLM and your infrastructure as a regular tool.
 2. **Runtime**: Runs in a JS code sandbox (user-configured; Deno supported out of the box, more to come).
 3. **Query Builder**: Uses a custom capability SQL builder that compiles to safe SQL.
 
-## Project Status
-This project is on the bleeding edge of agent tooling. There may be bugs in the implementation, but the author believes the core technology is solid.
+## ⚠️ Project Status: Experimental (v0.0.x)
+ExoAgent is an exploration of capability-based security for LLMs. While the architecture (OCaps + Sandboxing) is theoretically robust, this specific implementation is new and may contain bugs.
 
-It is pre-1.0 and experimental, but we're confident enough we're putting real money on the line.
+**The Guarantee**: We are confident enough in the core design that we are putting real money on the line. If you find a bypass, you get paid.
 
 ## Roadmap
 
@@ -133,11 +137,13 @@ It is pre-1.0 and experimental, but we're confident enough we're putting real mo
 
 ### FAQs
 **Q: Why not just use RLS (row-level security)?**
+
 A: Two main reasons:
 1. **Defense in Depth:** RLS has existed for a decade, yet no security team allows raw, untrusted SQL to run against production databases. You still need protection against resource exhaustion, unsafe functions, and column-level leaks.
 2. **Logic beyond the DB:** RLS is locked to the database. ExoAgent is a **general-purpose policy layer**. We want to enforce rules that span systems, like: *"The `email` column is PII. PII cannot be sent to the Slack tool."*
 
 **Q: Why not just use "LLM Guardrails" or System Prompts?**
+
 A: Those are **Probabilistic**. Guardrails reduce the *likelihood* of a breach, but they don't eliminate it. In security, a 99% success rate is a failing grade. ExoAgent provides **Deterministic** security—if the agent doesn't have the capability, the action is mathematically impossible.
 
 ## License

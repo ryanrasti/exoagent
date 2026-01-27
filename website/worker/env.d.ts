@@ -6,6 +6,7 @@ declare namespace Cloudflare {
     TURNSTILE_SECRET_KEY: string
     RAW_SQL_BOUNTY_KEY: string // BTC private key for raw SQL $20 bounty
     CTF_IS_LIVE: string // 'true' when CTF is live, controls preview mode
+    RAW_SQL_BOUNTY_CLAIMED: string // 'true' when raw SQL bounty has been claimed (manual override)
   }
 }
 

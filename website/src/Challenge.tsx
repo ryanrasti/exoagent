@@ -304,7 +304,7 @@ export function Challenge() {
                 />
               </p>
             </div>
-            <RawSqlAgentChat sessionIdPromise={sessionIdPromise} leaderboard={stats?.leaderboard} isLive={stats?.isLive ?? false} />
+            <RawSqlAgentChat sessionIdPromise={sessionIdPromise} leaderboard={stats?.leaderboard} isBountyClaimed={stats?.isRawSqlBountyClaimed ?? false} />
           </div>
 
           {/* ExoAgent (Protected) */}
@@ -324,7 +324,7 @@ export function Challenge() {
                 />
               </p>
             </div>
-            <ExoAgentChat sessionIdPromise={sessionIdPromise} isLive={stats?.isLive ?? false} />
+            <ExoAgentChat sessionIdPromise={sessionIdPromise} />
           </div>
         </div>
       </section>
