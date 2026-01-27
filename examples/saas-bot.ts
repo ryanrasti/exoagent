@@ -288,8 +288,8 @@ Use the execute tool to query the database. The API provides:
 - task.comments(): Returns a task's comments
 
 Examples:
-- api.organization().join(({ org }) => org.members()).select(({ member }) => member).execute()
-- api.organization().join(({ org }) => org.projects()).join(({ project }) => project.tasks()).select(({ project, task }) => ({ projectName: project.name, taskName: task.title })).execute()
+- (api) => api.organization().join(({ org }) => org.members()).select(({ member }) => member).execute()
+- (api) => api.organization().join(({ org }) => org.projects()).join(({ project }) => project.tasks()).select(({ project, task }) => ({ projectName: project.name, taskName: task.title })).execute()
 
 Always use .execute() at the end of your query chains.`,
     prompt: userPrompt,
