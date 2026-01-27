@@ -22,4 +22,4 @@ jobs:
       - run: npm run build
       - run: ./bin/bump-and-publish.sh
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_//registry.npmjs.org/:_authToken: ${{ secrets.NODE_AUTH_TOKEN }}
