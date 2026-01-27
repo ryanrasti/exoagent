@@ -34,6 +34,7 @@ export type StatsResult = {
   attemptCount: number
   leaderboard: { last24h: Array<{ username: string, claimedAt: string }>, recent: Array<{ username: string, claimedAt: string }> }
   isLive: boolean
+  isRawSqlBountyClaimed: boolean
   wallets: {
     rawSql: { balanceSats: number, expectedSats: number, address: string }
     exoagent: { balanceSats: number, expectedSats: number, address: string }
@@ -74,6 +75,10 @@ export function getStats(db: D1Database): Promise<StatsResult> {
         fetchWalletBalance(EXOAGENT_WALLET.address, EXOAGENT_WALLET.expectedSats),
       ])
 
+      // Bounty is claimed if: explicit flag OR balance dropped below 10%
+      const rawSqlBalancePercent = rawSqlBalance / RAW_SQL_WALLET.expectedSats
+      const isRawSqlBountyClaimed = env.RAW_SQL_BOUNTY_CLAIMED === 'true' || rawSqlBalancePercent < 0.1
+
       return {
         hackCount: counts?.hack_count ?? 0,
         attemptCount: counts?.attempt_count ?? 0,
@@ -82,6 +87,7 @@ export function getStats(db: D1Database): Promise<StatsResult> {
           recent: recent.results ?? [],
         },
         isLive: env.CTF_IS_LIVE === 'true',
+        isRawSqlBountyClaimed,
         wallets: {
           rawSql: { balanceSats: rawSqlBalance, expectedSats: RAW_SQL_WALLET.expectedSats, address: RAW_SQL_WALLET.address },
           exoagent: { balanceSats: exoagentBalance, expectedSats: EXOAGENT_WALLET.expectedSats, address: EXOAGENT_WALLET.address },

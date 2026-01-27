@@ -413,7 +413,7 @@ As a shorthand for selecting all columns, you can do e.g., api.users().select(({
     return { text: result.text, toolResults }
   }
 
-  @tool(z.object({ threadId: z.string().uuid(), username: z.string().max(50) }))
+  @tool(z.object({ threadId: z.string().uuid(), username: z.string().max(15) }))
   async claimSolve(input: { threadId: string, username: string }): Promise<{ success: boolean }> {
     const now = new Date().toISOString()
     // Only allow claiming if is_solved=1 and not already claimed
