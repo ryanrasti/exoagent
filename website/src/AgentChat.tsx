@@ -6,6 +6,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import initSql from '../migrations/0001_init.sql?raw'
+import { ToolResult } from './ToolResult'
 import { formatRelativeTime } from './utils'
 
 interface Message {
@@ -286,28 +287,7 @@ export function AgentChat({ chat, onHacked, placeholder, emptyState, accentColor
             {message.toolResults && message.toolResults.length > 0 && (
               <div className="ml-4 space-y-1">
                 {message.toolResults.map((tr, i) => (
-                  <div key={i} className="text-xs bg-neutral-900 rounded p-2 font-mono">
-                    <div className="text-neutral-500">
-                      →
-                      {' '}
-                      {tr.toolName}
-                      (
-                      {JSON.stringify(tr.args)}
-                      )
-                    </div>
-                    <div className={`mt-1 ${
-                      (tr.result as { blocked?: boolean })?.blocked
-                        ? 'text-red-400'
-                        : (tr.result as { error?: string })?.error
-                            ? 'text-amber-400'
-                            : (tr.result as SqlResult)?.hacked
-                                ? 'text-red-500 font-bold animate-pulse'
-                                : 'text-green-400'
-                    }`}
-                    >
-                      {JSON.stringify(tr.result, null, 2)}
-                    </div>
-                  </div>
+                  <ToolResult key={i} toolName={tr.toolName} args={tr.args} result={tr.result} />
                 ))}
               </div>
             )}
@@ -473,7 +453,7 @@ export function RawSqlAgentChat({ sessionIdPromise, leaderboard, isLive }: { ses
         const results = executeQuery(db, sql)
         // eslint-disable-next-line no-console
         console.log('results', results)
-        return { results }
+        return { results, sql }
       }
       catch (error) {
         console.error('error executing sql', error)
@@ -541,7 +521,7 @@ export function ExoAgentChat({ sessionIdPromise, isLive }: { sessionIdPromise: P
         console.error('error executing code', error)
         throw error
       }
-      return { results: Array.isArray(queryResult) ? queryResult : [queryResult] }
+      return queryResult as CodeResult
     }, 'stub'))
   }
 

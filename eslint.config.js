@@ -22,6 +22,7 @@ export default antfu(
       'antfu/top-level-function': 'off',
       'style/max-statements-per-line': 'off',
       'ts/no-this-alias': 'off',
+      'antfu/no-top-level-await': 'off',
     },
   },
 )

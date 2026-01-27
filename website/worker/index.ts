@@ -24,6 +24,7 @@ interface ChatMessage {
 // Result types
 export const sqlResultSchema = z.object({
   results: z.array(z.record(z.unknown())).optional(),
+  sql: z.string().optional(),
   error: z.string().optional(),
   hacked: z.boolean().optional(),
 })
@@ -32,8 +33,9 @@ export type SqlResult = z.infer<typeof sqlResultSchema>
 
 export const codeResultSchema = z.object({
   results: z.array(z.unknown()).optional(),
+  sql: z.string().optional(),
+  parameters: z.array(z.unknown()).optional(),
   error: z.string().optional(),
-  blocked: z.boolean().optional(),
 })
 
 export type CodeResult = z.infer<typeof codeResultSchema>

@@ -3,7 +3,7 @@ import { tool } from 'exoagent'
 import { Database } from 'exoagent/sql'
 import { D1Dialect } from 'kysely-d1'
 
-const db = new Database(new D1Dialect({ database: env.EXOAGENT_BOUNTY_DB }))
+const db = new Database(new D1Dialect({ database: env.EXOAGENT_BOUNTY_DB }), { returnExecutedQuery: true })
 
 class Wallet extends db.Table('wallets').as('wallet') {
   id = this.column('id')

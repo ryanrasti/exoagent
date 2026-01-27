@@ -269,8 +269,8 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   }
 
   @tool()
-  async execute(): Promise<{ [key in keyof S]: unknown }[]> {
-    return await this.#db.execute(this.compile()) as { [key in keyof S]: unknown }[]
+  async execute(): Promise<{ results: { [key in keyof S]: unknown }[], sql?: string, parameters?: readonly unknown[] }> {
+    return await this.#db.execute(this.compile()) as { results: { [key in keyof S]: unknown }[], sql?: string, parameters?: readonly unknown[] }
   }
 
   // Note, we use `= () => ` to ensure the method is a direct property of the class instance,
@@ -432,9 +432,9 @@ const table = <N extends string>(db: Database, name: N): TableClass<N> => {
 
 export class Database {
   private kysely?: Kysely<any>
-  constructor(private dialect: Dialect, private opts?: { logQuery?: (raw: CompiledQuery) => void }) {}
+  constructor(private dialect: Dialect, private opts?: { logQuery?: (raw: CompiledQuery) => void, returnExecutedQuery?: boolean }) {}
 
-  async execute(query: RawSql) {
+  async execute(query: RawSql): Promise<{ results: unknown[], sql?: string, parameters?: readonly unknown[] }> {
     if (this.kysely == null) {
       this.kysely = new Kysely({ dialect: this.dialect })
     }
@@ -444,7 +444,15 @@ export class Database {
     }
 
     const result = await query.execute(this.kysely)
-    return result.rows
+    if (this.opts?.returnExecutedQuery) {
+      const compiled = query.compile(this.kysely)
+      return {
+        results: result.rows,
+        sql: compiled.sql,
+        parameters: compiled.parameters,
+      }
+    }
+    return { results: result.rows }
   }
 
   Table<N extends string>(name: N) {

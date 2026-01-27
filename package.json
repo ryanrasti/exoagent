@@ -52,7 +52,8 @@
     "test": "vitest --run",
     "typecheck": "tsc",
     "ci:capnweb": "cd packages/capnweb && npm ci && npm run build",
-    "ci": "npm run ci:capnweb && npm ci && npm run lint && npm run typecheck && npm run build && npm run test"
+    "ci:examples": "npm --prefix ./examples run ci",
+    "ci": "npm run ci:capnweb && npm ci && npm run lint && npm run typecheck && npm run build && npm run test && npm run ci:examples"
   },
   "peerDependencies": {
     "ai": "^6.0.0"
