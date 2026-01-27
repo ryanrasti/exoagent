@@ -122,10 +122,10 @@ Use the execute tool to query the database. The API provides:
 - user.todos(): Returns a query builder for the user's todos.
 
 Example:
-- api.currentUser().todos().select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
-- api.currentUser().todos().where(({ todo }) => todo.completed['='](0)).select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
+- ({currentUser}) => api.currentUser().todos().select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
+- ({currentUser}) => api.currentUser().todos().where(({ todo }) => todo.completed['='](0)).select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
 
-To do a SELECT *, use this shorthand: api.currentUser().select(({ user }) => user)
+To do a SELECT *, use this shorthand: ({currentUser}) => api.currentUser().select(({ user }) => user)
 
 Always use .execute() at the end of your query chains to get results.`,
     prompt: userPrompt,
