@@ -22,11 +22,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs"
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
     },
     "./sql": {
       "types": "./dist/sql.d.ts",
-      "import": "./dist/sql.mjs"
+      "import": "./dist/sql.mjs",
+      "default": "./dist/sql.mjs"
     },
     "./package.json": "./package.json"
   },
