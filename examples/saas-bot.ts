@@ -291,6 +291,8 @@ Examples:
 - (api) => api.organization().join(({ org }) => org.members()).select(({ member }) => member).execute()
 - (api) => api.organization().join(({ org }) => org.projects()).join(({ project }) => project.tasks()).select(({ project, task }) => ({ projectName: project.name, taskName: task.title })).execute()
 
+Select must return a row object (not a flat column).
+
 Always use .execute() at the end of your query chains.`,
     prompt: userPrompt,
   })
