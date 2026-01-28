@@ -1,0 +1,53 @@
+{
+  "name": "capnjs",
+  "type": "module",
+  "version": "0.0.1",
+  "description": "JS interpreter for Cap'n Web",
+  "author": "Ryan Rasti <https://github.com/ryanrasti>",
+  "license": "MIT",
+  "homepage": "https://github.com/ryanrasti/exoagent/tree/main/packages/capnjs/#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryanrasti/exoagent.git",
+    "directory": "packages/capnjs"
+  },
+  "bugs": "https://github.com/ryanrasti/exoagent/issues",
+  "keywords": [
+    "capnweb",
+    "js",
+    "interpreter"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run build:main",
+    "build:main": "vite build",
+    "lint": "eslint",
+    "prepublishOnly": "npm run build",
+    "release": "bumpp",
+    "start": "tsx src/index.ts",
+    "test": "vitest --run",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0",
+    "capnweb": "file:../capnweb"
+  },
+  "lint-staged": {
+    "*": "eslint --fix"
+  }
+}
