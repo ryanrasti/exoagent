@@ -7,12 +7,6 @@ export function Terms() {
       <section className="px-8 py-12 max-w-3xl mx-auto">
         <h1 className="text-3xl font-bold mb-8">Bounty Terms</h1>
 
-        <div className="mb-8 p-4 bg-amber-950/50 border border-amber-800 rounded-lg">
-          <p className="text-amber-400 font-medium">
-            Bounty not yet loaded. If you're reading this, you're early to the party!
-          </p>
-        </div>
-
         <div className="space-y-8 text-neutral-300">
           <div>
             <h2 className="text-xl font-bold text-neutral-100 mb-3">The Challenge</h2>
@@ -59,6 +53,7 @@ export function Terms() {
             <ul className="list-disc list-inside mt-2 space-y-1">
               <li>
                 Email
+                {' '}
                 <a href="mailto:ryanrasti@gmail.com" className="text-green-400 hover:underline">ryanrasti@gmail.com</a>
               </li>
               <li>Include a signed message using the extracted private key to verify your claim</li>
