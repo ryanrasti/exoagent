@@ -37,7 +37,7 @@ export function Landing() {
       )}
     >
       {/* Hero */}
-      <section className="px-8 py-24 max-w-4xl mx-auto text-center">
+      <section className="px-8 pt-24 pb-12 max-w-4xl mx-auto text-center">
         <h1 className="text-5xl md:text-6xl font-bold mb-6">
           The
           {' '}
@@ -74,6 +74,20 @@ export function Landing() {
           >
             View on GitHub
           </a>
+        </div>
+      </section>
+
+      {/* Demo */}
+      <section className="px-8 pb-16">
+        <div className="max-w-4xl mx-auto">
+          <video
+            src="/demo.mp4"
+            autoPlay
+            controls
+            muted
+            playsInline
+            className="rounded-lg border border-neutral-800 w-full"
+          />
         </div>
       </section>
 
