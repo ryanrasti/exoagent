@@ -1,6 +1,8 @@
-# exoagent
+# ExoAgent
 
 The OS kernel to safely unleash your agents.
+
+![ExoAgent Demo](./website/public/demo.gif)
 
 🛡️ **[Live Challenge: Steal my $1,000 BTC](https://exoagent.io/challenge)**
 We put a real Bitcoin wallet in a database protected by ExoAgent. If you can prompt-inject the agent to extract the private key, you keep the money.
@@ -18,6 +20,8 @@ Today's agent frameworks give LLMs raw access to tools. The "security model" is 
 ExoAgent uses **Object Capabilities (OCap)** to enforce security at the runtime layer. Instead of giving the agent a "Database Tool," you give it a constrained **Capability Object** that can only access specific rows.
 
 It doesn't matter if the LLM gets jailbroken. It runs inside a sandbox where invalid actions are mathematically impossible. Security as a system invariant, not a polite suggestion.
+
+![ExoAgent Architecture](./website/public/architecture.png)
 
 ## Quick Start
 
