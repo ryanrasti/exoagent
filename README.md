@@ -21,7 +21,7 @@ ExoAgent uses **Object Capabilities (OCap)** to enforce security at the runtime 
 
 It doesn't matter if the LLM gets jailbroken. It runs inside a sandbox where invalid actions are mathematically impossible. Security as a system invariant, not a polite suggestion.
 
-![ExoAgent Architecture](./website/public/architecture.png)
+![ExoAgent Architecture](./website/public/architecture.jpg)
 
 ## Quick Start
 
