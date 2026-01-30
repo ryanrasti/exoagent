@@ -1,13 +1,12 @@
 import * as acorn from "acorn";
 import { RpcStub, type RpcCompatible } from "capnweb";
-import invariant from "tiny-invariant";
 
 export const interpret = (code: string, globalThis: RpcStub<{}>) => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: "latest" });
   return ast;
 };
 
-type Value = string | boolean | number | null | RegExp | bigint;
+type Value = string | boolean | number | null | RegExp | bigint | undefined | Value[];
 
 class Scope {
   constructor(public vars: Map<string, Value>, public parent: Scope | null) {}
@@ -16,8 +15,83 @@ class Scope {
     return this.vars.get(name) ?? this.parent?.get(name);
   }
 
-  set(name: string, value: Value) {
-    this.vars.set(name, value);
+  private set(name: acorn.Identifier, value: Value) {
+    evalInvariant(!this.vars.has(name.name), "Variable already bound", name, name.name);
+    this.vars.set(name.name, value);
+  }
+
+  bind(param: acorn.Pattern, value: Value) {
+    switch (param.type) {
+      case "Identifier":
+        this.set(param, value);
+        break;
+      case "MemberExpression":
+        parseInvariant(false, "Member assignment is not allowed", param);
+        break;
+      case "AssignmentPattern":
+        let rhs: Value = value;
+        if (rhs === undefined) {
+          rhs = evaluate(param.right, this);
+        }
+        this.bind(param.left, rhs);
+        break;
+      case "ArrayPattern":
+        // If we relax this to any iterable, just be careful about using a `...` spread:
+        evalInvariant(Array.isArray(value), "Array pattern must evaluate to an array", param, value);
+        for (const [i, pat] of param.elements.entries()) {
+          if (pat === null) {
+            continue;
+          }
+          if (pat.type === 'RestElement') {
+            parseInvariant(param.elements.length === i + 1, "Rest element must be last", pat);
+            this.bind(pat, value.slice(i));
+            break;
+          }
+          this.bind(pat, value[i]);
+        }
+        break;
+      case "ObjectPattern":
+        evalInvariant(Array.isArray(value) || isPlainObject(value), "Object pattern must evaluate to an object or array", param, value);
+        
+        const bound: Set<string | number> = new Set();
+        for (const [i, property] of param.properties.entries()) {
+          if (property.type === 'RestElement') {
+            parseInvariant(property.argument.type === 'Identifier', "Rest element must be an identifier", property.argument);
+            parseInvariant(param.properties.length === i + 1, "Rest element must be last", property.argument);
+            const copy = {}
+            for (const key of value.keys()) {
+              if (bound.has(key)) {
+                continue;
+              }
+              copy[key] = value[key];
+            }
+            this.set(property.argument, copy);
+            break;
+          }
+          let key;
+          if (property.computed) {
+            key = evaluate(property.key, this);
+          } else {
+            parseInvariant(property.key.type === 'Identifier', "Property key must be an identifier", property.key);
+            key = property.key.name;
+          }
+          // it isn't really necessary to check this here since we're saving to a `Map`, but for consistency
+          // we'll do it anyway:
+          assertSafeMember(key, property.key);
+          this.bind(property.value, copy[key as keyof typeof value] as Value);
+          bound.add(key);
+        }
+        break;
+
+      case "RestElement":
+        evalInvariant(Array.isArray(value), "Rest element must evaluate to an array", param, value);
+        this.bind(param.argument, value);
+        break;
+
+      default:
+        param satisfies never;
+        parseInvariant(false, "Invalid pattern", param);
+    }
   }
 }
 
@@ -55,9 +129,11 @@ const isSafeMember = (member: string) => {
   return !unsafe;
 };
 
-const assertSafeMember = (member: string, node: acorn.Node): void => {
+function assertSafeMember(member: unknown, node: acorn.Node): asserts member is string | number {
+  const type = typeof member;
+  evalInvariant(type === 'string' || type === 'number', "Member must be a string or number", node, member);
   evalInvariant(
-    isSafeMember(member),
+    type === 'number' || isSafeMember(member as string),
     `Unsafe member access: ${member}`,
     node,
     member,
@@ -69,17 +145,9 @@ const evalPropertyKey = (
   computed: boolean,
   scope: Scope,
 ) => {
-  let prop: string;
+  let prop: unknown;
   if (computed) {
-    const rawProp = evaluate(node, scope);
-    const type = typeof rawProp;
-    evalInvariant(
-      type === "string" || type === "number",
-      `Computed property must evaluate to a string or number`,
-      node,
-      rawProp,
-    );
-    prop = rawProp;
+    prop = evaluate(node, scope);
   } else {
     parseInvariant(
       node.type === "Identifier",
@@ -123,6 +191,7 @@ const evalArray = (
     }
     if (arg.type === "SpreadElement") {
       const res = evaluate(arg.argument, scope);
+      // If we relax this to any iterable, just be careful about the `...` spread:
       evalInvariant(
         Array.isArray(res),
         "Spread syntax requires ... iterable to be an array",
@@ -176,7 +245,7 @@ const evaluate = (node: acorn.Expression, scope: Scope) => {
       return evalArray(node.elements, scope);
 
     case "ObjectExpression":
-      let result = {};
+      let result: {[key: string]: Value} = {};
       for (const property of node.properties) {
         if (property.type === "SpreadElement") {
           const res = evaluate(property.argument, scope);
@@ -213,6 +282,28 @@ const evaluate = (node: acorn.Expression, scope: Scope) => {
       return result;
 
     case "ArrowFunctionExpression":
-      const params = evalArray(node.params, scope);
+      parseInvariant(
+        !node.async,
+        "Async functions are not allowed",
+        node,
+      );
+      parseInvariant(
+        !node.generator,
+        "Generator functions are not allowed",
+        node,
+      );
+      parseInvariant(
+        node.expression,
+        "Arrow functions must be expressions",
+        node,
+      );
+    
+      return (...args: Value[]) => {
+        const localScope = new Scope(new Map(), scope);
+        for (const [i, param] of node.params.entries()) {
+          localScope.bind(param, args[i]);
+        }
+        return evaluate(node.body, localScope);
+      };
   }
 };

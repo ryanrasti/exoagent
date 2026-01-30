@@ -1,0 +1,28 @@
+capneval
+
+primitives:
+- safeEval(<code>, stub (root) | { [key in string]: stub }) -> Stub | val
+  // operate either on stub or on rpctarget (local or remote)
+- safeDeval(<instructions>) -> string // code
+
+// Q: What do we need today?
+// A: Evaluate js that references caps
+    // motivating use case: typegres & basic tool calls
+
+// Q: What do we need tomorow?
+// A: Depends:
+//      - Generally: CPU, memory constraints for both parse, eval
+//      - IFC: (potentially) inspect call graph beforehand (impossible for dynamic code)
+//       - Remote as local abstraction -> easiest thing is cast to RpcTarget
+//      - Fine-grained control (e.g., await/try/catch/finally) over eval order
+//      - Standard library support: (object, string, array ops) & operators
+//
+
+// What are we doing?
+//   * 1:1 mapping of js code <-> capnweb instructions
+//      edge case: `await` <-> `pull`. others map to `pipeline`: just keep in mind later
+//      edge case of `safeEval`: gc of objects: just implement tracking & dispose later
+//      edge case -> cpu/mem usage:
+//         - in processs (parse/eval): need custom parser & add cpu/mem "gas" to it
+//         - rpc: separate issue to solve upstream
+
