@@ -2,7 +2,7 @@ import { RpcStub } from 'capnweb'
 import { describe, expect, it } from 'vitest'
 import { safeEval } from './index.js'
 
-describe('capnjs basic evaluation', () => {
+describe('capnweb-eval basic evaluation', () => {
   it('evaluates number literals', () => {
     const stub = new RpcStub({})
     expect(safeEval('123', stub)).toBe(123)
@@ -176,7 +176,7 @@ describe('capnjs basic evaluation', () => {
   })
 })
 
-describe('capnjs error handling', () => {
+describe('capnweb-eval error handling', () => {
   it('throws on invalid syntax', () => {
     const stub = new RpcStub({})
     expect(() => safeEval('{', stub)).toThrow()
@@ -203,7 +203,7 @@ describe('capnjs error handling', () => {
   })
 })
 
-describe('capnjs complex scenarios', () => {
+describe('capnweb-eval complex scenarios', () => {
   it('evaluates complex nested expressions', async () => {
     const stub = new RpcStub({
       data: {

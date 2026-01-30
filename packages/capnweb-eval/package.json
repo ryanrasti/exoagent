@@ -1,15 +1,15 @@
 {
-  "name": "capnjs",
+  "name": "capnweb-eval",
   "type": "module",
   "version": "0.0.1",
   "description": "JS interpreter for Cap'n Web",
   "author": "Ryan Rasti <https://github.com/ryanrasti>",
   "license": "MIT",
-  "homepage": "https://github.com/ryanrasti/exoagent/tree/main/packages/capnjs/#readme",
+  "homepage": "https://github.com/ryanrasti/exoagent/tree/main/packages/capnweb-eval/#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ryanrasti/exoagent.git",
-    "directory": "packages/capnjs"
+    "directory": "packages/capnweb-eval"
   },
   "bugs": "https://github.com/ryanrasti/exoagent/issues",
   "keywords": [
