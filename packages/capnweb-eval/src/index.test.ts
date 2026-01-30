@@ -221,28 +221,26 @@ describe('capnweb-eval complex scenarios', () => {
   })
 
   it('supports chained method calls', async () => {
-    const stub = new RpcStub({
-      obj: {
-        getValue() {
-          return { multiply: (x: number) => { return x * 2 } }
-        },
+    const objIn = {
+      getValue() {
+        return { multiply: (x: number) => { return x * 2 } }
       },
-    })
+    }
+    const stub = new RpcStub({ obj: objIn })
     const obj = await safeEval('obj', stub) as Record<string, unknown>
-    expect(obj).toHaveProperty('getValue')
-    expect(obj.getValue().multiply(3)).toBe(6)
+    expect((obj as typeof objIn).getValue().multiply(3)).toBe(6)
   })
 
   it('handles functions that return arrays', async () => {
     const stub = new RpcStub({
-      range: (n: number) => Array.from({ length: n }, (_, i) => i),
+      range: (n: number): number[] => Array.from({ length: n }, (_, i) => i),
     })
     expect(await safeEval('range(5)', stub)).toEqual([0, 1, 2, 3, 4])
   })
 
   it('handles functions that return objects', async () => {
     const stub = new RpcStub({
-      createPoint: (x: number, y: number) => ({ x, y }),
+      createPoint: (x: number, y: number): { x: number, y: number } => ({ x, y }),
     })
     expect(await safeEval('createPoint(10, 20)', stub)).toEqual({ x: 10, y: 20 })
   })
