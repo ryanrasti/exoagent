@@ -45,7 +45,9 @@ function* evalMemberExpression(
 
   const object = yield* evaluate(node.object, scope)
   evalInvariant(
-    typeof object === 'object' && object !== null,
+    // TODO: `typeof object === 'function'` is a hack to allow stubs to be used as objects
+    //    DO NOT SUBMIT THIS CHANGE
+    (typeof object === 'object' || typeof object === 'function') && object !== null,
     `Object must evaluate to an object`,
     node,
     object,
@@ -214,11 +216,6 @@ export function* evaluate(
     parseInvariant(
       !node.generator,
       'Generator functions are not allowed',
-      node,
-    )
-    parseInvariant(
-      node.expression,
-      'Arrow functions must be expressions',
       node,
     )
 

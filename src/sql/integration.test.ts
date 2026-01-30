@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { TestHarness } from '../capnweb-test-helpers'
 import { CodeMode } from '../code-mode'
 import { createDenoSandbox } from '../code-mode-deno'
+import { createEvalSandbox } from '../code-mode-eval'
 import { RpcToolset, tool } from '../rpc-toolset'
 import { Database } from './builder'
 import { sql } from './sql'
@@ -229,4 +230,61 @@ class Post extends db.Table('posts').as('post') {
 
     expect(result).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
   }, 10000)
+})
+
+describe('sql integration with eval sandbox', () => {
+  it('executes a basic select via CodeMode', async () => {
+    const codeMode = new CodeMode(createEvalSandbox())
+    const codeTool = await codeMode.wrap({
+      users: () => User.from(),
+    }, `class User extends db.Table('users').as('user') {
+  id = this.column('id')
+  name = this.column('name')
+  email = this.column('email')
+}`)
+
+    const result = await codeTool.execute({
+      code: `async ({ users }) => {
+        return await users()
+          .select(({ user }) => ({ id: user.id, name: user.name }))
+          .execute()
+      }`,
+    }, { toolCallId: 'test-1', messages: [] })
+
+    expect(result).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
+  })
+
+  it('executes a join via CodeMode', async () => {
+    const codeMode = new CodeMode(createEvalSandbox())
+    const codeTool = await codeMode.wrap({
+      users: () => User.from(),
+    }, `class User extends db.Table('users').as('user') {
+  id = this.column('id')
+  name = this.column('name')
+  email = this.column('email')
+
+  @tool()
+  posts() {
+    return Post.on(post => post.userId['='](this.id)).from()
+  }
+}
+
+class Post extends db.Table('posts').as('post') {
+  id = this.column('id')
+  userId = this.column('user_id')
+  title = this.column('title')
+  content = this.column('content')
+}`)
+
+    const result = await codeTool.execute({
+      code: `async ({ users }) => {
+        return await users()
+          .join(({ user }) => user.posts())
+          .select(({ user, post }) => ({ userName: user.name, postTitle: post.title }))
+          .execute()
+      }`,
+    }, { toolCallId: 'test-2', messages: [] })
+
+    expect(result).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
+  })
 })

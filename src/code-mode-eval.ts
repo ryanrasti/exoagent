@@ -19,6 +19,7 @@ export function createEvalSandbox<R>(): SafeEvalContext<R> {
       // Wrap the RpcTarget in an RpcStub to use as global scope
       const stub = new RpcStub(api)
       const fn = await safeEval(code)
+      console.log('fn', fn)
       return (fn as any)(stub) as unknown as R
     },
   }

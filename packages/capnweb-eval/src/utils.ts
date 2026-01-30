@@ -1,5 +1,6 @@
 import type * as acorn from 'acorn'
-import { RpcPromise, RpcStub } from 'capnweb'
+import type { RpcStub } from 'capnweb'
+import { RpcPromise } from 'capnweb'
 
 export type SafeEvalValue
   = | string
@@ -42,7 +43,12 @@ export const isPlainObject = (obj: unknown): obj is Record<string, unknown> => {
 }
 
 export const isStub = (obj: unknown): obj is StubInternal => {
-  return obj instanceof RpcStub
+  // const proto = Object.getPrototypeOf(obj)
+  // console.log('proto', obj, proto, proto === RpcStub.prototype, proto === RpcPromise.prototype)
+  // return proto === RpcStub.prototype || proto === RpcPromise.prototype
+  // TODO: `typeof obj === 'function'` is a hack to allow stubs to be used as objects
+  //    DO NOT SUBMIT THIS CHANGE
+  return typeof obj === 'function'
 }
 
 export function parseInvariant(

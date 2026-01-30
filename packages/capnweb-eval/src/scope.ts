@@ -39,6 +39,7 @@ export abstract class Scope {
       }
     }
     else if (param.type === 'ObjectPattern') {
+      console.log('value', value)
       evalInvariant(Array.isArray(value) || isPlainObject(value) || isStub(value), 'Object pattern must evaluate to an object or array', param, value)
 
       const bound: Set<string | number> = new Set()

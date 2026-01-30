@@ -43,9 +43,13 @@
     "test": "vitest --run",
     "typecheck": "tsc"
   },
+  "peerDependencies": {
+    "capnweb": "file:../../dist/capnweb"
+  },
   "devDependencies": {
     "acorn": "^8.15.0",
-    "capnweb": "file:../capnweb"
+    "vite": "7.2.7",
+    "vite-plugin-dts": "^4.5.4"
   },
   "lint-staged": {
     "*": "eslint --fix"
