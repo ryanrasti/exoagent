@@ -177,7 +177,7 @@ describe('codeMode', () => {
 
 describe('codeMode (capnweb-eval)', () => {
   // capnweb-eval does not support try/catch/finally; omit those tests. async/await is supported.
-  const codeModeCapnwebEval = new CodeMode({ kind: 'capnweb-eval' })
+  const codeModeCapnwebEval = new CodeMode({ kind: 'capnweb-eval__EXPERIMENTAL' })
 
 
   it('executes user code that calls tools', async () => {

@@ -27,7 +27,7 @@ export type SafeEvalContext<R> = {
   kind: 'passthrough'
   safeEval: (code: string, api: RpcTarget) => Promise<R>
 } | {
-  kind: 'capnweb-eval'
+  kind: 'capnweb-eval__EXPERIMENTAL'
 }
 
 type FlatTools = { [key: string]: Tool } | Tool[]
@@ -88,11 +88,13 @@ export class CodeMode<R> {
           return await this.context.safeEval(code, api)
         }
 
-        if (this.context.kind === 'capnweb-eval') {
+        if (this.context.kind === 'capnweb-eval__EXPERIMENTAL') {
           const channel = new MessageChannel()
           using stub = newMessagePortRpcSession(channel.port1)
           using _s = newMessagePortRpcSession(channel.port2, api)
           const fn = safeEval(code)
+          // TODO: in theory would it be possible to just pass new RpcStub(api) instead
+          //       of spinning up a transport and session like this?
           return await (fn as any)(stub)
         }
 
