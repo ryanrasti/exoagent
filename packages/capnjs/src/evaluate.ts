@@ -214,6 +214,13 @@ export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInt
       return evaluate(node.body, localScope)
     }
   }
+  else if (node.type === 'UnaryExpression') {
+    parseInvariant(node.operator === '-', 'Only unary minus is supported', node)
+    parseInvariant(node.prefix, 'Postfix unary expressions are not supported', node)
+    const value = evaluate(node.argument, scope)
+    evalInvariant(typeof value === 'number', 'Unary minus requires a number', node, value)
+    return -value
+  }
   else {
     parseInvariant(false, 'Unsupported expression', node)
   }

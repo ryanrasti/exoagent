@@ -71,9 +71,13 @@ export function evalInvariant(
 }
 
 export const isSafeMember = (member: string) => {
+  // RpcPromise should have a prototype
+  if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
+    throw new Error('RpcPromise has no prototype')
+  }
   const unsafe
     = member in Object.prototype
-      || member in RpcPromise.prototype
+      || (member in RpcPromise.prototype)
       || member === 'constructor'
       || member === 'prototype'
       || member === '__proto__'
