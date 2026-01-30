@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { inspect } from 'node:util'
 import { RpcTarget } from 'capnweb'
+import { RpcPromise } from 'capnweb'
 
 const validate = (schema: StandardSchemaV1 | ((arg: unknown) => boolean), value: unknown): void => {
   if ('~standard' in schema) {
@@ -146,17 +147,15 @@ const unwrapCallback = <A, V>(toolCallback: ToolCallback<(arg: A) => V>, returnS
 
     try {
       const result = callback(arg)
+      const proto = result != null && typeof result === 'function' ? Object.getPrototypeOf(result) : null
+      const isRpcPromise = (result != null && typeof result === 'function' && Object.getPrototypeOf(result) === RpcPromise.prototype)
+      console.log('result', result, proto, isRpcPromise)
       if (result instanceof Promise) {
-        isPromise = true
-        let ret: Promise<R>
-        ret = result.then(async (r) => {
+        return result.then(async (r) => {
           validate(returnSchema, r)
+          console.log('awaited result', r)
           return then(r)
-        }, opts?.catch)
-        if (opts?.finally) {
-          ret = ret.finally(opts.finally)
-        }
-        return ret as unknown as R
+        }, opts?.catch).finally(opts?.finally)
       }
 
       validate(returnSchema, result)

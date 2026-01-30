@@ -1,7 +1,7 @@
 import type { RpcStub } from 'capnweb'
 import type { SafeEvalValue } from './utils'
 import * as acorn from 'acorn'
-import { evaluate, isAwaitControl } from './evaluate'
+import { evaluate } from './evaluate'
 import { GlobalScope } from './scope'
 import { evalInvariant } from './utils'
 
@@ -16,9 +16,7 @@ export const safeEval = (code: string, globalThis?: RpcStub<object>): SafeEvalVa
   // We're in an async function, so we need to return a promise and await the results:
   const fn = async (): Promise<SafeEvalValue> => {
     while (!step.done) {
-      evalInvariant(isAwaitControl(step.value), 'Internal error: expected `await`, got raw value.', ast, step.value)
-      await step.value.value
-      step = iter.next()
+      step = iter.next(await step.value.value)
     }
     return step.value as SafeEvalValue
   }

@@ -4,11 +4,13 @@ import type { SafeEvalHasMemberInternal, SafeEvalValueInternal } from './utils'
 import { LocalScope } from './scope'
 import { assertSafeMember, evalInvariant, isPlainObject, isStub, parseInvariant } from './utils'
 
-export type Evaluation<T> = Generator<SafeEvalValueInternal, T, { control: 'await', value: SafeEvalValueInternal, node: acorn.Expression }>
+type AwaitControl = { [controlAwaitSymbol]: 'await', value: SafeEvalValueInternal | Promise<SafeEvalValueInternal>, node: acorn.Expression }
 
-const controlAwait = Symbol('controlAwait')
-export const isAwaitControl = (value: unknown): value is { [controlAwait]: 'await', value: SafeEvalValueInternal | Promise<SafeEvalValueInternal>, node: acorn.Expression } => {
-  return typeof value === 'object' && value !== null && controlAwait in value && value[controlAwait] === 'await'
+export type Evaluation<T> = Generator<AwaitControl, T, SafeEvalValueInternal>
+
+const controlAwaitSymbol = Symbol('controlAwait')
+const emitAwaitControl = (value: SafeEvalValueInternal, node: acorn.Expression): AwaitControl => {
+  return { [controlAwaitSymbol]: 'await', value, node }
 }
 
 function* evalPropertyKey(
@@ -209,7 +211,7 @@ export function* evaluate(
   }
   else if (node.type === 'AwaitExpression') {
     const promise = yield* evaluate(node.argument, scope)
-    const resolved = yield promise
+    const resolved = yield emitAwaitControl(promise, node);
     return resolved
   }
   else if (node.type === 'ArrowFunctionExpression') {
@@ -224,9 +226,7 @@ export function* evaluate(
         const iter = evalFunctionBody(node, scope, args)
         let step = iter.next()
         while (!step.done) {
-          evalInvariant(isAwaitControl(step.value), 'Internal error: expected `await`, got raw value.', node, step.value)
-          await step.value.value
-          step = iter.next()
+          step = iter.next(await step.value.value)
         }
         return step.value
       }
@@ -235,10 +235,7 @@ export function* evaluate(
       return (...args: SafeEvalValueInternal[]): SafeEvalValueInternal => {
         const iter = evalFunctionBody(node, scope, args)
         const step = iter.next()
-        if (!step.done) {
-          evalInvariant(isAwaitControl(step.value), 'Internal error: expected `await`, got raw value.', node, step.value)
-          parseInvariant(false, '`await` must be used in an async function', node)
-        }
+        parseInvariant(step.done === true, '`await` must be used in an async function', node)
         return step.value
       }
     }

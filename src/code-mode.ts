@@ -2,12 +2,13 @@ import type { Tool, ToolExecutionOptions } from 'ai'
 import type { RpcTarget } from 'capnweb'
 import type { RpcToolset } from './rpc-toolset'
 import type { WrappableTools } from './tool-wrapper'
-import { RpcSession } from 'capnweb'
+import { newMessagePortRpcSession, RpcSession } from 'capnweb'
 import { z } from 'zod'
 // eslint-disable-next-line antfu/no-import-dist
 import runtimeCode from '../dist/code-mode-runtime.mjs?raw'
 import { StreamTransport } from './stream-transport'
 import { generateToolApi, generateToolTypes } from './tool-wrapper'
+import { safeEval } from 'capnweb-eval'
 
 export type SafeEvalResult = {
   wait: () => Promise<void>
@@ -25,6 +26,8 @@ export type SafeEvalContext<R> = {
   // along with the API object:
   kind: 'passthrough'
   safeEval: (code: string, api: RpcTarget) => Promise<R>
+} | {
+  kind: 'capnweb-eval'
 }
 
 type FlatTools = { [key: string]: Tool } | Tool[]
@@ -83,6 +86,14 @@ export class CodeMode<R> {
 
         if (this.context.kind === 'passthrough') {
           return await this.context.safeEval(code, api)
+        }
+
+        if (this.context.kind === 'capnweb-eval') {
+          const channel = new MessageChannel()
+          using stub = newMessagePortRpcSession(channel.port1)
+          using _s = newMessagePortRpcSession(channel.port2, api)
+          const fn = safeEval(code)
+          return await (fn as any)(stub)
         }
 
         // 1. Inject sandbox context into bundled runtime

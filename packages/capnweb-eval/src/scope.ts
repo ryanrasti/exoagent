@@ -1,16 +1,16 @@
 import type * as acorn from 'acorn'
 import type { SafeEvalValueInternal, StubInternal } from './utils'
 import { assertSafeMember, evalInvariant, isPlainObject, isStub, parseInvariant } from './utils'
+import type { Evaluation } from './evaluate'
 
-export type ScopeEvaluation<T> = Generator<SafeEvalValueInternal, T, SafeEvalValueInternal>
 
-export type EvaluateFn = (node: acorn.Expression, scope: Scope) => ScopeEvaluation<SafeEvalValueInternal>
+export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<SafeEvalValueInternal>
 
 export abstract class Scope {
-  abstract get(node: acorn.Identifier): ScopeEvaluation<SafeEvalValueInternal | undefined>
+  abstract get(node: acorn.Identifier): Evaluation<SafeEvalValueInternal | undefined>
   abstract set(name: acorn.Identifier, value: SafeEvalValueInternal): void
 
-  * bind(param: acorn.Pattern, value: SafeEvalValueInternal, evaluate: EvaluateFn): ScopeEvaluation<void> {
+  * bind(param: acorn.Pattern, value: SafeEvalValueInternal, evaluate: EvaluateFn): Evaluation<void> {
     parseInvariant(param.type !== 'MemberExpression', 'Member assignment is not allowed', param)
 
     if (param.type === 'Identifier') {
@@ -39,7 +39,6 @@ export abstract class Scope {
       }
     }
     else if (param.type === 'ObjectPattern') {
-      console.log('value', value)
       evalInvariant(Array.isArray(value) || isPlainObject(value) || isStub(value), 'Object pattern must evaluate to an object or array', param, value)
 
       const bound: Set<string | number> = new Set()
@@ -87,7 +86,7 @@ export class GlobalScope extends Scope {
     super()
   }
 
-  * get(node: acorn.Identifier): ScopeEvaluation<SafeEvalValueInternal | undefined> {
+  *get(node: acorn.Identifier): Evaluation<SafeEvalValueInternal | undefined> {
     assertSafeMember(node.name, node)
     return this.globalThis[node.name as keyof StubInternal]
   }
@@ -102,7 +101,7 @@ export class LocalScope extends Scope {
     super()
   }
 
-  * get(node: acorn.Identifier): ScopeEvaluation<SafeEvalValueInternal | undefined> {
+  *get(node: acorn.Identifier): Evaluation<SafeEvalValueInternal | undefined> {
     assertSafeMember(node.name, node)
     const local = this.vars.get(node.name)
     if (local !== undefined)

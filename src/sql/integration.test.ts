@@ -234,7 +234,7 @@ class Post extends db.Table('posts').as('post') {
 
 describe('sql integration with eval sandbox', () => {
   it('executes a basic select via CodeMode', async () => {
-    const codeMode = new CodeMode(createEvalSandbox())
+    const codeMode = new CodeMode({ kind: 'capnweb-eval' })
     const codeTool = await codeMode.wrap({
       users: () => User.from(),
     }, `class User extends db.Table('users').as('user') {
@@ -255,7 +255,7 @@ describe('sql integration with eval sandbox', () => {
   })
 
   it('executes a join via CodeMode', async () => {
-    const codeMode = new CodeMode(createEvalSandbox())
+    const codeMode = new CodeMode({ kind: 'capnweb-eval' })
     const codeTool = await codeMode.wrap({
       users: () => User.from(),
     }, `class User extends db.Table('users').as('user') {
