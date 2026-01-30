@@ -147,13 +147,9 @@ const unwrapCallback = <A, V>(toolCallback: ToolCallback<(arg: A) => V>, returnS
 
     try {
       const result = callback(arg)
-      const proto = result != null && typeof result === 'function' ? Object.getPrototypeOf(result) : null
-      const isRpcPromise = (result != null && typeof result === 'function' && Object.getPrototypeOf(result) === RpcPromise.prototype)
-      console.log('result', result, proto, isRpcPromise)
       if (result instanceof Promise) {
-        return result.then(async (r) => {
+        return result.then((r) => {
           validate(returnSchema, r)
-          console.log('awaited result', r)
           return then(r)
         }, opts?.catch).finally(opts?.finally)
       }
