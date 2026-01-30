@@ -1,15 +1,9 @@
 /* eslint-disable ts/no-use-before-define */
-import type { RpcStub } from 'capnweb'
+import type * as acorn from 'acorn'
 import type { Scope } from './scope'
 import type { SafeEvalHasMemberInternal, SafeEvalValueInternal } from './utils'
-import * as acorn from 'acorn'
-import { GlobalScope, LocalScope } from './scope'
+import { LocalScope } from './scope'
 import { assertSafeMember, evalInvariant, isPlainObject, isStub, parseInvariant } from './utils'
-
-export const safeEval = (code: string, globalThis: RpcStub<object>): SafeEvalValueInternal => {
-  const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  return evaluate(ast, new GlobalScope(globalThis))
-}
 
 const evalPropertyKey = (
   node: acorn.Expression,
@@ -86,8 +80,10 @@ const evalArray = (
 }
 
 type StatementResult = {
-  control: 'return' | 'normal'
+  control: 'return'
   value?: SafeEvalValueInternal
+} | {
+  control: 'normal'
 }
 
 const evalStatement = (node: acorn.Statement, scope: Scope): StatementResult => {
@@ -112,8 +108,15 @@ const evalStatement = (node: acorn.Statement, scope: Scope): StatementResult => 
     }
     return { control: 'normal' }
   }
+  else if (node.type === 'ExpressionStatement') {
+    evaluate(node.expression, scope)
+    return { control: 'normal' }
+  }
+  else if (node.type === 'EmptyStatement') {
+    return { control: 'normal' }
+  }
   else {
-    parseInvariant(false, 'Invalid statement', node)
+    parseInvariant(false, 'Unsupported statement', node)
   }
 }
 
@@ -208,8 +211,11 @@ export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInt
         localScope.bind(param, args[i], evaluate)
       }
       if (node.body.type === 'BlockStatement') {
-        const { value } = evalStatement(node.body, localScope)
-        return value
+        const result = evalStatement(node.body, localScope)
+        if (result.control === 'return') {
+          return result.value
+        }
+        return
       }
       return evaluate(node.body, localScope)
     }
