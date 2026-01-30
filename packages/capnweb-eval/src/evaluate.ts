@@ -1,18 +1,24 @@
-/* eslint-disable ts/no-use-before-define */
 import type * as acorn from 'acorn'
 import type { Scope } from './scope'
 import type { SafeEvalHasMemberInternal, SafeEvalValueInternal } from './utils'
 import { LocalScope } from './scope'
 import { assertSafeMember, evalInvariant, isPlainObject, isStub, parseInvariant } from './utils'
 
-const evalPropertyKey = (
+export type Evaluation<T> = Generator<SafeEvalValueInternal, T, { control: 'await', value: SafeEvalValueInternal, node: acorn.Expression }>
+
+const controlAwait = Symbol('controlAwait')
+export const isAwaitControl = (value: unknown): value is { [controlAwait]: 'await', value: SafeEvalValueInternal | Promise<SafeEvalValueInternal>, node: acorn.Expression } => {
+  return typeof value === 'object' && value !== null && controlAwait in value && value[controlAwait] === 'await'
+}
+
+function* evalPropertyKey(
   node: acorn.Expression,
   computed: boolean,
   scope: Scope,
-) => {
+): Evaluation<string | number> {
   let prop: unknown
   if (computed) {
-    prop = evaluate(node, scope)
+    prop = yield* evaluate(node, scope)
   }
   else {
     parseInvariant(
@@ -26,7 +32,10 @@ const evalPropertyKey = (
   return prop
 }
 
-const evalMemberExpression = (node: acorn.MemberExpression, scope: Scope): { object: SafeEvalHasMemberInternal, prop: string | number } => {
+function* evalMemberExpression(
+  node: acorn.MemberExpression,
+  scope: Scope,
+): Evaluation<{ object: SafeEvalHasMemberInternal, prop: string | number }> {
   parseInvariant(node.object.type !== 'Super', '`super` is not allowed', node)
   parseInvariant(
     node.property.type !== 'PrivateIdentifier',
@@ -34,7 +43,7 @@ const evalMemberExpression = (node: acorn.MemberExpression, scope: Scope): { obj
     node,
   )
 
-  const object = evaluate(node.object, scope)
+  const object = yield* evaluate(node.object, scope)
   evalInvariant(
     typeof object === 'object' && object !== null,
     `Object must evaluate to an object`,
@@ -42,7 +51,7 @@ const evalMemberExpression = (node: acorn.MemberExpression, scope: Scope): { obj
     object,
   )
 
-  const prop = evalPropertyKey(node.property, node.computed, scope)
+  const prop = yield* evalPropertyKey(node.property, node.computed, scope)
   if (Array.isArray(object) || typeof object === 'string') {
     evalInvariant(typeof prop === 'number', 'Index must be a number', node, prop)
   }
@@ -52,17 +61,17 @@ const evalMemberExpression = (node: acorn.MemberExpression, scope: Scope): { obj
   return { object, prop }
 }
 
-const evalArray = (
+function* evalArray(
   args: (acorn.Expression | acorn.SpreadElement | null)[],
   scope: Scope,
-) => {
+): Evaluation<SafeEvalValueInternal[]> {
   const result: SafeEvalValueInternal[] = []
   for (const arg of args) {
     if (arg === null) {
       continue
     }
     if (arg.type === 'SpreadElement') {
-      const res = evaluate(arg.argument, scope)
+      const res = yield* evaluate(arg.argument, scope)
       // If we relax this to any iterable, just be careful about the `...` spread:
       evalInvariant(
         Array.isArray(res),
@@ -73,7 +82,7 @@ const evalArray = (
       result.push(...res)
     }
     else {
-      result.push(evaluate(arg, scope))
+      result.push(yield* evaluate(arg, scope))
     }
   }
   return result
@@ -86,11 +95,14 @@ type StatementResult = {
   control: 'normal'
 }
 
-const evalStatement = (node: acorn.Statement, scope: Scope): StatementResult => {
+function* evalStatement(
+  node: acorn.Statement,
+  scope: Scope,
+): Evaluation<StatementResult> {
   if (node.type === 'BlockStatement') {
     const localScope = new LocalScope(new Map(), scope)
     for (const statement of node.body) {
-      const result = evalStatement(statement, localScope)
+      const result = yield* evalStatement(statement, localScope)
       if (result.control === 'return') {
         return result
       }
@@ -98,19 +110,20 @@ const evalStatement = (node: acorn.Statement, scope: Scope): StatementResult => 
     return { control: 'normal' }
   }
   else if (node.type === 'ReturnStatement') {
-    return { control: 'return', value: node.argument == null ? undefined : evaluate(node.argument, scope) }
+    const value = node.argument == null ? undefined : (yield* evaluate(node.argument, scope))
+    return { control: 'return', value }
   }
   else if (node.type === 'VariableDeclaration') {
     parseInvariant(node.kind === 'const', 'Only `const` declarations are allowed', node)
     for (const declaration of node.declarations) {
       parseInvariant(declaration.init != null, 'Variable declarations must have an initializer', declaration)
-      const value = evaluate(declaration.init, scope)
-      scope.bind(declaration.id, value, evaluate)
+      const value = yield* evaluate(declaration.init, scope)
+      yield* scope.bind(declaration.id, value, evaluate)
     }
     return { control: 'normal' }
   }
   else if (node.type === 'ExpressionStatement') {
-    evaluate(node.expression, scope)
+    yield* evaluate(node.expression, scope)
     return { control: 'normal' }
   }
   else if (node.type === 'EmptyStatement') {
@@ -121,16 +134,19 @@ const evalStatement = (node: acorn.Statement, scope: Scope): StatementResult => 
   }
 }
 
-export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInternal => {
+export function* evaluate(
+  node: acorn.Expression,
+  scope: Scope,
+): Evaluation<SafeEvalValueInternal> {
   if (node.type === 'Identifier') {
-    return scope.get(node)
+    return (yield* scope.get(node))
   }
   else if (node.type === 'Literal') {
     evalInvariant(!(node.value instanceof RegExp), 'RegExp literals are not allowed', node, node.value)
     return node.value
   }
   else if (node.type === 'MemberExpression') {
-    const { object, prop } = evalMemberExpression(node, scope)
+    const { object, prop } = yield* evalMemberExpression(node, scope)
     return object[prop as keyof SafeEvalHasMemberInternal]
   }
   else if (node.type === 'CallExpression') {
@@ -140,22 +156,22 @@ export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInt
       node,
     )
     if (node.callee.type === 'MemberExpression') {
-      const { object, prop } = evalMemberExpression(node.callee, scope)
-      const args = evalArray(node.arguments, scope)
+      const { object, prop } = yield* evalMemberExpression(node.callee, scope)
+      const args = yield* evalArray(node.arguments, scope)
       return (object[prop as keyof SafeEvalHasMemberInternal] as any)(...args)
     }
-    const callee = evaluate(node.callee, scope)
-    const args = evalArray(node.arguments, scope)
+    const callee = yield* evaluate(node.callee, scope)
+    const args = yield* evalArray(node.arguments, scope)
     return (callee as any)(...args)
   }
   else if (node.type === 'ArrayExpression') {
-    return evalArray(node.elements, scope)
+    return yield* evalArray(node.elements, scope)
   }
   else if (node.type === 'ObjectExpression') {
     const result: { [key: string]: SafeEvalValueInternal } = {}
     for (const property of node.properties) {
       if (property.type === 'SpreadElement') {
-        const res = evaluate(property.argument, scope)
+        const res = yield* evaluate(property.argument, scope)
         evalInvariant(
           isPlainObject(res) || Array.isArray(res),
           'Spread syntax requires ... iterable to be a plain object or array',
@@ -183,18 +199,18 @@ export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInt
           property,
         )
 
-        const key = evalPropertyKey(property.key, property.computed, scope)
-        result[key] = evaluate(property.value, scope)
+        const key = yield* evalPropertyKey(property.key, property.computed, scope)
+        result[key] = yield* evaluate(property.value, scope)
       }
     }
     return result
   }
+  else if (node.type === 'AwaitExpression') {
+    const promise = yield* evaluate(node.argument, scope)
+    const resolved = yield promise
+    return resolved
+  }
   else if (node.type === 'ArrowFunctionExpression') {
-    parseInvariant(
-      !node.async,
-      'Async functions are not allowed',
-      node,
-    )
     parseInvariant(
       !node.generator,
       'Generator functions are not allowed',
@@ -206,33 +222,58 @@ export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInt
       node,
     )
 
-    return (...args: SafeEvalValueInternal[]) => {
-      const localScope = new LocalScope(new Map(), scope)
-      for (const [i, param] of node.params.entries()) {
-        localScope.bind(param, args[i], evaluate)
-      }
-      if (node.body.type === 'BlockStatement') {
-        // We don't call `evaluateStatement` directly to avoid
-        // creating a new scope:
-        for (const statement of node.body.body) {
-          const result = evalStatement(statement, localScope)
-          if (result.control === 'return') {
-            return result.value
-          }
+    if (node.async) {
+      return async (...args: SafeEvalValueInternal[]): Promise<SafeEvalValueInternal> => {
+        const iter = evalFunctionBody(node, scope, args)
+        let step = iter.next()
+        while (!step.done) {
+          evalInvariant(isAwaitControl(step.value), 'Internal error: expected `await`, got raw value.', node, step.value)
+          await step.value.value
+          step = iter.next()
         }
-        return
+        return step.value
       }
-      return evaluate(node.body, localScope)
+    }
+    else {
+      return (...args: SafeEvalValueInternal[]): SafeEvalValueInternal => {
+        const iter = evalFunctionBody(node, scope, args)
+        const step = iter.next()
+        if (!step.done) {
+          evalInvariant(isAwaitControl(step.value), 'Internal error: expected `await`, got raw value.', node, step.value)
+          parseInvariant(false, '`await` must be used in an async function', node)
+        }
+        return step.value
+      }
     }
   }
   else if (node.type === 'UnaryExpression') {
     parseInvariant(node.operator === '-', 'Only unary minus is supported', node)
     parseInvariant(node.prefix, 'Postfix unary expressions are not supported', node)
-    const value = evaluate(node.argument, scope)
+    const value = yield* evaluate(node.argument, scope)
     evalInvariant(typeof value === 'number', 'Unary minus requires a number', node, value)
     return -value
   }
   else {
     parseInvariant(false, 'Unsupported expression', node)
   }
+}
+
+function* evalFunctionBody(node: acorn.ArrowFunctionExpression, scope: Scope, args: SafeEvalValueInternal[]): Evaluation<SafeEvalValueInternal> {
+  const localScope = new LocalScope(new Map(), scope)
+  for (const [i, param] of node.params.entries()) {
+    yield* localScope.bind(param, args[i], evaluate)
+  }
+  const { body } = node
+  if (body.type === 'BlockStatement') {
+    // We don't call `evaluateStatement` directly to avoid
+    // creating a new scope:
+    for (const statement of body.body) {
+      const result = yield* evalStatement(statement, localScope)
+      if (result.control === 'return') {
+        return result.value
+      }
+    }
+    return
+  }
+  return yield* evaluate(body, localScope)
 }

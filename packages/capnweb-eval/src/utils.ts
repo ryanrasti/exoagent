@@ -21,7 +21,7 @@ export type SafeEvalValueInternal
     | null
     | bigint
     | undefined
-    | ((...args: SafeEvalValueInternal[]) => SafeEvalValueInternal)
+    | ((...args: SafeEvalValueInternal[]) => SafeEvalValueInternal | Promise<SafeEvalValueInternal>)
     | SafeEvalHasMemberInternal
 
 export type SafeEvalHasMemberInternal

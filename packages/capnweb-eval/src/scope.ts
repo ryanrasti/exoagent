@@ -2,10 +2,15 @@ import type * as acorn from 'acorn'
 import type { SafeEvalValueInternal, StubInternal } from './utils'
 import { assertSafeMember, evalInvariant, isPlainObject, isStub, parseInvariant } from './utils'
 
+export type ScopeEvaluation<T> = Generator<SafeEvalValueInternal, T, SafeEvalValueInternal>
+
+export type EvaluateFn = (node: acorn.Expression, scope: Scope) => ScopeEvaluation<SafeEvalValueInternal>
+
 export abstract class Scope {
-  abstract get(node: acorn.Identifier): SafeEvalValueInternal | undefined
-  abstract set(name: acorn.Identifier, value: SafeEvalValueInternal): any
-  bind(param: acorn.Pattern, value: SafeEvalValueInternal, evaluate: (node: acorn.Expression, scope: Scope) => SafeEvalValueInternal) {
+  abstract get(node: acorn.Identifier): ScopeEvaluation<SafeEvalValueInternal | undefined>
+  abstract set(name: acorn.Identifier, value: SafeEvalValueInternal): void
+
+  * bind(param: acorn.Pattern, value: SafeEvalValueInternal, evaluate: EvaluateFn): ScopeEvaluation<void> {
     parseInvariant(param.type !== 'MemberExpression', 'Member assignment is not allowed', param)
 
     if (param.type === 'Identifier') {
@@ -14,9 +19,9 @@ export abstract class Scope {
     else if (param.type === 'AssignmentPattern') {
       let rhs: SafeEvalValueInternal = value
       if (rhs === undefined) {
-        rhs = evaluate(param.right, this)
+        rhs = yield* evaluate(param.right, this)
       }
-      this.bind(param.left, rhs, evaluate)
+      yield* this.bind(param.left, rhs, evaluate)
     }
     else if (param.type === 'ArrayPattern') {
       evalInvariant(Array.isArray(value), 'Array pattern expects an array', param, value)
@@ -26,9 +31,11 @@ export abstract class Scope {
         }
         if (pat.type === 'RestElement') {
           parseInvariant(param.elements.length === i + 1, 'Rest element must be last', pat)
-          this.bind(pat, value.slice(i), evaluate)
+          yield* this.bind(pat, value.slice(i), evaluate)
         }
-        this.bind(pat, value[i], evaluate)
+        else {
+          yield* this.bind(pat, value[i], evaluate)
+        }
       }
     }
     else if (param.type === 'ObjectPattern') {
@@ -53,22 +60,20 @@ export abstract class Scope {
         }
         let key: SafeEvalValueInternal
         if (property.computed) {
-          key = evaluate(property.key, this)
+          key = yield* evaluate(property.key, this)
         }
         else {
           parseInvariant(property.key.type === 'Identifier', 'Property key must be an identifier', property.key)
           key = property.key.name
         }
-        // it isn't really necessary to check this here since we're saving to a `Map`, but for consistency
-        // we'll do it anyway:
         assertSafeMember(key, property.key)
-        this.bind(property.value, value[key as keyof typeof value] as SafeEvalValueInternal, evaluate)
+        yield* this.bind(property.value, value[key as keyof typeof value] as SafeEvalValueInternal, evaluate)
         bound.add(key)
       }
     }
     else if (param.type === 'RestElement') {
       evalInvariant(Array.isArray(value), 'Rest element must evaluate to an array', param, value)
-      this.bind(param.argument, value, evaluate)
+      yield* this.bind(param.argument, value, evaluate)
     }
     else {
       parseInvariant(false, 'Invalid pattern', param)
@@ -81,7 +86,7 @@ export class GlobalScope extends Scope {
     super()
   }
 
-  get(node: acorn.Identifier): SafeEvalValueInternal | undefined {
+  * get(node: acorn.Identifier): ScopeEvaluation<SafeEvalValueInternal | undefined> {
     assertSafeMember(node.name, node)
     return this.globalThis[node.name as keyof StubInternal]
   }
@@ -96,9 +101,14 @@ export class LocalScope extends Scope {
     super()
   }
 
-  get(node: acorn.Identifier): SafeEvalValueInternal | undefined {
+  * get(node: acorn.Identifier): ScopeEvaluation<SafeEvalValueInternal | undefined> {
     assertSafeMember(node.name, node)
-    return this.vars.get(node.name) ?? this.parent?.get(node)
+    const local = this.vars.get(node.name)
+    if (local !== undefined)
+      return local
+    if (this.parent != null)
+      return (yield* this.parent.get(node))
+    return undefined
   }
 
   set(name: acorn.Identifier, value: SafeEvalValueInternal) {

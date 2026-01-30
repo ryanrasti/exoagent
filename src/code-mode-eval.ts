@@ -17,11 +17,9 @@ export function createEvalSandbox<R>(): SafeEvalContext<R> {
     kind: 'passthrough',
     safeEval: async (code: string, api: RpcTarget): Promise<R> => {
       // Wrap the RpcTarget in an RpcStub to use as global scope
-      const fn = safeEval(code)
-      if (typeof fn !== 'function') {
-        throw new TypeError(`Code did not evaluate to a function: ${code}`)
-      }
-      return fn(new RpcStub(api) as any) as R
+      const stub = new RpcStub(api)
+      const fn = await safeEval(code)
+      return (fn as any)(stub) as unknown as R
     },
   }
 }
