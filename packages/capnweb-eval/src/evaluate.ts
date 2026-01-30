@@ -88,8 +88,9 @@ type StatementResult = {
 
 const evalStatement = (node: acorn.Statement, scope: Scope): StatementResult => {
   if (node.type === 'BlockStatement') {
+    const localScope = new LocalScope(new Map(), scope)
     for (const statement of node.body) {
-      const result = evalStatement(statement, scope)
+      const result = evalStatement(statement, localScope)
       if (result.control === 'return') {
         return result
       }
@@ -211,9 +212,13 @@ export const evaluate = (node: acorn.Expression, scope: Scope): SafeEvalValueInt
         localScope.bind(param, args[i], evaluate)
       }
       if (node.body.type === 'BlockStatement') {
-        const result = evalStatement(node.body, localScope)
-        if (result.control === 'return') {
-          return result.value
+        // We don't call `evaluateStatement` directly to avoid
+        // creating a new scope:
+        for (const statement of node.body.body) {
+          const result = evalStatement(statement, localScope)
+          if (result.control === 'return') {
+            return result.value
+          }
         }
         return
       }

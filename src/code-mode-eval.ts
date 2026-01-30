@@ -21,7 +21,7 @@ export function createEvalSandbox<R>(): SafeEvalContext<R> {
       if (typeof fn !== 'function') {
         throw new TypeError(`Code did not evaluate to a function: ${code}`)
       }
-      return fn(new RpcStub(api))
+      return fn(new RpcStub(api) as any) as R
     },
   }
 }
