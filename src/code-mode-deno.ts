@@ -23,7 +23,7 @@ export function createDenoSandbox<R>(options: {
   const { args = [], denoPath = 'deno' } = options
 
   return {
-    kind: 'direct',
+    kind: 'stream',
     safeEval: async (code: string): Promise<SafeEvalResult> => {
       const tempDir = await mkdtemp(join(tmpdir(), 'exoagent-deno-'))
       const tempFile = join(tempDir, 'code.ts') // Deno can run TypeScript directly

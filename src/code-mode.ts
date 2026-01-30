@@ -16,14 +16,14 @@ export type SafeEvalResult = {
 }
 
 export type SafeEvalContext<R> = {
-  kind: 'direct'
+  kind: 'stream'
   safeEval: (code: string) => Promise<SafeEvalResult>
   // See code-mode-runtime.ts for the expected format of the sandbox context
   sandboxContext: string
 } | {
   // We pass the code to the remote side to evaluate (over Cap'n Web),
   // along with the API object:
-  kind: 'rpc'
+  kind: 'passthrough'
   safeEval: (code: string, api: RpcTarget) => Promise<R>
 }
 
@@ -81,7 +81,7 @@ export class CodeMode<R> {
         const ToolApi = generateToolApi(tools, opts)
         const api = new ToolApi(code)
 
-        if (this.context.kind === 'rpc') {
+        if (this.context.kind === 'passthrough') {
           return await this.context.safeEval(code, api)
         }
 

@@ -10,7 +10,7 @@ import { CodeMode } from './code-mode.js'
 import { TestToolset } from './rpc-toolset-test-helpers'
 
 const codeMode = new CodeMode({
-  kind: 'direct',
+  kind: 'stream',
   safeEval: async (code: string) => {
     const tempDir = await mkdtemp(join(tmpdir(), 'exoagent-test-'))
     const tempFile = join(tempDir, 'code.mjs')

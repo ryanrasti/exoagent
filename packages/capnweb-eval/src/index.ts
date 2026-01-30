@@ -4,7 +4,7 @@ import * as acorn from 'acorn'
 import { evaluate } from './evaluate'
 import { GlobalScope } from './scope'
 
-export const safeEval = (code: string, globalThis: RpcStub<object>): SafeEvalValue => {
+export const safeEval = (code: string, globalThis?: RpcStub<object>): SafeEvalValue => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  return evaluate(ast, new GlobalScope(globalThis)) as SafeEvalValue
+  return evaluate(ast, globalThis ? new GlobalScope(globalThis) : new GlobalScope({})) as SafeEvalValue
 }

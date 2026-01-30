@@ -63,6 +63,7 @@
   "dependencies": {
     "camelcase": "^9.0.0",
     "capnweb": "file:dist/capnweb",
+    "capnweb-eval": "file:packages/capnweb-eval",
     "json-schema": "^0.4.0",
     "json-schema-to-typescript": "^15.0.0",
     "kysely": "^0.28.9",

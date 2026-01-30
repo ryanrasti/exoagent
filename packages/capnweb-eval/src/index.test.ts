@@ -28,7 +28,7 @@ describe('capnweb-eval basic evaluation', () => {
     const stub = new RpcStub({})
     expect(safeEval('null', stub)).toBe(null)
     // 'undefined' as an identifier accesses the stub property, which returns RpcPromise
-    const result = await safeEval('undefined', stub) as undefined
+    const result = await safeEval('undefined', stub)
     expect(result).toBe(undefined)
   })
 
