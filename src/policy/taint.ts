@@ -23,13 +23,14 @@ class TaintedValue<T> extends RpcTarget {
         if (value instanceof TaintedValue) {
             return value
         }
-        const wrap = (value: T, newTaints = taints) => new TaintedValue(value, taints)
+        const wrap = (v: T, newTaints: Set<string> = taints) => new TaintedValue(v, newTaints)
         const has = (_target: this, prop: string | symbol) => {
             if (prop === taintedProperty) {
                 return true
             }
             if (Array.isArray(value) || typeof value === 'string') {
-                return typeof prop === 'number'
+                const n = Number(prop)
+                return !Number.isNaN(n) && n >= 0 && n < (value as unknown[] | string).length
             }
             if (typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
                 return Object.hasOwn(value, prop)
@@ -40,16 +41,21 @@ class TaintedValue<T> extends RpcTarget {
             return false
         }
 
-        return new Proxy(this, {
-            apply: (target, thisArg, args) => {
+        const invoke = (thisArg: unknown, args: unknown[]) =>
+            Reflect.apply(value as (...a: unknown[]) => unknown, thisArg, args)
+
+        // Use wrapped value as target when callable so the proxy is callable
+        const proxyTarget = typeof value === 'function' ? value : this
+        return new Proxy(proxyTarget, {
+            apply: (_target, thisArg, args) => {
                 const unionTaints = new Set([...taints, ...args.flatMap(arg => arg[taintedProperty]?.taints ?? [])])
 
                 if (isStub(value)) {
                     // Remote call: wrap the args
-                    return wrap(target.apply(thisArg, args.map(arg => wrap(arg, unionTaints))))
+                    return wrap(invoke(thisArg, args.map(arg => wrap(arg as T, unionTaints))) as T)
                 }
                 // Local call: wrap the return value
-                return wrap(target.apply(thisArg, args), unionTaints)
+                return wrap(invoke(thisArg, args), unionTaints)
             },
             get: (_target, prop, _receiver) => {
                 if (prop === taintedProperty) {
@@ -75,13 +81,20 @@ class TaintedValue<T> extends RpcTarget {
                 }
                 return undefined
             },
-            has,
+            has: (target, prop) => has(target as this, prop),
         })
     }
 
 }
 
+export const wrapTainted = <T>(value: T, taints: Iterable<string> = []): T =>
+    new TaintedValue(value, new Set(taints)) as T
 
+export const getTaints = (value: unknown): Set<string> | undefined =>
+    (value as { [taintedProperty]?: { taints: Set<string> } })?.[taintedProperty]?.taints
+
+export const getValue = (value: unknown): unknown =>
+    (value as { [taintedProperty]?: { value: unknown } })?.[taintedProperty]?.value ?? value
 
 // Constraints:
 // 1. Local function calls (including record/replay callbacks):
