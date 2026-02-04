@@ -1,7 +1,8 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { inspect } from 'node:util'
 import { RpcTarget } from 'capnweb'
-import { RpcPromise } from 'capnweb'
+
+export type ToolProps<Sink extends string = string> = { sink?: Sink }
 
 const validate = (schema: StandardSchemaV1 | ((arg: unknown) => boolean), value: unknown): void => {
   if ('~standard' in schema) {
@@ -21,9 +22,10 @@ const validate = (schema: StandardSchemaV1 | ((arg: unknown) => boolean), value:
 }
 
 const toolMetadataKey = Symbol('toolMetadata')
-type ToolMetadata = {
+export type ToolMetadata = {
   [toolMetadataKey]?: {
     runtimeValidationEnabled?: boolean
+    policyProps?: ToolProps
   }
 }
 export const setToolMetadata = (target: (...args: any[]) => unknown, metadata: ToolMetadata[typeof toolMetadataKey]) => {
@@ -32,6 +34,10 @@ export const setToolMetadata = (target: (...args: any[]) => unknown, metadata: T
     ...meta[toolMetadataKey],
     ...metadata,
   }
+}
+export const getToolMetadata = (target: (...args: any[]) => unknown): ToolMetadata[typeof toolMetadataKey] | undefined => {
+  const meta = target as unknown as ToolMetadata
+  return meta[toolMetadataKey]
 }
 
 // `@tool` is a decorator that annotates the input of a method
@@ -44,7 +50,11 @@ function toolDef<TInput>(inputSchema: StandardSchemaV1<TInput, TInput>): <This, 
   target: (this: This, arg: TInput) => Return,
   context: ClassMethodDecoratorContext<This, (this: This, arg: TInput) => Return>,
 ) => (this: This, arg: TInput) => Return
-function toolDef<TInput = void>(inputSchema?: StandardSchemaV1<TInput, TInput>) {
+function toolDef<TInput>(inputSchema: StandardSchemaV1<TInput, TInput>, props: ToolProps): <This, Return>(
+  target: (this: This, arg: TInput) => Return,
+  context: ClassMethodDecoratorContext<This, (this: This, arg: TInput) => Return>,
+) => (this: This, arg: TInput) => Return
+function toolDef<TInput = void>(inputSchema?: StandardSchemaV1<TInput, TInput>, props?: ToolProps) {
   return <This, Return>(
     target: ((this: This) => Return) | ((this: This, arg: TInput) => Return),
     context: ClassMethodDecoratorContext<This, (...unknown: unknown[]) => Return>,
@@ -70,13 +80,13 @@ function toolDef<TInput = void>(inputSchema?: StandardSchemaV1<TInput, TInput>) 
       }
     }
 
-    setToolMetadata(replacementMethod, { runtimeValidationEnabled: true })
+    setToolMetadata(replacementMethod, { runtimeValidationEnabled: true, policyProps: props })
 
     return replacementMethod
   }
 }
 
-function toolUnsafeNoValidation() {
+function toolUnsafeNoValidation(props?: ToolProps) {
   return <This, Return>(
     target: (this: This, ...args: any[]) => Return,
     context: ClassMethodDecoratorContext<This, (...unknown: any[]) => Return>,
@@ -85,7 +95,7 @@ function toolUnsafeNoValidation() {
       throw new Error(`Tool decorator can only be used on methods`)
     }
 
-    setToolMetadata(target, { runtimeValidationEnabled: true })
+    setToolMetadata(target, { runtimeValidationEnabled: true, policyProps: props })
 
     return target
   }
@@ -98,8 +108,7 @@ export type ToolCallback<T extends (arg: any) => unknown> = T | { [callbackMetad
 
 type Fn = ToolCallback<(arg: any) => any>
 
-function callbackTool(
-): <This, Return>(
+function callbackTool(props?: ToolProps): <This, Return>(
   target: (this: This, arg: Fn) => Return,
   context: ClassMethodDecoratorContext<This, (this: This, arg: Fn) => Return>,
 ) => (this: This, arg: Fn) => Return {
@@ -130,7 +139,7 @@ function callbackTool(
       return target.call(this, callbackWrapped as unknown as Fn)
     }
 
-    setToolMetadata(replacementMethod, { runtimeValidationEnabled: true })
+    setToolMetadata(replacementMethod, { runtimeValidationEnabled: true, policyProps: props })
 
     return replacementMethod
   }
@@ -143,7 +152,6 @@ function callbackTool(
 const unwrapCallback = <A, V>(toolCallback: ToolCallback<(arg: A) => V>, returnSchema: StandardSchemaV1<V, V> | ((arg: unknown) => arg is V)) =>
   <R>(arg: A, then: (result: V) => R, opts?: { catch?: (error: unknown) => R, finally?: () => void }): R => {
     const callback = callbackMetadataKey in toolCallback ? toolCallback[callbackMetadataKey].callback : toolCallback
-    let isPromise = false
 
     try {
       const result = callback(arg)
@@ -151,7 +159,7 @@ const unwrapCallback = <A, V>(toolCallback: ToolCallback<(arg: A) => V>, returnS
         return result.then((r) => {
           validate(returnSchema, r)
           return then(r)
-        }, opts?.catch).finally(opts?.finally)
+        }, opts?.catch).finally(opts?.finally) as R
       }
 
       validate(returnSchema, result)
@@ -164,9 +172,7 @@ const unwrapCallback = <A, V>(toolCallback: ToolCallback<(arg: A) => V>, returnS
       throw error
     }
     finally {
-      if (!isPromise) {
-        opts?.finally?.()
-      }
+      opts?.finally?.()
     }
   }
 

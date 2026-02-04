@@ -1,6 +1,7 @@
+import type { ToolCallback } from './rpc-toolset'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { RpcToolset, tool } from './rpc-toolset'
+import { getToolMetadata, RpcToolset, tool } from './rpc-toolset'
 import { TestToolset, User } from './rpc-toolset-test-helpers'
 import { isFromItem } from './sql/builder'
 import { compiledQuery } from './sql/test-helpers'
@@ -188,5 +189,49 @@ describe('sql integration with RPC toolset', () => {
       sql: 'SELECT "user"."id" as "id", "user"."name" as "name" FROM "users" AS "user" WHERE "user"."id" = $1',
       parameters: ['123'],
     })
+  })
+})
+
+describe('policy annotations', () => {
+  it('stores policy props in metadata when provided', () => {
+    class T extends RpcToolset {
+      @tool(z.object({ msg: z.string() }), { sink: 'slack' })
+      send(input: { msg: string }) {
+        return input.msg
+      }
+
+      @tool.callback({ sink: 'log' })
+      logCallback(callback: ToolCallback<(arg: string) => void>) {
+        tool.unwrap(callback, z.void())('test', () => {})
+      }
+
+      @tool.unsafeNoValidation({ sink: 'api' })
+      unsafeMethod() {
+        return 'ok'
+      }
+    }
+
+    const t = new T()
+    const sendMeta = getToolMetadata(t.send)
+    expect(sendMeta?.policyProps).toEqual({ sink: 'slack' })
+
+    const logMeta = getToolMetadata(t.logCallback)
+    expect(logMeta?.policyProps).toEqual({ sink: 'log' })
+
+    const unsafeMeta = getToolMetadata(t.unsafeMethod)
+    expect(unsafeMeta?.policyProps).toEqual({ sink: 'api' })
+  })
+
+  it('does not store policy props when not provided', () => {
+    class T extends RpcToolset {
+      @tool(z.object({ n: z.number() }))
+      double(input: { n: number }) {
+        return input.n * 2
+      }
+    }
+
+    const t = new T()
+    const meta = getToolMetadata(t.double)
+    expect(meta?.policyProps).toBeUndefined()
   })
 })
