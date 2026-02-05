@@ -97,7 +97,7 @@ export class GlobalScope extends Scope {
 
   * get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined> {
     assertSafeMember(node.name, node)
-    const inner = this.globalThis.raw[node.name]
+    const inner = this.globalThis[node.name]
     if (inner === undefined)
       return undefined
     return Value.of(inner, []) as Value<SafeEvalValueInner>

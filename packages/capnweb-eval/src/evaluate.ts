@@ -1,6 +1,7 @@
 import type * as acorn from 'acorn'
 import type { Scope } from './scope'
 import type { AwaitControl, SafeEvalValueInner } from './utils'
+import { inspect } from 'node:util'
 import { LocalScope } from './scope'
 import { emitAwaitControl, evalInvariant, parseInvariant, Value } from './utils'
 
@@ -120,6 +121,7 @@ export function* evaluate(
 ): Evaluation<Value<SafeEvalValueInner>> {
   if (node.type === 'Identifier') {
     const val = (yield* scope.get(node))
+    console.log('evaluate', node.name, inspect(val, { depth: null }))
     if (val == null) {
       parseInvariant(false, 'Identifier not found in scope', node)
     }

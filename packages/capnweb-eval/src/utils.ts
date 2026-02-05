@@ -79,8 +79,11 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return Array.isArray(this.raw)
   }
 
-  isThenable(): this is Value<PromiseLike<unknown>> {
-    return Value.isThenable(this.raw)
+  isThenable(): this is Value<PromiseLike<SafeEvalValueInner>> {
+    if (!this.isPlainObject() && !this.isStub()) {
+      return false
+    }
+    return typeof (this.raw as PromiseLike<unknown>)?.then === 'function'
   }
 
   isNumber(): this is Value<number> {
@@ -105,6 +108,15 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   static isThenable(x: unknown): boolean {
     return typeof x === 'object' && x !== null
       && typeof (x as Promise<unknown>)?.then === 'function'
+  }
+
+  asAwaitable(): PromiseLike<Value<SafeEvalValueInner>> | Value<SafeEvalValueInner> {
+    if (this.isThenable()) {
+      console.log('asAwaitable', this.raw)
+      return this.raw.then(v => Value.of(v, this.getTaints()))
+    }
+    console.log('asAwaitable', this.raw, 'not thenable')
+    return this
   }
 }
 

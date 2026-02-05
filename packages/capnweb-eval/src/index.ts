@@ -3,17 +3,16 @@ import type { SafeEvalValueInner, StubInternal } from './utils'
 import * as acorn from 'acorn'
 import { evaluate } from './evaluate'
 import { GlobalScope } from './scope'
-import { unwrap, Value } from './utils'
+import { Value } from './utils'
 
 export type { SafeEvalValueInner, Value } from './utils'
-export { unwrap } from './utils'
 
-export const safeEval = (code: string, globalThis?: RpcStub<object>): Value<SafeEvalValueInner> | Promise<Value<SafeEvalValueInner>> => {
+export const safeEval = (code: string, globalThis?: RpcStub<object>): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
   const iter = evaluate(ast, globalThis ? new GlobalScope(globalThis as StubInternal) : new GlobalScope({}))
   let step = iter.next()
   if (step.done) {
-    return step.value
+    return step.value.asAwaitable()
   }
 
   const fn = async (): Promise<Value<SafeEvalValueInner>> => {
@@ -27,7 +26,7 @@ export const safeEval = (code: string, globalThis?: RpcStub<object>): Value<Safe
       const taints = raw instanceof Value ? raw.getTaints() : Value.getTaints(resolved)
       step = iter.next(Value.of(innerOnly, taints) as Value<SafeEvalValueInner>)
     }
-    return step.value
+    return step.value.asAwaitable()
   }
   return fn()
 }
