@@ -1,3 +1,4 @@
+import { inspect } from 'node:util'
 import { RpcStub } from 'capnweb'
 import { describe, expect, it } from 'vitest'
 import { safeEval } from './index.js'
@@ -47,13 +48,13 @@ describe('capnweb-eval basic evaluation', () => {
     const stub = new RpcStub({
       obj: { nested: { value: 123 } },
     })
-    expect(await safeEval('obj', stub)).toEqual(Value.of({ nested: { value: 123 } }, []))
+    expect(await safeEval('obj', stub)).toEqual(Value.of({ nested: Value.of({ value: Value.of(123, []) }, []) }, []))
   })
 
   it('accesses array elements', async () => {
     const stub = new RpcStub({ arr: [1, 2, 3] })
     const result = await safeEval('arr', stub)
-    expect(result).toEqual(Value.of([1, 2, 3], []))
+    expect(result).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
     expect(Array.isArray(result.raw)).toBe(true)
   })
 
@@ -80,7 +81,7 @@ describe('capnweb-eval basic evaluation', () => {
     })
     const result = await safeEval('obj', stub)
     expect(result).toEqual(Value.of({
-      value: 10,
+      value: Value.of(10, []),
       getValue: expect.any(Function),
       multiply: expect.any(Function),
     }, []))
@@ -88,14 +89,14 @@ describe('capnweb-eval basic evaluation', () => {
 
   it('creates arrays', async () => {
     const stub = new RpcStub({})
-    expect(await safeEval('[1, 2, 3]', stub)).toEqual(Value.of([1, 2, 3], []))
+    expect(await safeEval('[1, 2, 3]', stub)).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
     expect(await safeEval('[]', stub)).toEqual(Value.of([], []))
-    expect(await safeEval('[true, false, null]', stub)).toEqual(Value.of([true, false, null], []))
+    expect(await safeEval('[true, false, null]', stub)).toEqual(Value.of([Value.of(true, []), Value.of(false, []), Value.of(null, [])], []))
   })
 
   it('creates objects', async () => {
     const stub = new RpcStub({})
-    expect(await safeEval('{foo: 123, bar: "hello"}', stub)).toEqual(Value.of({ foo: 123, bar: 'hello' }, []))
+    expect(await safeEval('{foo: 123, bar: "hello"}', stub)).toEqual(Value.of({ foo: Value.of(123, []), bar: Value.of('hello', []) }, []))
     expect(await safeEval('{}', stub)).toEqual(Value.of({}, []))
   })
 
@@ -103,12 +104,12 @@ describe('capnweb-eval basic evaluation', () => {
     const stub = new RpcStub({ obj: { a: 1, b: 2 }, key: 'a' })
     const objResult = await safeEval('obj', stub)
     const keyResult = await safeEval('key', stub)
-    expect(objResult).toEqual(Value.of({ a: 1, b: 2 }, []))
+    expect(objResult).toEqual(Value.of({ a: Value.of(1, []), b: Value.of(2, []) }, []))
     expect(keyResult).toEqual(Value.of('a', []))
-    const obj = objResult.raw as Record<string, unknown>
+    const obj = objResult.raw as Record<string, Value<unknown>>
     const key = keyResult.raw as string
-    expect(obj[key]).toBe(1)
-    expect(obj.b).toBe(2)
+    expect(obj[key].raw).toBe(1)
+    expect(obj.b.raw).toBe(2)
   })
 
   it('supports arrow functions', async () => {
@@ -118,7 +119,7 @@ describe('capnweb-eval basic evaluation', () => {
     })
     const fn = await safeEval('x => double(x)', stub)
     expect(fn).toEqual(Value.of(expect.any(Function), []))
-    expect(await safeEval('numbers', stub)).toEqual(Value.of([1, 2, 3], []))
+    expect(await safeEval('numbers', stub)).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
   })
 
   it('supports arrow functions with multiple parameters', async () => {
@@ -128,12 +129,12 @@ describe('capnweb-eval basic evaluation', () => {
 
   it('supports array spread', async () => {
     const stub = new RpcStub({})
-    expect(await safeEval('[1, 2, ...[3, 4]]', stub)).toEqual(Value.of([1, 2, 3, 4], []))
+    expect(await safeEval('[1, 2, ...[3, 4]]', stub)).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, []), Value.of(4, [])], []))
   })
 
   it('supports object spread', async () => {
     const stub = new RpcStub({})
-    expect(await safeEval('{a: 1, ...{b: 2}}', stub)).toEqual(Value.of({ a: 1, b: 2 }, []))
+    expect(await safeEval('{a: 1, ...{b: 2}}', stub)).toEqual(Value.of({ a: Value.of(1, []), b: Value.of(2, []) }, []))
   })
 
   it('supports nested expressions', async () => {
@@ -147,9 +148,9 @@ describe('capnweb-eval basic evaluation', () => {
   it('supports array methods', async () => {
     const stub = new RpcStub({ arr: [1, 2, 3] })
     const result = await safeEval('arr', stub)
-    expect(result).toEqual(Value.of([1, 2, 3], []))
+    expect(result).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
     expect(Array.isArray(result.raw)).toBe(true)
-    expect((result.raw as unknown[]).length).toBe(3)
+    expect((result.raw as Value<unknown>[]).length).toBe(3)
   })
 
   it('handles string indexing', async () => {
@@ -199,10 +200,10 @@ describe('capnweb-eval complex scenarios', () => {
     })
     const dataResult = await safeEval('data', stub)
     expect(dataResult).toEqual(Value.of({
-      users: [
-        { name: 'Alice', age: 30 },
-        { name: 'Bob', age: 25 },
-      ],
+      users: Value.of([
+        Value.of({ name: Value.of('Alice', []), age: Value.of(30, []) }, []),
+        Value.of({ name: Value.of('Bob', []), age: Value.of(25, []) }, []),
+      ], []),
     }, []))
     const getAgeResult = await safeEval('getAge', stub)
     expect(getAgeResult).toEqual(Value.of(expect.any(Function), []))
@@ -216,22 +217,22 @@ describe('capnweb-eval complex scenarios', () => {
     }
     const stub = new RpcStub({ obj: objIn })
     const result = await safeEval('obj', stub)
-    expect(result).toEqual(Value.of(expect.objectContaining({ getValue: expect.any(Function) }), []))
-    const obj = result.raw as Record<string, unknown>
-    expect((obj as typeof objIn).getValue().multiply(3)).toBe(6)
+    expect(result).toEqual(Value.of(expect.objectContaining({ getValue: Value.of(expect.any(Function)) }), []))
+    const obj = result.unwrap() as typeof objIn
+    expect(obj.getValue().multiply(3)).toBe(6)
   })
 
   it('handles functions that return arrays', async () => {
     const stub = new RpcStub({
       range: (n: number): number[] => Array.from({ length: n }, (_, i) => i),
     })
-    expect(await safeEval('range(5)', stub)).toEqual(Value.of([0, 1, 2, 3, 4], []))
+    expect(await safeEval('range(5)', stub)).toEqual(Value.of([Value.of(0, []), Value.of(1, []), Value.of(2, []), Value.of(3, []), Value.of(4, [])], []))
   })
 
   it('handles functions that return objects', async () => {
     const stub = new RpcStub({
       createPoint: (x: number, y: number): { x: number, y: number } => ({ x, y }),
     })
-    expect(await safeEval('createPoint(10, 20)', stub)).toEqual(Value.of({ x: 10, y: 20 }, []))
+    expect(await safeEval('createPoint(10, 20)', stub)).toEqual(Value.of({ x: Value.of(10, []), y: Value.of(20, []) }, []))
   })
 })

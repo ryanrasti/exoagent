@@ -40,7 +40,40 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return extra.length === 0 ? this : new Value(this.raw, [...this.taints, ...extra]) as Value<T>
   }
 
+  /** Recursively unwrap arrays and objects, converting Value instances back to raw values. */
+  unwrap(): SafeEvalValue {
+    // Arrays: unwrap each element recursively
+    if (Array.isArray(this.raw)) {
+      return this.raw.map(item => item instanceof Value ? item.unwrap() : item) as SafeEvalValue
+    }
+    // Plain objects: unwrap each property value recursively
+    if (this.isPlainObject()) {
+      const unwrapped: { [key: string]: SafeEvalValue } = {}
+      for (const [key, val] of Object.entries(this.raw)) {
+        unwrapped[key] = val instanceof Value ? val.unwrap() : val as SafeEvalValue
+      }
+      return unwrapped as SafeEvalValue
+    }
+    // Primitives, functions, stubs, etc.: return raw value
+    return this.raw as SafeEvalValue
+  }
+
   static of<T extends SafeEvalValueInner>(raw: T, taints: readonly string[] = []): Value<T> {
+    // Recursively wrap arrays and objects
+    if (Array.isArray(raw)) {
+      const wrapped = raw.map(item => item instanceof Value ? item : Value.of(item as SafeEvalValueInner, []))
+      return new Value(wrapped as T, taints)
+    }
+    if (typeof raw === 'object' && raw !== null) {
+      const proto = Object.getPrototypeOf(raw)
+      if (proto === null || proto === Object.prototype) {
+        const wrapped: { [key: string]: Value<SafeEvalValueInner> } = {}
+        for (const [key, val] of Object.entries(raw)) {
+          wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, [])
+        }
+        return new Value(wrapped as T, taints)
+      }
+    }
     return new Value(raw, taints)
   }
 
