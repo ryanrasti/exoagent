@@ -1,78 +1,96 @@
 import type * as acorn from 'acorn'
-import type { SafeEvalValueInternal, StubInternal } from './utils'
-import { assertSafeMember, evalInvariant, isPlainObject, isStub, parseInvariant } from './utils'
 import type { Evaluation } from './evaluate'
+import type { SafeEvalValueInner, StubInternal } from './utils'
+import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
 
+type EvalArray = Value<SafeEvalValueInner>[]
+type EvalRecord = Record<string, Value<SafeEvalValueInner>>
+function assertObjectOrArray(value: Value<SafeEvalValueInner>, node: acorn.Node): asserts value is Value<EvalRecord | EvalArray> {
+  evalInvariant(value.isArray() || value.isPlainObject() || value.isStub(), 'Object pattern must evaluate to an object or array', node, value)
+}
 
-export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<SafeEvalValueInternal>
+export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<Value<SafeEvalValueInner>>
 
 export abstract class Scope {
-  abstract get(node: acorn.Identifier): Evaluation<SafeEvalValueInternal | undefined>
-  abstract set(name: acorn.Identifier, value: SafeEvalValueInternal): void
+  abstract get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined>
+  abstract set(name: acorn.Identifier, value: Value<SafeEvalValueInner>): void
+  /** Taints from the execution path that led here (e.g. condition). Merged into values when binding. */
+  getContextTaints(): string[] { return [] }
 
-  * bind(param: acorn.Pattern, value: SafeEvalValueInternal, evaluate: EvaluateFn): Evaluation<void> {
+  /** Value with scope context taints merged in (for storing in this scope). */
+  withContextTaints(value: Value<SafeEvalValueInner>): Value<SafeEvalValueInner> {
+    if (!(value instanceof Value))
+      return Value.of(value as SafeEvalValueInner, []) as Value<SafeEvalValueInner>
+    return value.withTaints(this.getContextTaints()) as Value<SafeEvalValueInner>
+  }
+
+  * bind(param: acorn.Pattern, value: Value<SafeEvalValueInner>, evaluate: EvaluateFn): Evaluation<void> {
     parseInvariant(param.type !== 'MemberExpression', 'Member assignment is not allowed', param)
+    const v = this.withContextTaints(value)
 
     if (param.type === 'Identifier') {
-      this.set(param, value)
+      this.set(param, v)
     }
     else if (param.type === 'AssignmentPattern') {
-      let rhs: SafeEvalValueInternal = value
-      if (rhs === undefined) {
+      let rhs: Value<SafeEvalValueInner> = value
+      if (rhs.raw === undefined) {
         rhs = yield* evaluate(param.right, this)
       }
       yield* this.bind(param.left, rhs, evaluate)
     }
     else if (param.type === 'ArrayPattern') {
-      evalInvariant(Array.isArray(value), 'Array pattern expects an array', param, value)
+      evalInvariant(value.isArray(), 'Array pattern expects an array', param, value)
+      const arr = value.raw as EvalArray
       for (const [i, pat] of param.elements.entries()) {
         if (pat === null) {
           continue
         }
         if (pat.type === 'RestElement') {
           parseInvariant(param.elements.length === i + 1, 'Rest element must be last', pat)
-          yield* this.bind(pat, value.slice(i), evaluate)
+          yield* this.bind(pat, Value.of(arr.slice(i), Value.mergeTaints(...arr.slice(i))) as Value<SafeEvalValueInner>, evaluate)
         }
         else {
-          yield* this.bind(pat, value[i], evaluate)
+          yield* this.bind(pat, arr[i]!, evaluate)
         }
       }
     }
     else if (param.type === 'ObjectPattern') {
-      evalInvariant(Array.isArray(value) || isPlainObject(value) || isStub(value), 'Object pattern must evaluate to an object or array', param, value)
+      assertObjectOrArray(value, param)
+      const inner = value.raw as EvalRecord
 
       const bound: Set<string | number> = new Set()
       for (const [i, property] of param.properties.entries()) {
         if (property.type === 'RestElement') {
-          evalInvariant(!isStub(value), 'Rest element must cannot be a stub', param, value)
+          evalInvariant(!value.isStub(), 'Rest element must cannot be a stub', param, value)
           parseInvariant(property.argument.type === 'Identifier', 'Rest element must be an identifier', property.argument)
           parseInvariant(param.properties.length === i + 1, 'Rest element must be last', property.argument)
-          const copy: { [key: string]: SafeEvalValueInternal } = {}
-          for (const key of Object.keys(value)) {
+          const copy: { [key: string]: Value<SafeEvalValueInner> } = {}
+          for (const key of Object.keys(inner)) {
             if (bound.has(key)) {
               continue
             }
             assertSafeMember(key, property)
-            copy[key] = value[key]
+            copy[key] = inner[key as keyof typeof inner]
           }
-          this.set(property.argument, copy)
+          this.set(property.argument, Value.of(copy, Value.mergeTaints(...Object.values(copy))) as Value<SafeEvalValueInner>)
           break
         }
-        let key: SafeEvalValueInternal
+        let key: Value<SafeEvalValueInner>
         if (property.computed) {
           key = yield* evaluate(property.key, this)
         }
         else {
           parseInvariant(property.key.type === 'Identifier', 'Property key must be an identifier', property.key)
-          key = property.key.name
+          key = Value.of(property.key.name, []) as Value<SafeEvalValueInner>
         }
-        assertSafeMember(key, property.key)
-        yield* this.bind(property.value, value[key as keyof typeof value] as SafeEvalValueInternal, evaluate)
-        bound.add(key)
+        evalInvariant(key.isSafeMember(), 'Member must be a safe string or number', property.key, key)
+        const k = key.raw
+        yield* this.bind(property.value, inner[k]!, evaluate)
+        bound.add(k)
       }
     }
     else if (param.type === 'RestElement') {
-      evalInvariant(Array.isArray(value), 'Rest element must evaluate to an array', param, value)
+      evalInvariant(value.isArray(), 'Rest element must evaluate to an array', param, value)
       yield* this.bind(param.argument, value, evaluate)
     }
     else {
@@ -86,22 +104,25 @@ export class GlobalScope extends Scope {
     super()
   }
 
-  *get(node: acorn.Identifier): Evaluation<SafeEvalValueInternal | undefined> {
+  * get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined> {
     assertSafeMember(node.name, node)
-    return this.globalThis[node.name as keyof StubInternal]
+    const inner = (this.globalThis as Record<string, SafeEvalValueInner | undefined>)[node.name]
+    if (inner === undefined)
+      return undefined
+    return Value.of(inner, []) as Value<SafeEvalValueInner>
   }
 
-  set(name: acorn.Identifier, value: SafeEvalValueInternal) {
+  set(name: acorn.Identifier, value: Value<SafeEvalValueInner>) {
     evalInvariant(false, 'Global scope is read-only', name, value)
   }
 }
 
 export class LocalScope extends Scope {
-  constructor(public vars: Map<string, SafeEvalValueInternal>, public parent: Scope | null) {
+  constructor(public vars: Map<string, Value<SafeEvalValueInner>>, public parent: Scope | null) {
     super()
   }
 
-  *get(node: acorn.Identifier): Evaluation<SafeEvalValueInternal | undefined> {
+  * get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined> {
     assertSafeMember(node.name, node)
     const local = this.vars.get(node.name)
     if (local !== undefined)
@@ -111,7 +132,7 @@ export class LocalScope extends Scope {
     return undefined
   }
 
-  set(name: acorn.Identifier, value: SafeEvalValueInternal) {
+  set(name: acorn.Identifier, value: Value<SafeEvalValueInner>) {
     evalInvariant(!this.vars.has(name.name), 'Variable already bound', name, name.name)
     this.vars.set(name.name, value)
   }

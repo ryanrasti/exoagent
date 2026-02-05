@@ -46,11 +46,7 @@ function toolDef(): <This, Return>(
   target: (this: This) => Return,
   context: ClassMethodDecoratorContext<This, (this: This) => Return>,
 ) => (this: This) => Return
-function toolDef<TInput>(inputSchema: StandardSchemaV1<TInput, TInput>): <This, Return>(
-  target: (this: This, arg: TInput) => Return,
-  context: ClassMethodDecoratorContext<This, (this: This, arg: TInput) => Return>,
-) => (this: This, arg: TInput) => Return
-function toolDef<TInput>(inputSchema: StandardSchemaV1<TInput, TInput>, props: ToolProps): <This, Return>(
+function toolDef<TInput>(inputSchema: StandardSchemaV1<TInput, TInput>, props?: ToolProps): <This, Return>(
   target: (this: This, arg: TInput) => Return,
   context: ClassMethodDecoratorContext<This, (this: This, arg: TInput) => Return>,
 ) => (this: This, arg: TInput) => Return

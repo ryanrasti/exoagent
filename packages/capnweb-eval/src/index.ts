@@ -1,24 +1,33 @@
 import type { RpcStub } from 'capnweb'
-import type { SafeEvalValue } from './utils'
+import type { SafeEvalValueInner, StubInternal } from './utils'
 import * as acorn from 'acorn'
 import { evaluate } from './evaluate'
 import { GlobalScope } from './scope'
-import { evalInvariant } from './utils'
+import { unwrap, Value } from './utils'
 
-export const safeEval = (code: string, globalThis?: RpcStub<object>): SafeEvalValue | Promise<SafeEvalValue> => {
+export type { SafeEvalValueInner, Value } from './utils'
+export { unwrap } from './utils'
+
+export const safeEval = (code: string, globalThis?: RpcStub<object>): Value<SafeEvalValueInner> | Promise<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  const iter = evaluate(ast, globalThis ? new GlobalScope(globalThis) : new GlobalScope({}))
+  const iter = evaluate(ast, globalThis ? new GlobalScope(globalThis as StubInternal) : new GlobalScope({}))
   let step = iter.next()
   if (step.done) {
-    return step.value as SafeEvalValue
+    return step.value
   }
 
-  // We're in an async function, so we need to return a promise and await the results:
-  const fn = async (): Promise<SafeEvalValue> => {
+  const fn = async (): Promise<Value<SafeEvalValueInner>> => {
     while (!step.done) {
-      step = iter.next(await step.value.value)
+      const ctrl = step.value as { value: Value<SafeEvalValueInner> | Promise<Value<SafeEvalValueInner>> }
+      const raw = ctrl.value
+      const resolved = raw instanceof Value
+        ? (raw.raw instanceof Promise ? await raw.raw : raw.raw)
+        : await raw
+      const innerOnly: SafeEvalValueInner = resolved instanceof Value ? (resolved as Value<SafeEvalValueInner>).raw : (resolved as SafeEvalValueInner)
+      const taints = raw instanceof Value ? raw.getTaints() : Value.getTaints(resolved)
+      step = iter.next(Value.of(innerOnly, taints) as Value<SafeEvalValueInner>)
     }
-    return step.value as SafeEvalValue
+    return step.value
   }
   return fn()
 }
