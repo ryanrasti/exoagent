@@ -1,6 +1,6 @@
 import type * as acorn from 'acorn'
 import type { RpcStub } from 'capnweb'
-import { RpcPromise } from 'capnweb'
+import { RpcPromise, RpcTarget } from 'capnweb'
 
 const checkSafeMember = (member: string) => {
   if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
@@ -59,9 +59,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 
   isStub(): this is Value<(...args: unknown[]) => unknown> {
-    // TODO: `typeof obj === 'function'` is a hack to allow stubs to be used as objects
-  //    DO NOT SUBMIT THIS CHANGE
-    return typeof this.raw === 'function'
+    return this.raw instanceof RpcTarget
   }
 
   isFunction(): this is Value<(...args: unknown[]) => unknown> {

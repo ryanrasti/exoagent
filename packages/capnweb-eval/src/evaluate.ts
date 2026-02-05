@@ -156,7 +156,7 @@ export function* evaluate(
     const args = yield* evalArray(node.arguments, scope)
     evalInvariant(callee.isFunction(), 'Member must be a function', node.callee, callee)
     const method = callee.raw
-    if (object.isStub()) {
+    if (callee.isStub()) {
       // If we're calling a method outside of the evaluation context, it's a regular
       // JS call -- call it then re-wrap it:
       // TODO: ensure this works for promises too
@@ -164,7 +164,7 @@ export function* evaluate(
       return Value.of(r, callee.getTaints())
     }
     else {
-      const result = Reflect.apply(method, object.raw, args.map(a => a.raw))
+      const result = Reflect.apply(method, object, args)
       return result.withTaints(callee.getTaints())
     }
   }
