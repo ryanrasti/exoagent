@@ -14,7 +14,15 @@ type StatementResult = {
   control: 'normal'
 }
 
+export type CheckStubCall = (method: (...args: any[]) => any, thisVal: Value<SafeEvalValueInner>, args: Value<SafeEvalValueInner>[]) => { verdict: 'allow' } | { verdict: 'deny', reason: string }
+
 export class Evaluator {
+  private checkStubCall: CheckStubCall
+
+  constructor(checkStubCall: CheckStubCall) {
+    this.checkStubCall = checkStubCall
+  }
+
   * evalPropertyKey(
     node: acorn.Expression,
     computed: boolean,
@@ -161,7 +169,10 @@ export class Evaluator {
         // If we're calling a method outside of the evaluation context, it's a regular
         // JS call -- call it then re-wrap it:
         // TODO: ensure this works for promises too
-        // TODO: do the actual policy check here
+        const result = this.checkStubCall(method, object, args)
+        if (result.verdict === 'deny') {
+          throw new Error(`Method call denied: ${result.reason}`)
+        }
         const r = Reflect.apply(method, object.raw, args.map(a => a.raw))
         return Value.of(r, callee.getTaints()).withTaints(
           // Since we're calling a method outside of the evaluation context,
@@ -284,12 +295,4 @@ export class Evaluator {
     }
     return yield* this.evaluate(body, localScope)
   }
-}
-
-export function* evaluate(
-  node: acorn.Expression,
-  scope: Scope,
-): Evaluation<Value<SafeEvalValueInner>> {
-  const evaluator = new Evaluator()
-  return yield* evaluator.evaluate(node, scope)
 }

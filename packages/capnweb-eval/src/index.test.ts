@@ -1,4 +1,3 @@
-import { inspect } from 'node:util'
 import { RpcStub } from 'capnweb'
 import { describe, expect, it } from 'vitest'
 import { safeEval } from './index.js'

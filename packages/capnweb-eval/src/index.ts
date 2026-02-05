@@ -1,15 +1,20 @@
 import type { RpcStub } from 'capnweb'
+import type { CheckStubCall } from './evaluate'
 import type { SafeEvalValueInner, StubInternal } from './utils'
 import * as acorn from 'acorn'
-import { evaluate } from './evaluate'
+import { Evaluator } from './evaluate'
 import { GlobalScope } from './scope'
 import { Value } from './utils'
 
 export type { SafeEvalValueInner, Value } from './utils'
 
-export const safeEval = (code: string, globalThis?: RpcStub<object>): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
+export const safeEval = (code: string, globalThis?: RpcStub<object>, checkStubCall?: CheckStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  const iter = evaluate(ast, globalThis ? new GlobalScope(globalThis as StubInternal) : new GlobalScope({}))
+  const evaluator = new Evaluator(checkStubCall ?? (() => {
+    // TODO: default allow, but should be deny:
+    return { verdict: 'allow' }
+  }))
+  const iter = evaluator.evaluate(ast, globalThis ? new GlobalScope(globalThis as StubInternal) : new GlobalScope({}))
   let step = iter.next()
   if (step.done) {
     return step.value.asAwaitable()
