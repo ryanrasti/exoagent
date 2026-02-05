@@ -149,6 +149,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     console.log('asAwaitable', this.raw, 'not thenable')
     return this
   }
+
+  callStub(this: Value<(...args: unknown[]) => unknown>, thisVal: Value, args: Value[]): Value {
+    return Value.of(Reflect.apply(this.raw, thisVal.raw, args.map(a => a.raw)), Value.mergeTaints(thisVal, ...args))
+  }
 }
 
 export type SafeEvalValue

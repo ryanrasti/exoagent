@@ -6,7 +6,8 @@ import { Evaluator } from './evaluate'
 import { GlobalScope } from './scope'
 import { Value } from './utils'
 
-export type { SafeEvalValueInner, Value } from './utils'
+export { Evaluator } from './evaluate'
+export { Value } from './utils'
 
 export const safeEval = (code: string, globalThis?: RpcStub<object>, checkStubCall?: CheckStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })

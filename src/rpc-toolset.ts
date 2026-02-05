@@ -2,7 +2,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { inspect } from 'node:util'
 import { RpcTarget } from 'capnweb'
 
-export type ToolProps<Sink extends string = string> = { sink?: Sink }
+export type ToolProps<Sinks extends string[] = string[], Sources extends string[] = string[]> = { sources?: Sources, sinks?: Sinks }
 
 const validate = (schema: StandardSchemaV1 | ((arg: unknown) => boolean), value: unknown): void => {
   if ('~standard' in schema) {

@@ -3,12 +3,12 @@ import type { RpcTarget } from 'capnweb'
 import type { RpcToolset } from './rpc-toolset'
 import type { WrappableTools } from './tool-wrapper'
 import { newMessagePortRpcSession, RpcSession } from 'capnweb'
+import { Evaluator, Value } from 'capnweb-eval'
 import { z } from 'zod'
 // eslint-disable-next-line antfu/no-import-dist
 import runtimeCode from '../dist/code-mode-runtime.mjs?raw'
 import { StreamTransport } from './stream-transport'
 import { generateToolApi, generateToolTypes } from './tool-wrapper'
-import { safeEval } from 'capnweb-eval'
 
 export type SafeEvalResult = {
   wait: () => Promise<void>
@@ -92,10 +92,14 @@ export class CodeMode<R> {
           const channel = new MessageChannel()
           using stub = newMessagePortRpcSession(channel.port1)
           using _s = newMessagePortRpcSession(channel.port2, api)
+          const evaluator = new Evaluator()
           const fn = safeEval(code)
+          if (!(fn instanceof Value) || !(fn.isFunction())) {
+            throw new Error('Code did not return a function')
+          }
           // TODO: in theory would it be possible to just pass new RpcStub(api) instead
           //       of spinning up a transport and session like this?
-          return await (fn as any)(stub)
+          return await fn.raw(stub) as unknown as R
         }
 
         // 1. Inject sandbox context into bundled runtime
