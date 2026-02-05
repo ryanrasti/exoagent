@@ -1,7 +1,6 @@
 import type * as acorn from 'acorn'
 import type { Scope } from './scope'
 import type { AwaitControl, SafeEvalValueInner } from './utils'
-import { inspect } from 'node:util'
 import { LocalScope } from './scope'
 import { emitAwaitControl, evalInvariant, parseInvariant, Value } from './utils'
 
@@ -14,13 +13,13 @@ type StatementResult = {
   control: 'normal'
 }
 
-export type CheckStubCall = (method: (...args: any[]) => any, thisVal: Value<SafeEvalValueInner>, args: Value<SafeEvalValueInner>[]) => { verdict: 'allow' } | { verdict: 'deny', reason: string }
+export type DoStubCall = (method: Value<(...args: any[]) => any>, thisVal: Value<SafeEvalValueInner>, args: Value<SafeEvalValueInner>[]) => Value<SafeEvalValueInner>
 
 export class Evaluator {
-  private checkStubCall: CheckStubCall
+  private doStubCall: DoStubCall
 
-  constructor(checkStubCall: CheckStubCall) {
-    this.checkStubCall = checkStubCall
+  constructor(doStubCall: DoStubCall) {
+    this.doStubCall = doStubCall
   }
 
   * evalPropertyKey(
@@ -130,7 +129,6 @@ export class Evaluator {
   ): Evaluation<Value<SafeEvalValueInner>> {
     if (node.type === 'Identifier') {
       const val = (yield* scope.get(node))
-      console.log('evaluate', node.name, inspect(val, { depth: null }))
       if (val == null) {
         parseInvariant(false, 'Identifier not found in scope', node)
       }
@@ -164,25 +162,15 @@ export class Evaluator {
       }
       const args = yield* this.evalArray(node.arguments, scope)
       evalInvariant(callee.isFunction(), 'Member must be a function', node.callee, callee)
-      const method = callee.raw
       if (callee.isStub()) {
-        // If we're calling a method outside of the evaluation context, it's a regular
-        // JS call -- call it then re-wrap it:
+        // If we're calling a method outside of the evaluation context, use doStubCall
+        // which handles policy checks and taint propagation:
         // TODO: ensure this works for promises too
-        const result = this.checkStubCall(method, object, args)
-        if (result.verdict === 'deny') {
-          throw new Error(`Method call denied: ${result.reason}`)
-        }
-        const r = Reflect.apply(method, object.raw, args.map(a => a.raw))
-        return Value.of(r, callee.getTaints()).withTaints(
-          // Since we're calling a method outside of the evaluation context,
-          //  we need to manually merge the taints from the arguments:
-          args.flatMap(a => a.getTaints()),
-        )
+        return this.doStubCall(callee, object, args)
       }
       else {
         // TODO: ensure this works for promises too:
-        const result = Reflect.apply(method, object, args)
+        const result = Reflect.apply(callee.raw, object, args)
         return result.withTaints(callee.getTaints())
       }
     }

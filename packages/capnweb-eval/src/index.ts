@@ -1,5 +1,5 @@
 import type { RpcStub } from 'capnweb'
-import type { CheckStubCall } from './evaluate'
+import type { DoStubCall } from './evaluate'
 import type { SafeEvalValueInner, StubInternal } from './utils'
 import * as acorn from 'acorn'
 import { Evaluator } from './evaluate'
@@ -9,11 +9,12 @@ import { Value } from './utils'
 export { Evaluator } from './evaluate'
 export { Value } from './utils'
 
-export const safeEval = (code: string, globalThis?: RpcStub<object>, checkStubCall?: CheckStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
+export const safeEval = (code: string, globalThis?: RpcStub<object>, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  const evaluator = new Evaluator(checkStubCall ?? (() => {
-    // TODO: default allow, but should be deny:
-    return { verdict: 'allow' }
+  const evaluator = new Evaluator(doStubCall ?? ((method, thisVal, args) => {
+    // Default: just call the stub without policy checks
+    // TODO: default should probably deny, but for now allow:
+    return method.callStub(thisVal, args)
   }))
   const iter = evaluator.evaluate(ast, globalThis ? new GlobalScope(globalThis as StubInternal) : new GlobalScope({}))
   let step = iter.next()
