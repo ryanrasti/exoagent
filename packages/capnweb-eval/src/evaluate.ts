@@ -160,10 +160,16 @@ export function* evaluate(
       // If we're calling a method outside of the evaluation context, it's a regular
       // JS call -- call it then re-wrap it:
       // TODO: ensure this works for promises too
+      // TODO: do the actual policy check here
       const r = Reflect.apply(method, object.raw, args.map(a => a.raw))
-      return Value.of(r, callee.getTaints())
+      return Value.of(r, callee.getTaints()).withTaints(
+        // Since we're calling a method outside of the evaluation context,
+        //  we need to manually merge the taints from the arguments:
+        args.flatMap(a => a.getTaints()),
+      )
     }
     else {
+      // TODO: ensure this works for promises too:
       const result = Reflect.apply(method, object, args)
       return result.withTaints(callee.getTaints())
     }
@@ -220,6 +226,7 @@ export function* evaluate(
 
     // TODO: when we start checking policy, these function need to somehow
     //         check the current policy against their return values
+    //         alternative is to capture taints from the closure scope
     if (node.async) {
       return Value.of(
         async (...args: Value<SafeEvalValueInner>[]): Promise<Value<SafeEvalValueInner>> => {
