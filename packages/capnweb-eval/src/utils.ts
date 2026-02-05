@@ -15,6 +15,13 @@ const checkSafeMember = (member: string) => {
   return !unsafe
 }
 
+export function isSafeMemberRaw(member: unknown): member is string | number {
+  const t = typeof member
+  if (t !== 'string' && t !== 'number')
+    return false
+  return t === 'number' || checkSafeMember(member as string)
+}
+
 // Single wrapper for values in eval: raw value + taints + helpers. Wrap/unwrap only at boundaries.
 export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint extends string = string> {
   constructor(
@@ -33,11 +40,11 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return extra.length === 0 ? this : new Value(this.raw, [...this.taints, ...extra]) as Value<T>
   }
 
-  static of<T>(raw: T, taints: readonly string[] = []): Value<T> {
+  static of<T extends SafeEvalValueInner>(raw: T, taints: readonly string[] = []): Value<T> {
     return new Value(raw, taints)
   }
 
-  static mergeTaints(...items: (Value<unknown> | undefined)[]): string[] {
+  static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): string[] {
     return [...new Set(items.flatMap(x => (x != null ? x.getTaints() : [])))]
   }
 
@@ -86,18 +93,13 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
   /** Slot for key; returns Value with taints merged from this and key. */
   getSlot(key: Value<string | number>): Value<SafeEvalValueInner> {
-    const r = this.raw as { [key: string]: unknown }
-    const slot = r != null ? r[key.raw] : undefined
-    return Value.of(slot, Value.mergeTaints(this, key))
+    const obj = this.raw as { [key: string]: Value<SafeEvalValueInner> }
+    return key.raw in obj ? obj[key.raw].withTaints(key.getTaints()) : Value.of(undefined, [])
   }
 
   /** True if this value is a safe member key (string | number, and string not unsafe). */
   isSafeMember(): this is Value<string | number> {
-    const r = this.raw
-    const t = typeof r
-    if (t !== 'string' && t !== 'number')
-      return false
-    return t === 'number' || checkSafeMember(r as string)
+    return isSafeMemberRaw(this.raw as unknown)
   }
 
   static isThenable(x: unknown): boolean {
@@ -162,6 +164,10 @@ export function evalInvariant(
       } with value ${JSON.stringify(value)}`,
     )
   }
+}
+
+export function assertSafeMember(member: unknown, node: acorn.Node): asserts member is string | number {
+  evalInvariant(isSafeMemberRaw(member), 'Member must be a safe string or number', node, member)
 }
 
 export const controlAwaitSymbol = Symbol('controlAwait')

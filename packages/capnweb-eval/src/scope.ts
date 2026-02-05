@@ -3,12 +3,6 @@ import type { Evaluation } from './evaluate'
 import type { SafeEvalValueInner, StubInternal } from './utils'
 import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
 
-type EvalArray = Value<SafeEvalValueInner>[]
-type EvalRecord = Record<string, Value<SafeEvalValueInner>>
-function assertObjectOrArray(value: Value<SafeEvalValueInner>, node: acorn.Node): asserts value is Value<EvalRecord | EvalArray> {
-  evalInvariant(value.isArray() || value.isPlainObject() || value.isStub(), 'Object pattern must evaluate to an object or array', node, value)
-}
-
 export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<Value<SafeEvalValueInner>>
 
 export abstract class Scope {
@@ -40,14 +34,14 @@ export abstract class Scope {
     }
     else if (param.type === 'ArrayPattern') {
       evalInvariant(value.isArray(), 'Array pattern expects an array', param, value)
-      const arr = value.raw as EvalArray
+      const arr = value.raw
       for (const [i, pat] of param.elements.entries()) {
         if (pat === null) {
           continue
         }
         if (pat.type === 'RestElement') {
           parseInvariant(param.elements.length === i + 1, 'Rest element must be last', pat)
-          yield* this.bind(pat, Value.of(arr.slice(i), Value.mergeTaints(...arr.slice(i))) as Value<SafeEvalValueInner>, evaluate)
+          yield* this.bind(pat, Value.of(arr.slice(i), Value.mergeTaints(...arr.slice(i))), evaluate)
         }
         else {
           yield* this.bind(pat, arr[i]!, evaluate)
@@ -55,8 +49,7 @@ export abstract class Scope {
       }
     }
     else if (param.type === 'ObjectPattern') {
-      assertObjectOrArray(value, param)
-      const inner = value.raw as EvalRecord
+      evalInvariant(value.isPlainObject() || value.isArray(), 'Object pattern must evaluate to an object or array', param, value)
 
       const bound: Set<string | number> = new Set()
       for (const [i, property] of param.properties.entries()) {
@@ -65,14 +58,13 @@ export abstract class Scope {
           parseInvariant(property.argument.type === 'Identifier', 'Rest element must be an identifier', property.argument)
           parseInvariant(param.properties.length === i + 1, 'Rest element must be last', property.argument)
           const copy: { [key: string]: Value<SafeEvalValueInner> } = {}
-          for (const key of Object.keys(inner)) {
+          for (const key of Object.keys(value.raw)) {
             if (bound.has(key)) {
               continue
             }
-            assertSafeMember(key, property)
-            copy[key] = inner[key as keyof typeof inner]
+            copy[key] = value.getSlot(Value.of(key, []))
           }
-          this.set(property.argument, Value.of(copy, Value.mergeTaints(...Object.values(copy))) as Value<SafeEvalValueInner>)
+          this.set(property.argument, Value.of(copy, Value.mergeTaints(...Object.values(copy))))
           break
         }
         let key: Value<SafeEvalValueInner>
@@ -81,12 +73,11 @@ export abstract class Scope {
         }
         else {
           parseInvariant(property.key.type === 'Identifier', 'Property key must be an identifier', property.key)
-          key = Value.of(property.key.name, []) as Value<SafeEvalValueInner>
+          key = Value.of(property.key.name, [])
         }
         evalInvariant(key.isSafeMember(), 'Member must be a safe string or number', property.key, key)
-        const k = key.raw
-        yield* this.bind(property.value, inner[k]!, evaluate)
-        bound.add(k)
+        yield* this.bind(property.value, value.getSlot(key), evaluate)
+        bound.add(key.raw)
       }
     }
     else if (param.type === 'RestElement') {
@@ -106,7 +97,7 @@ export class GlobalScope extends Scope {
 
   * get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined> {
     assertSafeMember(node.name, node)
-    const inner = (this.globalThis as Record<string, SafeEvalValueInner | undefined>)[node.name]
+    const inner = this.globalThis.raw[node.name]
     if (inner === undefined)
       return undefined
     return Value.of(inner, []) as Value<SafeEvalValueInner>
