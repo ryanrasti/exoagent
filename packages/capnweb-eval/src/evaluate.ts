@@ -160,11 +160,11 @@ export function* evaluate(
       // If we're calling a method outside of the evaluation context, it's a regular
       // JS call -- call it then re-wrap it:
       // TODO: ensure this works for promises too
-      const r = method.call(object.raw, ...args.map(a => a.raw))
+      const r = Reflect.apply(method, object.raw, args.map(a => a.raw))
       return Value.of(r, callee.getTaints())
     }
     else {
-      const result = method.call(object, ...args)
+      const result = Reflect.apply(method, object.raw, args.map(a => a.raw))
       return result.withTaints(callee.getTaints())
     }
   }
