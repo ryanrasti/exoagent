@@ -1,4 +1,4 @@
-import { Value } from 'capnweb-eval'
+import { Value } from './eval'
 import { getToolMetadata } from './rpc-toolset'
 
 type PolicyDenyRule = {
@@ -33,7 +33,12 @@ export class Policy<Sources extends string[] = [], Sinks extends string[] = []> 
   }
 
   doStubCall(method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
-    const annotation = getToolMetadata(method.raw)?.policyProps
+    const meta = getToolMetadata(method.raw)
+    if (meta == null) {
+      throw new Error(`Method ${thisVal.raw}.${method.raw} is not a tool`)
+    }
+
+    const annotation = meta.policyProps
 
     const sinks = annotation?.sinks ?? []
     const sources = annotation?.sources ?? []

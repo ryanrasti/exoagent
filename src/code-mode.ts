@@ -3,7 +3,7 @@ import type { RpcTarget } from 'capnweb'
 import type { RpcToolset } from './rpc-toolset'
 import type { WrappableTools } from './tool-wrapper'
 import { newMessagePortRpcSession, RpcSession } from 'capnweb'
-import { safeEval, Value } from 'capnweb-eval'
+import { safeEval, Value } from './eval'
 import { z } from 'zod'
 // eslint-disable-next-line antfu/no-import-dist
 import runtimeCode from '../dist/code-mode-runtime.mjs?raw'

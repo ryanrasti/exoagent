@@ -40,24 +40,26 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 
   /** Recursively unwrap arrays and objects, converting Value instances back to raw values. */
-  unwrap(): SafeEvalValue {
+  unwrap(): SafeEvalValueInner {
     // Arrays: unwrap each element recursively
     if (Array.isArray(this.raw)) {
       return this.raw.map(item => item instanceof Value ? item.unwrap() : item) as SafeEvalValue
     }
     // Plain objects: unwrap each property value recursively
     if (this.isPlainObject()) {
-      const unwrapped: { [key: string]: SafeEvalValue } = {}
+      const unwrapped: { [key: string]: SafeEvalValueInner } = {}
       for (const [key, val] of Object.entries(this.raw)) {
-        unwrapped[key] = val instanceof Value ? val.unwrap() : val as SafeEvalValue
+        unwrapped[key] = val instanceof Value ? val.unwrap() : val as SafeEvalValueInner
       }
-      return unwrapped as SafeEvalValue
+      return unwrapped as SafeEvalValueInner
     }
     // Primitives, functions, stubs, etc.: return raw value
-    return this.raw as SafeEvalValue
+    return this.raw as SafeEvalValueInner
   }
 
-  static of<T extends SafeEvalValueInner>(raw: T, taints: readonly string[] = []): Value<T> {
+  static of(raw: unknown, taints?: readonly string[]): Value;
+  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[]): Value<T>;
+  static of(raw: unknown, taints: readonly string[] = []): Value {
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
       const wrapped = raw.map(item => item instanceof Value ? item : Value.of(item as SafeEvalValueInner, []))
@@ -166,19 +168,6 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 }
 
-export type SafeEvalValue
-  = | string
-    | boolean
-    | number
-    | null
-    | bigint
-    | undefined
-    | ((...args: SafeEvalValue[]) => SafeEvalValue)
-    | SafeEvalValue[]
-    | { [key: string]: SafeEvalValue }
-    | RpcStub<object>
-    | RpcPromise<object>
-
 // Inner = unwrapped shape; inside eval we use Value<SafeEvalValueInner>.
 export type SafeEvalValueInner
   = | string
@@ -193,11 +182,8 @@ export type SafeEvalValueInner
 export type SafeEvalHasMemberInner
   = | Value<SafeEvalValueInner>[]
     | { [key: string]: Value<SafeEvalValueInner> }
-    | StubInternal
+    | RpcTarget
 
-class _StubInternal {}
-// We use an internal type for stubs because RpcStub<object> wreaks havoc with the type system
-export type StubInternal = _StubInternal
 
 /**
  * Formats an error message with a code snippet showing the relevant location.

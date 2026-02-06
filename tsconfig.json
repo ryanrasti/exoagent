@@ -7,7 +7,7 @@
     "moduleResolution": "Bundler",
     "paths": {
       "capnweb": ["./packages/capnweb/dist"],
-      "capnweb-eval": ["./packages/capnweb-eval/src/index.ts"]
+      "capnweb-eval": ["src/eval/index.ts"]
     },
     "resolveJsonModule": true,
     "strict": true,

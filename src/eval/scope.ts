@@ -1,6 +1,7 @@
 import type * as acorn from 'acorn'
 import type { Evaluation } from './evaluate'
-import type { SafeEvalValueInner, StubInternal } from './utils'
+import type { SafeEvalValueInner } from './utils'
+import type { RpcTarget } from 'capnweb'
 import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
 
 export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<Value<SafeEvalValueInner>>
@@ -91,16 +92,15 @@ export abstract class Scope {
 }
 
 export class GlobalScope extends Scope {
-  constructor(public globalThis: StubInternal) {
+  constructor(public globalThis: Value<RpcTarget | { [key: string]: Value }>) {
     super()
   }
 
   * get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined> {
     assertSafeMember(node.name, node)
-    const inner = this.globalThis[node.name]
-    if (inner === undefined)
-      return undefined
-    return Value.of(inner, []) as Value<SafeEvalValueInner>
+    // TODO: `get` should actually accept a Value<string | number> so we
+    //  can properly propagate taints
+    return this.globalThis.getSlot(Value.of(node.name, []))
   }
 
   set(name: acorn.Identifier, value: Value<SafeEvalValueInner>) {

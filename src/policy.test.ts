@@ -1,5 +1,5 @@
 import { RpcStub } from 'capnweb'
-import { safeEval, Value } from 'capnweb-eval'
+import { safeEval, Value } from './eval'
 import { describe, expect, it } from 'vitest'
 import { Policy } from './policy'
 import { RpcToolset, tool } from './rpc-toolset'
