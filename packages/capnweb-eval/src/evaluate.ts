@@ -2,7 +2,7 @@ import type * as acorn from 'acorn'
 import type { Scope } from './scope'
 import type { AwaitControl, SafeEvalValueInner } from './utils'
 import { LocalScope } from './scope'
-import { emitAwaitControl, evalInvariant, parseInvariant, Value } from './utils'
+import { emitAwaitControl, Invariant, Value } from './utils'
 
 export type Evaluation<T> = Generator<AwaitControl, T, Value<SafeEvalValueInner>>
 
@@ -17,8 +17,10 @@ export type DoStubCall = (method: Value<(...args: any[]) => any>, thisVal: Value
 
 export class Evaluator {
   private doStubCall: DoStubCall
+  private inv: Invariant
 
-  constructor(doStubCall: DoStubCall) {
+  constructor(code: string, doStubCall: DoStubCall) {
+    this.inv = new Invariant(code)
     this.doStubCall = doStubCall
   }
 
@@ -29,12 +31,12 @@ export class Evaluator {
   ): Evaluation<Value<string | number>> {
     if (computed) {
       const prop = yield* this.evaluate(node, scope)
-      evalInvariant(prop.isSafeMember(), 'Member must be a safe string or number', node, prop)
+      this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node, prop)
       return prop
     }
-    parseInvariant(node.type === 'Identifier', 'Property must be an identifier', node)
+    this.inv.parse(node.type === 'Identifier', 'Property must be an identifier', node)
     const prop = Value.of(node.name, [])
-    evalInvariant(prop.isSafeMember(), 'Member must be a safe string or number', node, prop)
+    this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node, prop)
     return prop
   }
 
@@ -42,23 +44,23 @@ export class Evaluator {
     node: acorn.MemberExpression,
     scope: Scope,
   ): Evaluation<{ object: Value<SafeEvalValueInner>, prop: Value<string | number> }> {
-    parseInvariant(node.object.type !== 'Super', '`super` is not allowed', node)
-    parseInvariant(
+    this.inv.parse(node.object.type !== 'Super', '`super` is not allowed', node)
+    this.inv.parse(
       node.property.type !== 'PrivateIdentifier',
       'Private identifiers are not allowed',
       node,
     )
 
     const object = yield* this.evaluate(node.object, scope)
-    evalInvariant(object.hasMembers(), 'Object must evaluate to an object', node, object)
+    this.inv.eval(object.hasMembers(), 'Object must evaluate to an object', node, object)
 
     const prop = yield* this.evalPropertyKey(node.property, node.computed, scope)
-    evalInvariant(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
+    this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
     if (object.isArray() || object.isString()) {
-      evalInvariant(prop.isNumber(), 'Index must be a number', node, prop)
+      this.inv.eval(prop.isNumber(), 'Index must be a number', node, prop)
     }
     else {
-      evalInvariant(object.isPlainObject() || object.isStub(), 'Object must evaluate to an object', node, object)
+      this.inv.eval(object.isPlainObject() || object.isStub(), 'Object must evaluate to an object', node, object)
     }
     return { object, prop }
   }
@@ -74,7 +76,7 @@ export class Evaluator {
       }
       if (arg.type === 'SpreadElement') {
         const res = yield* this.evaluate(arg.argument, scope)
-        evalInvariant(res.isArray(), 'Spread syntax requires ... iterable to be an array', arg.argument, res)
+        this.inv.eval(res.isArray(), 'Spread syntax requires ... iterable to be an array', arg.argument, res)
         result.push(...res.raw)
       }
       else {
@@ -103,9 +105,9 @@ export class Evaluator {
       return { control: 'return', value }
     }
     else if (node.type === 'VariableDeclaration') {
-      parseInvariant(node.kind === 'const', 'Only `const` declarations are allowed', node)
+      this.inv.parse(node.kind === 'const', 'Only `const` declarations are allowed', node)
       for (const declaration of node.declarations) {
-        parseInvariant(declaration.init != null, 'Variable declarations must have an initializer', declaration)
+        this.inv.parse(declaration.init != null, 'Variable declarations must have an initializer', declaration)
         const value = yield* this.evaluate(declaration.init, scope)
         yield* scope.bind(declaration.id, value, this.evaluate.bind(this))
       }
@@ -119,7 +121,7 @@ export class Evaluator {
       return { control: 'normal' }
     }
     else {
-      parseInvariant(false, 'Unsupported statement', node)
+      this.inv.parse(false, 'Unsupported statement', node)
     }
   }
 
@@ -130,21 +132,21 @@ export class Evaluator {
     if (node.type === 'Identifier') {
       const val = (yield* scope.get(node))
       if (val == null) {
-        parseInvariant(false, 'Identifier not found in scope', node)
+        this.inv.parse(false, 'Identifier not found in scope', node)
       }
       return val
     }
     else if (node.type === 'Literal') {
-      evalInvariant(!(node.value instanceof RegExp), 'RegExp literals are not allowed', node, node.value)
+      this.inv.eval(!(node.value instanceof RegExp), 'RegExp literals are not allowed', node, node.value)
       return Value.of(node.value, [])
     }
     else if (node.type === 'MemberExpression') {
       const { object, prop } = yield* this.evalMemberExpression(node, scope)
-      evalInvariant(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
+      this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
       return object.getSlot(prop)
     }
     else if (node.type === 'CallExpression') {
-      parseInvariant(
+      this.inv.parse(
         node.callee.type !== 'Super',
         '`super` is not allowed',
         node,
@@ -161,7 +163,7 @@ export class Evaluator {
         callee = yield* this.evaluate(node.callee, scope)
       }
       const args = yield* this.evalArray(node.arguments, scope)
-      evalInvariant(callee.isFunction(), 'Member must be a function', node.callee, callee)
+      this.inv.eval(callee.isFunction(), 'Member must be a function', node.callee, callee)
       
       // TODO (security): we need to ensure that calling functions is only
       //         allowed if either:
@@ -189,30 +191,30 @@ export class Evaluator {
       for (const property of node.properties) {
         if (property.type === 'SpreadElement') {
           const res = yield* this.evaluate(property.argument, scope)
-          evalInvariant(res.isPlainObject() || res.isArray(), 'Spread syntax requires ... iterable to be a plain object or array', property.argument, res)
+          this.inv.eval(res.isPlainObject() || res.isArray(), 'Spread syntax requires ... iterable to be a plain object or array', property.argument, res)
           for (const [key, val] of Object.entries(res.raw)) {
             result[key] = val
           }
         }
         else {
-          parseInvariant(
+          this.inv.parse(
             property.kind === 'init',
             'Disallowed property kind',
             property,
           )
-          parseInvariant(
+          this.inv.parse(
             !property.shorthand,
             'Shorthand properties are not allowed',
             property,
           )
-          parseInvariant(
+          this.inv.parse(
             !property.method,
             'Property methods not allowed (use function expressions instead)',
             property,
           )
 
           const keyVal = yield* this.evalPropertyKey(property.key, property.computed, scope)
-          evalInvariant(keyVal.isSafeMember(), 'Member must be a safe string or number', property.key, keyVal)
+          this.inv.eval(keyVal.isSafeMember(), 'Member must be a safe string or number', property.key, keyVal)
           result[keyVal.raw] = yield* this.evaluate(property.value, scope)
         }
       }
@@ -224,7 +226,7 @@ export class Evaluator {
       return resolved
     }
     else if (node.type === 'ArrowFunctionExpression') {
-      parseInvariant(
+      this.inv.parse(
         !node.generator,
         'Generator functions are not allowed',
         node,
@@ -251,7 +253,7 @@ export class Evaluator {
           (...args: Value<SafeEvalValueInner>[]): Value<SafeEvalValueInner> => {
             const iter = this.evalFunctionBody(node, scope, args)
             const step = iter.next()
-            parseInvariant(step.done === true, '`await` must be used in an async function', node)
+            this.inv.parse(step.done === true, '`await` must be used in an async function', node)
             return step.value
           },
           [],
@@ -259,14 +261,14 @@ export class Evaluator {
       }
     }
     else if (node.type === 'UnaryExpression') {
-      parseInvariant(node.operator === '-', 'Only unary minus is supported', node)
-      parseInvariant(node.prefix, 'Postfix unary expressions are not supported', node)
+      this.inv.parse(node.operator === '-', 'Only unary minus is supported', node)
+      this.inv.parse(node.prefix, 'Postfix unary expressions are not supported', node)
       const value = yield* this.evaluate(node.argument, scope)
-      evalInvariant(value.isNumber(), 'Unary minus requires a number', node, value)
+      this.inv.eval(value.isNumber(), 'Unary minus requires a number', node, value)
       return Value.of(-value.raw, value.getTaints())
     }
     else {
-      parseInvariant(false, 'Unsupported expression', node)
+      this.inv.parse(false, 'Unsupported expression', node)
     }
   }
 

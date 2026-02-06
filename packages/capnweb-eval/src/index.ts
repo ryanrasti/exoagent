@@ -7,11 +7,11 @@ import { GlobalScope } from './scope'
 import { Value } from './utils'
 
 export { Evaluator } from './evaluate'
-export { Value } from './utils'
+export { formatCodeMessage, Invariant, Value } from './utils'
 
 export const safeEval = (code: string, globalThis?: RpcStub<object>, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  const evaluator = new Evaluator(doStubCall ?? ((method, thisVal, args) => {
+  const evaluator = new Evaluator(code, doStubCall ?? ((method, thisVal, args) => {
     // Default: just call the stub without policy checks
     // TODO: default should probably deny, but for now allow:
     return method.callStub(thisVal, args)

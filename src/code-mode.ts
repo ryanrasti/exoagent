@@ -3,7 +3,7 @@ import type { RpcTarget } from 'capnweb'
 import type { RpcToolset } from './rpc-toolset'
 import type { WrappableTools } from './tool-wrapper'
 import { newMessagePortRpcSession, RpcSession } from 'capnweb'
-import { Evaluator, Value } from 'capnweb-eval'
+import { safeEval, Value } from 'capnweb-eval'
 import { z } from 'zod'
 // eslint-disable-next-line antfu/no-import-dist
 import runtimeCode from '../dist/code-mode-runtime.mjs?raw'
@@ -92,7 +92,6 @@ export class CodeMode<R> {
           const channel = new MessageChannel()
           using stub = newMessagePortRpcSession(channel.port1)
           using _s = newMessagePortRpcSession(channel.port2, api)
-          const evaluator = new Evaluator()
           const fn = safeEval(code)
           if (!(fn instanceof Value) || !(fn.isFunction())) {
             throw new Error('Code did not return a function')

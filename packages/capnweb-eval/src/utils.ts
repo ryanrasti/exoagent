@@ -87,11 +87,11 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   hasMembers(): this is Value<{ [key: string]: unknown } | ((...args: unknown[]) => unknown)> {
     // TODO: `typeof object === 'function'` is a hack to allow stubs to be used as objects
     //    DO NOT SUBMIT THIS CHANGE
-    return (typeof this.raw === 'object' || typeof this.raw === 'function') && this.raw !== null
+    return (typeof this.raw === 'object' && this.raw !== null) || this.isStub()
   }
 
   isStub(): this is RpcTarget {
-    console.log('isStub', this.raw)
+    console.log('isStub', this.raw, this.raw instanceof RpcTarget)
     return this.raw instanceof RpcTarget
   }
 
@@ -128,7 +128,14 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   /** Slot for key; returns Value with taints merged from this and key. */
   getSlot(key: Value<string | number>): Value<SafeEvalValueInner> {
     const obj = this.raw as { [key: string]: Value<SafeEvalValueInner> }
-    return key.raw in obj ? obj[key.raw].withTaints(key.getTaints()) : Value.of(undefined, [])
+    if (key.raw in obj) {
+      const val = obj[key.raw]
+      if (this.isStub() && !(val instanceof Value)) {
+        return Value.of(val, Value.mergeTaints(this, key))
+      }
+      return obj[key.raw].withTaints(key.getTaints())
+    }
+    return Value.of(undefined, [])
   }
 
   /** True if this value is a safe member key (string | number, and string not unsafe). */
@@ -152,6 +159,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
   callStub(this: Value<(...args: unknown[]) => unknown>, thisVal: Value, args: Value[]): Value {
     return Value.of(Reflect.apply(this.raw, thisVal.raw, args.map(a => a.raw)), Value.mergeTaints(thisVal, ...args))
+  }
+  
+  toString(): string {
+    return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${this.getTaints().join(', ')})`
   }
 }
 
@@ -187,6 +198,62 @@ export type SafeEvalHasMemberInner
 class _StubInternal {}
 // We use an internal type for stubs because RpcStub<object> wreaks havoc with the type system
 export type StubInternal = _StubInternal
+
+/**
+ * Formats an error message with a code snippet showing the relevant location.
+ */
+export function formatCodeMessage(
+  code: string,
+  position: number,
+  message: string,
+): string {
+  // Find the line containing the position
+  const lines = code.split('\n')
+  let currentPos = 0
+  let lineNumber = 0
+  let columnNumber = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineLength = lines[i].length + 1 // +1 for newline
+    if (currentPos + lineLength > position) {
+      lineNumber = i
+      columnNumber = position - currentPos
+      break
+    }
+    currentPos += lineLength
+  }
+
+  const line = lines[lineNumber] ?? ''
+  const pointer = ' '.repeat(columnNumber) + '^'
+
+  return `${message}\n  ${lineNumber + 1} | ${line}\n    | ${pointer}`
+}
+
+export class Invariant {
+  constructor(private readonly code: string) {}
+
+  parse(
+    condition: boolean,
+    message: string,
+    node: acorn.Node,
+  ): asserts condition {
+    if (!condition) {
+      throw new Error(formatCodeMessage(this.code, node.start, `Parse error: ${message}`))
+    }
+  }
+
+  eval(
+    condition: boolean,
+    message: string,
+    node: acorn.Node,
+    value: unknown,
+  ): asserts condition {
+    if (!condition) {
+      const valueStr = JSON.stringify(value)
+      throw new Error(formatCodeMessage(this.code, node.start, `Eval error: ${message} (value: ${valueStr})`))
+    }
+  }
+}
 
 export function parseInvariant(
   condition: boolean,
