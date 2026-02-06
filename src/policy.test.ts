@@ -95,8 +95,8 @@ describe('policy', () => {
     // Evaluate code that calls source1 then sink
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
     const result = await safeEval(
-      'sink(source1())',
-      toolset,
+      'api.sink(api.source1())',
+      Value.of({api: toolset}, []),
       policy.doStubCall.bind(policy),
     )
 
@@ -113,8 +113,8 @@ describe('policy', () => {
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
     await expect(
       safeEval(
-        'sink(source2())',
-        toolset,
+        'api.sink(api.source2())',
+        Value.of({api: toolset}, []),
         policy.doStubCall.bind(policy),
       ),
     ).rejects.toThrow('Method call denied: taint2 are not allowed to be used as sources and taint1 are not allowed to be used as sinks')

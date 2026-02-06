@@ -1,5 +1,5 @@
 import type * as acorn from 'acorn'
-import { RpcPromise, RpcStub } from 'capnweb'
+import { RpcPromise, RpcStub, RpcTarget } from 'capnweb'
 
 const checkSafeMember = (member: string) => {
   if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
@@ -90,8 +90,9 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return (typeof this.raw === 'object' || typeof this.raw === 'function') && this.raw !== null
   }
 
-  isStub(): this is RpcStub {
-    return this.raw instanceof RpcStub
+  isStub(): this is RpcTarget {
+    console.log('isStub', this.raw)
+    return this.raw instanceof RpcTarget
   }
 
   isFunction(): this is Value<(...args: unknown[]) => unknown> {

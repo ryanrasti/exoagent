@@ -162,7 +162,12 @@ export class Evaluator {
       }
       const args = yield* this.evalArray(node.arguments, scope)
       evalInvariant(callee.isFunction(), 'Member must be a function', node.callee, callee)
-      if (callee.isStub()) {
+      
+      // TODO (security): we need to ensure that calling functions is only
+      //         allowed if either:
+      //          - the function is a @tool
+      //          - the function is defined in the evaluation context
+      if (object.isStub()) {
         // If we're calling a method outside of the evaluation context, use doStubCall
         // which handles policy checks and taint propagation:
         // TODO: ensure this works for promises too
@@ -170,6 +175,7 @@ export class Evaluator {
       }
       else {
         // TODO: ensure this works for promises too:
+        console.log('callee', callee)
         const result = Reflect.apply(callee.raw, object, args)
         return result.withTaints(callee.getTaints())
       }
