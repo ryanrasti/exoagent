@@ -1,5 +1,6 @@
 import type * as acorn from 'acorn'
-import { RpcPromise, RpcStub, RpcTarget } from 'capnweb'
+import type { RpcTarget } from 'capnweb'
+import { RpcPromise, RpcStub } from 'capnweb'
 
 const checkSafeMember = (member: string) => {
   if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
@@ -32,7 +33,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   constructor(
     public readonly raw: T,
     public readonly taints: readonly Taint[] = [],
-      public readonly options: ValueOptions = {},
+    public readonly options: ValueOptions = {},
   ) {
     // TODO: implicit in all of this is that objects and arrays must be
     //  wrapped in Value objects; this is not enforced (yet).
@@ -64,8 +65,8 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return this.raw as SafeEvalValueInner
   }
 
-  static of(raw: unknown, taints?: readonly string[], options?: ValueOptions): Value;
-  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: ValueOptions): Value<T>;
+  static of(raw: unknown, taints?: readonly string[], options?: ValueOptions): Value
+  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: ValueOptions): Value<T>
   static of(raw: unknown, taints: readonly string[] = [], options?: ValueOptions): Value {
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
@@ -81,6 +82,9 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
         }
         return new Value(wrapped as T, taints, options)
       }
+    }
+    if (raw instanceof Value) {
+      return raw.withTaints(taints)
     }
     return new Value(raw, taints, options)
   }
@@ -138,10 +142,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
       }
       return this.raw[key.raw].withTaints(key.getTaints())
     }
-    
+
     if (typeof this.raw === 'object' && this.raw !== null) {
       if (typeof key.raw !== 'string') {
-        throw new Error(`Key must be a string`)
+        throw new TypeError(`Key must be a string`)
       }
       return Value.of(this.raw[key.raw], this.getTaints(), {
         propertyName: key.raw,
@@ -172,9 +176,9 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 
   callStub(this: Value<(...args: unknown[]) => unknown>, thisVal: Value, args: Value[]): Value {
-    return Value.of(Reflect.apply(this.raw, thisVal.raw, args.map(a => a.raw)), Value.mergeTaints(thisVal, ...args))
+    return Value.of(Reflect.apply(this.raw, thisVal.raw, args.map(a => a.unwrap())), Value.mergeTaints(thisVal, ...args))
   }
-  
+
   toString(): string {
     return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${this.getTaints().join(', ')})`
   }
@@ -195,7 +199,6 @@ export type SafeEvalHasMemberInner
   = | Value<SafeEvalValueInner>[]
     | { [key: string]: Value<SafeEvalValueInner> }
     | RpcTarget
-
 
 /**
  * Formats an error message with a code snippet showing the relevant location.
@@ -222,7 +225,7 @@ export function formatCodeMessage(
   }
 
   const line = lines[lineNumber] ?? ''
-  const pointer = ' '.repeat(columnNumber) + '^'
+  const pointer = `${' '.repeat(columnNumber)}^`
 
   return `${message}\n  ${lineNumber + 1} | ${line}\n    | ${pointer}`
 }

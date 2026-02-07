@@ -1,11 +1,11 @@
 import type { ToolExecutionOptions } from 'ai'
-import { safeEval, Value } from './eval'
+import type { Policy } from './policy'
 import { z } from 'zod'
-
+import { safeEval, Value } from './eval'
 
 export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: string) => {
- return {
-      description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.
+  return {
+    description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.
         
         \`\`\`typescript
         type Primitive = string | number | boolean | null | undefined | bigint | Date | Uint8Array | Error;
@@ -37,12 +37,13 @@ export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: s
             }
         \`\`\`
         `,
-      inputSchema: z.object({
-        code: z.string(),
-      }),
-      execute: async ({ code }: { code: string }, opts: ToolExecutionOptions): Promise<R> => {
-          return await safeEval(code, Value.of(api), policy)
-      },
-    }
+    inputSchema: z.object({
+      code: z.string(),
+    }),
+    execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<R> => {
+      const result = await safeEval(`(${code})(api)`, Value.of(api), policy.doStubCall.bind(policy))
+      console.log('result', result, result.unwrap())
+      return result.unwrap()
+    },
   }
-
+}

@@ -1,8 +1,7 @@
-import { RpcStub } from 'capnweb'
-import { safeEval, Value } from './eval'
 import { describe, expect, it } from 'vitest'
-import { ExoAgent } from './policy'
 import z from 'zod'
+import { safeEval, Value } from './eval'
+import { ExoAgent } from './policy'
 
 const exo = new ExoAgent(['taint1', 'taint2'], ['taint1'])
 
@@ -37,7 +36,7 @@ describe('policy', () => {
     // Call source1 which emits taint1
     const source1Method = Value.of(toolset.source1, [])
     const source1Result = policy.doStubCall(
-      { propertyName: 'source1', parent: Value.of(toolset, []) }, 
+      { propertyName: 'source1', parent: Value.of(toolset, []) },
       source1Method as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
       [],
@@ -118,7 +117,7 @@ describe('policy', () => {
     // Evaluate code that calls source2 then sink - should be denied
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
     expect(
-      () =>safeEval(
+      () => safeEval(
         'sink(source2())',
         Value.of(toolset, []),
         policy.doStubCall.bind(policy),

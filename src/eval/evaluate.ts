@@ -156,7 +156,7 @@ export class Evaluator {
       }
       const args = yield* this.evalArray(node.arguments, scope)
       this.inv.eval(callee.isFunction(), 'Member must be a function', node.callee, callee)
-      
+
       // TODO (security): we need to ensure that calling functions is only
       //         allowed if either:
       //          - the function is a @tool
@@ -172,7 +172,7 @@ export class Evaluator {
         // TODO: ensure this works for promises too:
         console.log('callee', callee)
         const result = Reflect.apply(callee.raw, object, args)
-        return result.withTaints(callee.getTaints())
+        return Value.of(result, callee.getTaints())
       }
     }
     else if (node.type === 'ArrayExpression') {
@@ -239,7 +239,7 @@ export class Evaluator {
             return step.value
           },
           [],
-          {isInternalFunction: true},
+          { isInternalFunction: true },
         )
       }
       else {
@@ -251,7 +251,7 @@ export class Evaluator {
             return step.value
           },
           [],
-          {isInternalFunction: true},
+          { isInternalFunction: true },
         )
       }
     }
