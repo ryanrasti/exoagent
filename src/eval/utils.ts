@@ -88,7 +88,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
       if (proto === null || proto === Object.prototype) {
         const wrapped: { [key: string]: Value<SafeEvalValueInner> } = {}
         for (const [key, val] of Object.entries(raw)) {
-          wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, [])
+          wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, taints)
         }
         return new Value(wrapped as T, taints, options)
       }
@@ -119,7 +119,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 
   isClassLike(): this is Value<{ [key: string]: Value<SafeEvalValueInner> }> {
-    return typeof this.raw === 'object' && this.raw !== null && !this.isPlainObject()
+    return typeof this.raw === 'object' && this.raw !== null && !this.isPlainObject() && !this.isArray()
   }
 
   isArray(): this is Value<Value<SafeEvalValueInner>[]> {
