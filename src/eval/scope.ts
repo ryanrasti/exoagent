@@ -1,7 +1,6 @@
 import type * as acorn from 'acorn'
 import type { Evaluation } from './evaluate'
 import type { SafeEvalValueInner } from './utils'
-import type { RpcTarget } from 'capnweb'
 import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
 
 export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<Value<SafeEvalValueInner>>
@@ -50,12 +49,12 @@ export abstract class Scope {
       }
     }
     else if (param.type === 'ObjectPattern') {
-      evalInvariant(value.isPlainObject() || value.isArray(), 'Object pattern must evaluate to an object or array', param, value)
+      evalInvariant(value.isPlainObject() || value.isArray() || value.isClassLike(), 'Object pattern must evaluate to an object or array', param, value)
 
       const bound: Set<string | number> = new Set()
       for (const [i, property] of param.properties.entries()) {
         if (property.type === 'RestElement') {
-          evalInvariant(!value.isStub(), 'Rest element must cannot be a stub', param, value)
+          evalInvariant(!value.isClassLike(), 'Rest element must cannot be a stub', param, value)
           parseInvariant(property.argument.type === 'Identifier', 'Rest element must be an identifier', property.argument)
           parseInvariant(param.properties.length === i + 1, 'Rest element must be last', property.argument)
           const copy: { [key: string]: Value<SafeEvalValueInner> } = {}
@@ -92,7 +91,7 @@ export abstract class Scope {
 }
 
 export class GlobalScope extends Scope {
-  constructor(public globalThis: Value<RpcTarget | { [key: string]: Value }>) {
+  constructor(public globalThis: Value<{ [key: string]: Value }>) {
     super()
   }
 

@@ -28,6 +28,9 @@ export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: s
         - Arrow functions: \`(a, b, c) => ...\`
         - Async functions: \`async (a, b, c) => ...\`
         ANY OTHER FEATURES WILL RESULT IN AN ERROR.
+
+        Also, no globals are available or prototype methods on standard objects (e.g., Array.prototype.map). You 
+        only have access to the \`api\` object and its methods (recursively).
         
         Example:
         \`\`\`javascript

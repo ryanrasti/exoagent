@@ -1,6 +1,8 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ValueOptions } from './eval/utils'
+import z from 'zod'
 import { Value } from './eval'
+import { getPolicyMetadata, setPolicyMetadata } from './meta'
 
 export type ToolProps<Sinks extends string[], Sources extends string[]> = { source?: Sources[number] | readonly Sources[number][], sink?: Sinks[number] | readonly Sinks[number][] }
 
@@ -27,18 +29,6 @@ const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: In
     }
   }
   return ret
-}
-
-const policyMetadataKey = Symbol('policyMetadata')
-type PolicyMetadata = {
-  [key: string]: ToolProps<string[], string[]>
-}
-
-const getPolicyMetadata = (target: object): PolicyMetadata | null => {
-  if (typeof target === 'object' && target !== null) {
-    return (target as any)[policyMetadataKey]
-  }
-  return null
 }
 
 type PolicyDenyRule = {
@@ -100,13 +90,6 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
   }
 }
 
-const setPolicyMetadata = (obj: object, metadata: PolicyMetadata): void => {
-  if (typeof obj !== 'object' || obj === null) {
-    throw new Error(`Target is not an object`)
-  }
-  (obj as any)[policyMetadataKey] = metadata
-}
-
 export class ExoAgent<Sources extends string[], Sinks extends string[]> {
   constructor(private sources: readonly [...Sources], private sinks: readonly [...Sinks]) {
 
@@ -155,15 +138,39 @@ export class ExoAgent<Sources extends string[], Sinks extends string[]> {
   }
 }
 
+const _exo = new ExoAgent([], [])
+export const tool: <TInputs extends any[]>(...inputSchemasAndProps: [...InputSchemas<TInputs>]) => MethodDecorator<TInputs> = _exo.tool.bind(_exo)
+
 type InputSchemas<TInputs extends unknown[]> = { [k in keyof TInputs]: StandardSchemaV1<TInputs[k], TInputs[k]> }
 
-type MethodDecorator<TInputs extends unknown[]> = <This, Return>(
-  target: (...args: TInputs) => Return,
-  context: ClassMethodDecoratorContext<This, (...args: TInputs) => Return>,
-) => (this: This, ...args: TInputs) => Return
+type MethodDecorator<TInputs extends any[]> = <This>(
+  target: (...args: TInputs) => any,
+  context: ClassMethodDecoratorContext<This, (...args: TInputs) => any>,
+) => (this: This, ...args: TInputs) => any
 
-export const fn = new class {
-  returns<TInput>(returnValue: StandardSchemaV1<TInput, TInput>): StandardSchemaV1<(...args: any[]) => TInput> {
+class ValidateFn {
+  constructor(private optional: boolean = false) {}
+
+  private validate(value: unknown) {
+    if (typeof value !== 'function') {
+      return { issues: [{ message: 'Return value must be a function' }] }
+    }
+
+    return { value: (...args: any[]) => {
+      const ret = value(...args)
+      const validation = returnValue['~standard'].validate(ret)
+      if (validation instanceof Promise) {
+        throw new TypeError(`Validation must be synchronous`)
+      }
+      if (validation.issues) {
+        return { issues: [{ message: 'Return value must be a function' }] }
+      }
+      return validation.value
+    } }
+  }
+
+  returns<TInput>(returnValue: StandardSchemaV1<TInput, TInput>): StandardSchemaV1<(...args: any[]) => TInput> & { optional: () => StandardSchemaV1<(...args: any[]) => TInput> } {
+    const self = this
     return {
       '~standard': {
         version: 1,
@@ -172,24 +179,11 @@ export const fn = new class {
           input: (undefined as unknown as (...args: any[]) => TInput),
           output: (undefined as unknown as (...args: any[]) => TInput),
         },
-        validate: (value) => {
-          if (typeof value !== 'function') {
-            return { issues: [{ message: 'Return value must be a function' }] }
-          }
-
-          return { value: (...args: any[]) => {
-            const ret = value(...args)
-            const validation = returnValue['~standard'].validate(ret)
-            if (validation instanceof Promise) {
-              throw new TypeError(`Validation must be synchronous`)
-            }
-            if (validation.issues) {
-              return { issues: [{ message: 'Return value must be a function' }] }
-            }
-            return validation.value
-          } }
-        },
+        validate: value => self.validate(value),
       },
+      'optional': () => { new ValidateFn(true).returns(returnValue) },
     }
   }
-}()
+}
+
+export const fn = new ValidateFn()

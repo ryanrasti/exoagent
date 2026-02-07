@@ -1,6 +1,7 @@
 import type * as acorn from 'acorn'
 import type { RpcTarget } from 'capnweb'
-import { RpcPromise, RpcStub } from 'capnweb'
+import { RpcPromise } from 'capnweb'
+import { getPolicyMetadata } from '../meta'
 
 const checkSafeMember = (member: string) => {
   if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
@@ -108,6 +109,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return proto === null || proto === Object.prototype
   }
 
+  isClassLike(): this is Value<{ [key: string]: Value<SafeEvalValueInner> }> {
+    return typeof this.raw === 'object' && this.raw !== null && !this.isPlainObject()
+  }
+
   isArray(): this is Value<Value<SafeEvalValueInner>[]> {
     return Array.isArray(this.raw)
   }
@@ -147,6 +152,16 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
       if (typeof key.raw !== 'string') {
         throw new TypeError(`Key must be a string`)
       }
+      const metadata = getPolicyMetadata(this.raw)
+      if (!metadata) {
+        throw new Error(`No policy metadata found for object: ${this.raw}. Cannot access its members.`)
+      }
+
+      const val = metadata[key.raw]
+      if (!val) {
+        throw new Error(`No policy metadata found for object: ${this.raw}.${key.raw}.`)
+      }
+
       return Value.of(this.raw[key.raw], this.getTaints(), {
         propertyName: key.raw,
         parent: this,
