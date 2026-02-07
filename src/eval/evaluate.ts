@@ -169,7 +169,7 @@ export class Evaluator {
       //         allowed if either:
       //          - the function is a @tool
       //          - the function is defined in the evaluation context
-      if (object.isStub()) {
+      if (!callee.isInternalFunction) {
         // If we're calling a method outside of the evaluation context, use doStubCall
         // which handles policy checks and taint propagation:
         // TODO: ensure this works for promises too
@@ -246,6 +246,7 @@ export class Evaluator {
             return step.value
           },
           [],
+          {isInternalFunction: true},
         )
       }
       else {
@@ -257,6 +258,7 @@ export class Evaluator {
             return step.value
           },
           [],
+          {isInternalFunction: true},
         )
       }
     }

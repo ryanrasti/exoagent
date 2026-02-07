@@ -1,5 +1,6 @@
 import type * as acorn from 'acorn'
 import { RpcPromise, RpcStub, RpcTarget } from 'capnweb'
+import { getToolMetadata } from './rpc-toolset'
 
 const checkSafeMember = (member: string) => {
   if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
@@ -26,6 +27,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   constructor(
     public readonly raw: T,
     public readonly taints: readonly Taint[] = [],
+    public readonly isInternalFunction: boolean = false,
   ) {
     // TODO: implicit in all of this is that objects and arrays must be
     //  wrapped in Value objects; this is not enforced (yet).
@@ -57,13 +59,13 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return this.raw as SafeEvalValueInner
   }
 
-  static of(raw: unknown, taints?: readonly string[]): Value;
-  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[]): Value<T>;
-  static of(raw: unknown, taints: readonly string[] = []): Value {
+  static of(raw: unknown, taints?: readonly string[], options?: { isInternalFunction?: boolean }): Value;
+  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: { isInternalFunction?: boolean }): Value<T>;
+  static of(raw: unknown, taints: readonly string[] = [], options?: { isInternalFunction?: boolean }): Value {
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
       const wrapped = raw.map(item => item instanceof Value ? item : Value.of(item as SafeEvalValueInner, []))
-      return new Value(wrapped as T, taints)
+      return new Value(wrapped as T, taints, options?.isInternalFunction ?? false)
     }
     if (typeof raw === 'object' && raw !== null) {
       const proto = Object.getPrototypeOf(raw)
@@ -72,10 +74,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
         for (const [key, val] of Object.entries(raw)) {
           wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, [])
         }
-        return new Value(wrapped as T, taints)
+        return new Value(wrapped as T, taints, options?.isInternalFunction ?? false)
       }
     }
-    return new Value(raw, taints)
+    return new Value(raw, taints, options?.isInternalFunction ?? false)
   }
 
   static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): string[] {
@@ -84,17 +86,6 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
   static getTaints(x: unknown): string[] {
     return x instanceof Value ? x.getTaints() : []
-  }
-
-  hasMembers(): this is Value<{ [key: string]: unknown } | ((...args: unknown[]) => unknown)> {
-    // TODO: `typeof object === 'function'` is a hack to allow stubs to be used as objects
-    //    DO NOT SUBMIT THIS CHANGE
-    return (typeof this.raw === 'object' && this.raw !== null) || this.isStub()
-  }
-
-  isStub(): this is RpcTarget {
-    console.log('isStub', this.raw, this.raw instanceof RpcTarget)
-    return this.raw instanceof RpcTarget
   }
 
   isFunction(): this is Value<(...args: unknown[]) => unknown> {
@@ -129,15 +120,25 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
   /** Slot for key; returns Value with taints merged from this and key. */
   getSlot(key: Value<string | number>): Value<SafeEvalValueInner> {
-    const obj = this.raw as { [key: string]: Value<SafeEvalValueInner> }
-    if (key.raw in obj) {
-      const val = obj[key.raw]
-      if (this.isStub() && !(val instanceof Value)) {
-        return Value.of(val, Value.mergeTaints(this, key))
-      }
-      return obj[key.raw].withTaints(key.getTaints())
+    if (!key.isSafeMember()) {
+      throw new Error(`Key ${key.raw} is not a safe string or number`)
     }
-    return Value.of(undefined, [])
+
+    if (this.isPlainObject()) {
+      return this.raw[key.raw].withTaints(key.getTaints())
+    }
+    if (this.isArray()) {
+      if (!key.isNumber()) {
+        throw new Error(`Index must be a number`)
+      }
+      return this.raw[key.raw].withTaints(key.getTaints())
+    }
+    
+    if (typeof this.raw === 'object' && this.raw !== null) {
+      // it's a class, so we need to ensure it has the right metadata:
+      
+    }
+
   }
 
   /** True if this value is a safe member key (string | number, and string not unsafe). */

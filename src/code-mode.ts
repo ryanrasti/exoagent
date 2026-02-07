@@ -1,65 +1,13 @@
-import type { Tool, ToolExecutionOptions } from 'ai'
-import type { RpcTarget } from 'capnweb'
-import type { RpcToolset } from './rpc-toolset'
-import type { WrappableTools } from './tool-wrapper'
-import { newMessagePortRpcSession, RpcSession } from 'capnweb'
+import type { ToolExecutionOptions } from 'ai'
 import { safeEval, Value } from './eval'
 import { z } from 'zod'
-// eslint-disable-next-line antfu/no-import-dist
-import runtimeCode from '../dist/code-mode-runtime.mjs?raw'
-import { StreamTransport } from './stream-transport'
-import { generateToolApi, generateToolTypes } from './tool-wrapper'
 
-export type SafeEvalResult = {
-  wait: () => Promise<void>
-  input: ReadableStream<Uint8Array>
-  output: WritableStream<Uint8Array>
-}
 
-export type SafeEvalContext<R> = {
-  kind: 'stream'
-  safeEval: (code: string) => Promise<SafeEvalResult>
-  // See code-mode-runtime.ts for the expected format of the sandbox context
-  sandboxContext: string
-} | {
-  // We pass the code to the remote side to evaluate (over Cap'n Web),
-  // along with the API object:
-  kind: 'passthrough'
-  safeEval: (code: string, api: RpcTarget) => Promise<R>
-} | {
-  kind: 'capnweb-eval__EXPERIMENTAL'
-}
-
-type FlatTools = { [key: string]: Tool } | Tool[]
-type RpcTools = { [key: string]: () => RpcToolset }
-
-type ExecutableTool<R> = {
-  description: string
-  inputSchema: z.ZodSchema<{ code: string }>
-  execute: (input: { code: string }, opts: ToolExecutionOptions) => Promise<R>
-}
-
-export class CodeMode<R> {
-  constructor(private context: SafeEvalContext<R>) {}
-
-  wrap(tools: FlatTools): Promise<ExecutableTool<R>>
-  wrap(tools: RpcTools | FlatTools, dts: string): Promise<ExecutableTool<R>>
-  async wrap(tools: WrappableTools, dts?: string): Promise<ExecutableTool<R>> {
-    // 1. Consume raw tools
-
-    const typeDefinitions: string[] = []
-    for await (const chunk of generateToolTypes(tools, 'Tools')) {
-      typeDefinitions.push(chunk)
-    }
-    const definitions = typeDefinitions.join('')
-
-    // 2. Generate new tool that uses the tools (as classes)
-    return {
+export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: string) => {
+ return {
       description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.
-
+        
         \`\`\`typescript
-        ${definitions}
-
         type Primitive = string | number | boolean | null | undefined | bigint | Date | Uint8Array | Error;
         type Returnable = Primitive | { [key: string]: Returnable } | Returnable[];
         \`\`\`
@@ -67,8 +15,20 @@ export class CodeMode<R> {
         ${dts ? `// .d.ts for the \`RpcToolset\`s:\n${dts}` : ''}
 
         Provide a valid **javascript** (NOT TypeScript) function taking a single argument of type \`Tools\` and returning
-        a value of type \`Promise<Returnable>\`.
+        a value of type \`Promise<Returnable>\ | Returnable\`.
 
+        Important: the JavaScript interpreter is limited to the following expression/statement types:
+        - Literals: booleans, strings, numbers, null, undefined, bigint
+        - Member access: \`foo.bar\`
+        - Function invocation: \`bar(baz)\`
+        - Variable assignment: \`const a = ...\`
+        - Functions (\`=>\` functions only): \`(a, b, c) => ...\`
+        - Block statements \`{ a; b; c; }\`
+        - Await expression: \`await ...\`
+        - Arrow functions: \`(a, b, c) => ...\`
+        - Async functions: \`async (a, b, c) => ...\`
+        ANY OTHER FEATURES WILL RESULT IN AN ERROR.
+        
         Example:
         \`\`\`javascript
             (api) => {
@@ -81,37 +41,8 @@ export class CodeMode<R> {
         code: z.string(),
       }),
       execute: async ({ code }: { code: string }, opts: ToolExecutionOptions): Promise<R> => {
-        const ToolApi = generateToolApi(tools, opts)
-        const api = new ToolApi(code)
-
-        if (this.context.kind === 'passthrough') {
-          return await this.context.safeEval(code, api)
-        }
-
-        if (this.context.kind === 'capnweb-eval__EXPERIMENTAL') {
-          const channel = new MessageChannel()
-          using stub = newMessagePortRpcSession(channel.port1)
-          using _s = newMessagePortRpcSession(channel.port2, api)
-          const fn = safeEval(code)
-          if (!(fn instanceof Value) || !(fn.isFunction())) {
-            throw new Error('Code did not return a function')
-          }
-          // TODO: in theory would it be possible to just pass new RpcStub(api) instead
-          //       of spinning up a transport and session like this?
-          return await fn.raw(stub) as unknown as R
-        }
-
-        // 1. Inject sandbox context into bundled runtime
-        const injectedCode = `globalThis.__SANDBOX_CONTEXT_PROMISE__ = ${this.context.sandboxContext};\n${runtimeCode}`
-        const { input, output, wait } = await this.context.safeEval(injectedCode)
-
-        // 2. Hook up the input and output streams:
-        const transport = new StreamTransport(input, output)
-        const _session = new RpcSession(transport, api)
-        // Remote side should have access to api via RPC and execute the code
-        await wait()
-        return api.__return_value__ as unknown as R
+          return await safeEval(code, Value.of(api), policy)
       },
     }
   }
-}
+
