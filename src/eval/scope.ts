@@ -44,7 +44,7 @@ export abstract class Scope {
           yield* this.bind(pat, Value.of(arr.slice(i), Value.mergeTaints(...arr.slice(i))), evaluate)
         }
         else {
-          yield* this.bind(pat, arr[i]!, evaluate)
+          yield* this.bind(pat, arr[i] ?? Value.of(undefined, []), evaluate)
         }
       }
     }

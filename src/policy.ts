@@ -111,7 +111,6 @@ export class ExoAgent<Sources extends string[], Sinks extends string[]> {
       }
 
       context.addInitializer(function (this: This) {
-        console.log('initializing this', this, `[${methodName}]`, toolProps)
         const metadata = getPolicyMetadata(this as object)
         setPolicyMetadata(this as object, {
           ...metadata,
@@ -151,7 +150,7 @@ type MethodDecorator<TInputs extends any[]> = <This>(
 class ValidateFn {
   constructor(private optional: boolean = false) {}
 
-  private validate(value: unknown) {
+  private validate(returnValue: StandardSchemaV1<any, any>, value: unknown) {
     if (typeof value !== 'function') {
       return { issues: [{ message: 'Return value must be a function' }] }
     }
@@ -179,9 +178,9 @@ class ValidateFn {
           input: (undefined as unknown as (...args: any[]) => TInput),
           output: (undefined as unknown as (...args: any[]) => TInput),
         },
-        validate: value => self.validate(value),
+        validate: value => self.validate(returnValue, value),
       },
-      'optional': () => { new ValidateFn(true).returns(returnValue) },
+      'optional': () => { return new ValidateFn(true).returns(returnValue) },
     }
   }
 }

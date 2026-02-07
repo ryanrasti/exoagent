@@ -62,6 +62,15 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
       }
       return unwrapped as SafeEvalValueInner
     }
+    if (this.isFunction() && this.options?.isInternalFunction) {
+      // If we return an internal function, we need a new one that doesn't wrap.
+      return (...args: unknown[]) => {
+        const res = this.raw(...(args.map(arg => Value.of(arg))))
+        return res.unwrap()
+      }
+    }
+    // TODO: handle promise-like
+
     // Primitives, functions, stubs, etc.: return raw value
     return this.raw as SafeEvalValueInner
   }

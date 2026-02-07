@@ -220,7 +220,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>) {
     const fromItemCallbackRaw = isFromItem(fromItem) ? () => fromItem : fromItem as NamespacedExpression<TN, FromItem<N2, F2>>
     let fromItemResolved = fromItemCallbackRaw(this.arg)
-    invariant(isFromItem(fromItemResolved), 'fromItem must return a FromItem')
+    invariant(isFromItem(fromItemResolved), `fromItem must return a FromItem: ${fromItemResolved}`)
 
     if (fromItemResolved instanceof QueryBuilder && fromItemResolved.rawTable) {
       // If we're joining to a raw table, use it because it might have an `onExpression`
