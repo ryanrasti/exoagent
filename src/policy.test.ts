@@ -1,25 +1,27 @@
 import { RpcStub } from 'capnweb'
 import { safeEval, Value } from './eval'
 import { describe, expect, it } from 'vitest'
-import { Policy } from './policy'
-import { tool } from './validate'
+import { ExoAgent } from './policy'
+import z from 'zod'
+
+const exo = new ExoAgent(['taint1', 'taint2'], ['taint1'])
 
 // Create a test toolset with 3 methods:
 // - source1: emits 'taint1' source
 // - source2: emits 'taint2' source
 // - sink: accepts 'taint1' sink
-class TestPolicyToolset extends RpcToolset {
-  @tool.unsafeNoValidation({ sources: ['taint1'] })
+class TestPolicyToolset {
+  @exo.tool({ source: ['taint1'] })
   source1() {
     return 'data from source1'
   }
 
-  @tool.unsafeNoValidation({ sources: ['taint2'] })
+  @exo.tool({ source: ['taint2'] })
   source2() {
     return 'data from source2'
   }
 
-  @tool.unsafeNoValidation({ sinks: ['taint1'] })
+  @exo.tool(z.string(), { sink: ['taint1'] })
   sink(input: string) {
     return `sink received: ${input}`
   }
@@ -28,13 +30,14 @@ class TestPolicyToolset extends RpcToolset {
 describe('policy', () => {
   it('allows source1 -> sink flow (taint1 source to taint1 sink)', () => {
     const toolset = new TestPolicyToolset()
-    const policy = new Policy(['taint1', 'taint2'], ['taint1'], [
+    const policy = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
     ])
 
     // Call source1 which emits taint1
     const source1Method = Value.of(toolset.source1, [])
     const source1Result = policy.doStubCall(
+      { propertyName: 'source1', parent: Value.of(toolset, []) }, 
       source1Method as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
       [],
@@ -48,6 +51,7 @@ describe('policy', () => {
     const sinkMethod = Value.of(toolset.sink, [])
     const sinkArg = Value.of('data from source1', source1Result.getTaints())
     const sinkResult = policy.doStubCall(
+      { propertyName: 'sink', parent: Value.of(toolset, []) },
       sinkMethod as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
       [sinkArg],
@@ -58,13 +62,14 @@ describe('policy', () => {
 
   it('denies source2 -> sink flow (taint2 source to taint1 sink)', () => {
     const toolset = new TestPolicyToolset()
-    const policy = new Policy(['taint1', 'taint2'], ['taint1'], [
+    const policy = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
     ])
 
     // Call source2 which emits taint2
     const source2Method = Value.of(toolset.source2, [])
     const source2Result = policy.doStubCall(
+      { propertyName: 'source2', parent: Value.of(toolset, []) },
       source2Method as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
       [],
@@ -79,6 +84,7 @@ describe('policy', () => {
     const sinkArg = Value.of('data from source2', source2Result.getTaints())
     expect(() => {
       policy.doStubCall(
+        { propertyName: 'sink', parent: Value.of(toolset, []) },
         sinkMethod as Value<(...args: any[]) => any>,
         Value.of(toolset, []),
         [sinkArg],
@@ -88,15 +94,15 @@ describe('policy', () => {
 
   it('allows source1 -> sink flow end-to-end through evaluator', async () => {
     const toolset = new TestPolicyToolset()
-    const policy = new Policy(['taint1', 'taint2'], ['taint1'], [
+    const policy = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
     ])
 
     // Evaluate code that calls source1 then sink
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
     const result = safeEval(
-      'api.sink(api.source1())',
-      {api: toolset},
+      'sink(source1())',
+      Value.of(toolset, []),
       policy.doStubCall.bind(policy),
     ) as Value<string>
 
@@ -105,7 +111,7 @@ describe('policy', () => {
 
   it('denies source2 -> sink flow end-to-end through evaluator', async () => {
     const toolset = new TestPolicyToolset()
-    const policy = new Policy(['taint1', 'taint2'], ['taint1'], [
+    const policy = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
     ])
 
@@ -113,8 +119,8 @@ describe('policy', () => {
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
     expect(
       () =>safeEval(
-        'api.sink(api.source2())',
-        {api: toolset},
+        'sink(source2())',
+        Value.of(toolset, []),
         policy.doStubCall.bind(policy),
       ),
     ).toThrow('Method call denied: taint2 are not allowed to be used as sources and taint1 are not allowed to be used as sinks')

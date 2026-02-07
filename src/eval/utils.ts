@@ -1,6 +1,5 @@
 import type * as acorn from 'acorn'
 import { RpcPromise, RpcStub, RpcTarget } from 'capnweb'
-import { getToolMetadata } from './rpc-toolset'
 
 const checkSafeMember = (member: string) => {
   if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
@@ -22,12 +21,18 @@ export function isSafeMemberRaw(member: unknown): member is string | number {
   return t === 'number' || checkSafeMember(member as string)
 }
 
+export type ValueOptions = {
+  isInternalFunction?: boolean
+  parent?: Value<SafeEvalValueInner>
+  propertyName?: string
+}
+
 // Single wrapper for values in eval: raw value + taints + helpers. Wrap/unwrap only at boundaries.
 export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint extends string = string> {
   constructor(
     public readonly raw: T,
     public readonly taints: readonly Taint[] = [],
-    public readonly isInternalFunction: boolean = false,
+      public readonly options: ValueOptions = {},
   ) {
     // TODO: implicit in all of this is that objects and arrays must be
     //  wrapped in Value objects; this is not enforced (yet).
@@ -59,13 +64,13 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return this.raw as SafeEvalValueInner
   }
 
-  static of(raw: unknown, taints?: readonly string[], options?: { isInternalFunction?: boolean }): Value;
-  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: { isInternalFunction?: boolean }): Value<T>;
-  static of(raw: unknown, taints: readonly string[] = [], options?: { isInternalFunction?: boolean }): Value {
+  static of(raw: unknown, taints?: readonly string[], options?: ValueOptions): Value;
+  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: ValueOptions): Value<T>;
+  static of(raw: unknown, taints: readonly string[] = [], options?: ValueOptions): Value {
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
       const wrapped = raw.map(item => item instanceof Value ? item : Value.of(item as SafeEvalValueInner, []))
-      return new Value(wrapped as T, taints, options?.isInternalFunction ?? false)
+      return new Value(wrapped as T, taints, options)
     }
     if (typeof raw === 'object' && raw !== null) {
       const proto = Object.getPrototypeOf(raw)
@@ -74,10 +79,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
         for (const [key, val] of Object.entries(raw)) {
           wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, [])
         }
-        return new Value(wrapped as T, taints, options?.isInternalFunction ?? false)
+        return new Value(wrapped as T, taints, options)
       }
     }
-    return new Value(raw, taints, options?.isInternalFunction ?? false)
+    return new Value(raw, taints, options)
   }
 
   static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): string[] {
@@ -104,7 +109,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 
   isThenable(): this is Value<PromiseLike<SafeEvalValueInner>> {
-    if (!this.isPlainObject() && !this.isStub()) {
+    if (!this.isPlainObject() && !(typeof this.raw === 'object' && this.raw !== null)) {
       return false
     }
     return typeof (this.raw as PromiseLike<unknown>)?.then === 'function'
@@ -135,10 +140,16 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     }
     
     if (typeof this.raw === 'object' && this.raw !== null) {
-      // it's a class, so we need to ensure it has the right metadata:
-      
+      if (typeof key.raw !== 'string') {
+        throw new Error(`Key must be a string`)
+      }
+      return Value.of(this.raw[key.raw], this.getTaints(), {
+        propertyName: key.raw,
+        parent: this,
+      })
     }
 
+    throw new Error(`Key ${key.raw} is not a safe string or number: ${typeof this.raw}`)
   }
 
   /** True if this value is a safe member key (string | number, and string not unsafe). */

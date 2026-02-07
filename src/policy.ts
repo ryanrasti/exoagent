@@ -1,6 +1,7 @@
 import z from 'zod'
 import { Value } from './eval'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { ValueOptions } from './eval/utils'
 
 export type ToolProps<Sinks extends string[], Sources extends string[]> = { source?: Sources[number] | readonly Sources[number][], sink?: Sinks[number] | readonly Sinks[number][] }
 
@@ -35,12 +36,16 @@ class Policy<Sources extends readonly string[] = [], Sinks extends readonly stri
     }
   }
 
-  doStubCall(methodName: string, method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
-    const meta = getPolicyMetadata(method.raw)
-    if (!meta) {
-      throw new Error(`Method ${thisVal.raw} does not have any @tool annotations`)
+  doStubCall(options: ValueOptions, method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
+    if (!options.propertyName || !options.parent) {
+      throw new Error(`Method must have a name and parent`)
     }
-    const toolProps = meta[methodName]
+
+    const meta = getPolicyMetadata(options.parent.raw as object)
+    if (!meta) {
+      throw new Error(`Method ${options.propertyName} does not have any @tool annotations: ${options.parent.raw}`)
+    }
+    const toolProps = meta[options.propertyName]
     if (!toolProps) {
       throw new Error(`Method ${thisVal.raw}.${method.raw} is not a tool`)
     }
@@ -119,14 +124,15 @@ export class ExoAgent<Sources extends string[] , Sinks extends string[]> {
       if (context.kind !== 'method') {
         throw new Error(`Tool decorator can only be used on methods`)
       }
-      const methodName = context.name)
+      const methodName = context.name
       if (typeof methodName !== 'string') {
         throw new Error(`Tool decorator can only be used on methods with a string name`)
       }
 
-      context.addInitializer(function () {
-        const metadata = getPolicyMetadata(target)
-        setPolicyMetadata(target, {
+      context.addInitializer(function (this: This) {
+        console.log('initializing this', this, `[${methodName}]`, toolProps)
+        const metadata = getPolicyMetadata(this as object)
+        setPolicyMetadata(this as object, {
           ...metadata,
           [methodName]: toolProps ?? {},
         })

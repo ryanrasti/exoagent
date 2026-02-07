@@ -1,6 +1,6 @@
 import type * as acorn from 'acorn'
 import type { Scope } from './scope'
-import type { AwaitControl, SafeEvalValueInner } from './utils'
+import type { AwaitControl, SafeEvalValueInner, ValueOptions } from './utils'
 import { LocalScope } from './scope'
 import { emitAwaitControl, Invariant, Value } from './utils'
 
@@ -13,7 +13,7 @@ type StatementResult = {
   control: 'normal'
 }
 
-export type DoStubCall = (method: Value<(...args: any[]) => any>, thisVal: Value<SafeEvalValueInner>, args: Value<SafeEvalValueInner>[]) => Value<SafeEvalValueInner>
+export type DoStubCall = (options: ValueOptions, method: Value<(...args: any[]) => any>, thisVal: Value<SafeEvalValueInner>, args: Value<SafeEvalValueInner>[]) => Value<SafeEvalValueInner>
 
 export class Evaluator {
   private doStubCall: DoStubCall
@@ -52,16 +52,8 @@ export class Evaluator {
     )
 
     const object = yield* this.evaluate(node.object, scope)
-    this.inv.eval(object.hasMembers(), 'Object must evaluate to an object', node, object)
 
     const prop = yield* this.evalPropertyKey(node.property, node.computed, scope)
-    this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
-    if (object.isArray() || object.isString()) {
-      this.inv.eval(prop.isNumber(), 'Index must be a number', node, prop)
-    }
-    else {
-      this.inv.eval(object.isPlainObject() || object.isStub(), 'Object must evaluate to an object', node, object)
-    }
     return { object, prop }
   }
 
@@ -169,11 +161,12 @@ export class Evaluator {
       //         allowed if either:
       //          - the function is a @tool
       //          - the function is defined in the evaluation context
-      if (!callee.isInternalFunction) {
+      if (!callee.options.isInternalFunction) {
         // If we're calling a method outside of the evaluation context, use doStubCall
         // which handles policy checks and taint propagation:
         // TODO: ensure this works for promises too
-        return this.doStubCall(callee, object, args)
+        this.inv.eval(callee.options.propertyName != null, 'Method must have a name', node.callee, callee)
+        return this.doStubCall(callee.options, callee, object, args)
       }
       else {
         // TODO: ensure this works for promises too:
