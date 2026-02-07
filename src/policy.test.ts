@@ -2,7 +2,7 @@ import { RpcStub } from 'capnweb'
 import { safeEval, Value } from './eval'
 import { describe, expect, it } from 'vitest'
 import { Policy } from './policy'
-import { RpcToolset, tool } from './rpc-toolset'
+import { tool } from './validate'
 
 // Create a test toolset with 3 methods:
 // - source1: emits 'taint1' source

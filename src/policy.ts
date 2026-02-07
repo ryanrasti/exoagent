@@ -2,25 +2,25 @@ import z from 'zod'
 import { Value } from './eval'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
-export type ToolProps<Sinks extends string[], Sources extends string[]> = { source?: [Sources[number]] | Sources[number], sink?: [Sinks[number]] | Sinks[number] }
+export type ToolProps<Sinks extends string[], Sources extends string[]> = { source?: Sources[number] | readonly Sources[number][], sink?: Sinks[number] | readonly Sinks[number][] }
 
 type PolicyDenyRule = {
   sources: string[]
   sinks: string[]
 }
 
-class Policy<Sources extends string[] = [], Sinks extends string[] = []> {
+class Policy<Sources extends readonly string[] = [], Sinks extends readonly string[] = []> {
   constructor(private sources: Sources, private sinks: Sinks, private denyRules: PolicyDenyRule[] = []) {
   }
 
-  private checkSourceTaintsConfigured(taints: string[]): asserts taints is Sources {
+  private checkSourceTaintsConfigured(taints: readonly string[]): asserts taints is Sources {
     const unconfigured = taints.filter(taint => !this.sources.includes(taint))
     if (unconfigured.length > 0) {
       throw new Error(`Source taint ${unconfigured.join(', ')} is not configured`)
     }
   }
 
-  private checkSinkTaintsConfigured(taints: string[]): asserts taints is Sinks {
+  private checkSinkTaintsConfigured(taints: readonly string[]): asserts taints is Sinks {
     const unconfigured = taints.filter(taint => !this.sinks.includes(taint))
     if (unconfigured.length > 0) {
       throw new Error(`Sink taint ${unconfigured.join(', ')} is not configured`)
@@ -35,16 +35,17 @@ class Policy<Sources extends string[] = [], Sinks extends string[] = []> {
     }
   }
 
-  doStubCall(method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
-    const meta = getToolMetadata(method.raw)
-    if (meta == null) {
+  doStubCall(methodName: string, method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
+    const meta = getPolicyMetadata(method.raw)
+    if (!meta) {
+      throw new Error(`Method ${thisVal.raw} does not have any @tool annotations`)
+    }
+    const toolProps = meta[methodName]
+    if (!toolProps) {
       throw new Error(`Method ${thisVal.raw}.${method.raw} is not a tool`)
     }
-
-    const annotation = meta.policyProps
-
-    const sinks = annotation?.sinks ?? []
-    const sources = annotation?.sources ?? []
+    const sinks = flattenArray(toolProps.sink ?? [])
+    const sources = flattenArray(toolProps.source ?? [])
     this.checkSinkTaintsConfigured(sinks)
     this.checkSourceTaintsConfigured(sources)
 
@@ -57,26 +58,10 @@ class Policy<Sources extends string[] = [], Sinks extends string[] = []> {
     return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sources])
   }
 
-  tool<TInputs extends unknown[]>(...args: [...InputSchemas<TInputs>, ToolProps<Sinks, Sources>]): (target: (...args: TInputs) => any, context: ClassMethodDecoratorContext<any, (...args: TInputs) => any>) => any {
-    return <This, Return>(
-      target: (...args: TInputs) => Return,
-      context: ClassMethodDecoratorContext<This, (...args: TInputs) => Return>,
-    ): any => {
-      if (context.kind !== 'method') {
-        throw new Error(`Tool decorator can only be used on methods`)
-      }
-      if (typeof context.name !== 'string') {
-        throw new Error(`Tool decorator can only be used on methods with a string name`)
-      }
- 
-      const inputSchemas = args.slice(0, -1) as InputSchemas<TInputs>
-      const toolProps = args[args.length - 1]
-      validate(context.name, inputSchemas, args)
+}
 
-      return tool(...inputSchemas)(target, context)
-    }
-  }
-
+const flattenArray = <T>(array: T | readonly T[]): T[] => {
+  return Array.isArray(array) ? array : [array]
 }
 
 const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: InputSchemas<Inputs>, values: unknown[]): Inputs => {
@@ -101,6 +86,26 @@ const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: In
 
 }
 
+const policyMetadataKey = Symbol('policyMetadata')
+type PolicyMetadata = {
+  [key: string]: ToolProps<string[], string[]>
+}
+
+const getPolicyMetadata = (target: object): PolicyMetadata | null => {
+  if (typeof target === 'object' && target !== null) {
+    return (target as any)[policyMetadataKey]
+  }
+  return null;
+}
+
+const setPolicyMetadata = (obj: object, metadata: PolicyMetadata): void => {
+  if (typeof obj !== 'object' || obj === null) {
+    throw new Error(`Target is not an object`)
+  }
+    (obj as any)[policyMetadataKey] = metadata
+}
+
+
 export class ExoAgent<Sources extends string[] , Sinks extends string[]> {
   constructor(private sources: readonly [...Sources], private sinks: readonly [...Sinks]) {
     
@@ -114,8 +119,19 @@ export class ExoAgent<Sources extends string[] , Sinks extends string[]> {
       if (context.kind !== 'method') {
         throw new Error(`Tool decorator can only be used on methods`)
       }
+      const methodName = context.name)
+      if (typeof methodName !== 'string') {
+        throw new Error(`Tool decorator can only be used on methods with a string name`)
+      }
+
+      context.addInitializer(function () {
+        const metadata = getPolicyMetadata(target)
+        setPolicyMetadata(target, {
+          ...metadata,
+          [methodName]: toolProps ?? {},
+        })
+      })
   
-      const methodName = String(context.name)
       const inputSchemas = inputSchemasAndProps.slice(0, -1) as InputSchemas<TInputs>
       const toolProps = inputSchemasAndProps[inputSchemasAndProps.length - 1] as ToolProps<Sinks, Sources> | undefined
   
