@@ -7,7 +7,7 @@ import { getPolicyMetadata, setPolicyMetadata } from './meta'
 export type ToolProps<Sinks extends string[], Sources extends string[]> = { source?: Sources[number] | readonly Sources[number][], sink?: Sinks[number] | readonly Sinks[number][] }
 
 const flattenArray = <T>(array: T | readonly T[]): T[] => {
-  return Array.isArray(array) ? array : [array]
+  return Array.isArray(array) ? array : [array as T]
 }
 
 const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: InputSchemas<Inputs>, values: unknown[]): Inputs => {
@@ -28,7 +28,7 @@ const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: In
       ret.push(validation.value)
     }
   }
-  return ret
+  return ret as Inputs
 }
 
 type PolicyDenyRule = {
@@ -85,14 +85,16 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     this.checkDenyRules(incomingTaints, sinks)
 
     const result = method.callStub(thisVal, args)
-    console.log('result', result)
     return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sources])
   }
 }
 
 export class ExoAgent<Sources extends string[], Sinks extends string[]> {
-  constructor(private sources: readonly [...Sources], private sinks: readonly [...Sinks]) {
-
+  public readonly sources: Sources
+  public readonly sinks: Sinks
+  constructor(sources: readonly [...Sources], sinks: readonly [...Sinks]) {
+    this.sources = sources as Sources
+    this.sinks = sinks as Sinks
   }
 
   tool<TInputs extends unknown[]>(...inputSchemasAndProps: [...InputSchemas<TInputs>]): MethodDecorator<TInputs>
@@ -110,6 +112,12 @@ export class ExoAgent<Sources extends string[], Sinks extends string[]> {
         throw new TypeError(`Tool decorator can only be used on methods with a string name`)
       }
 
+      const last = inputSchemasAndProps[inputSchemasAndProps.length - 1]
+      const hasToolProps = last != null && !('~standard' in last)
+
+      const inputSchemas = (hasToolProps ? inputSchemasAndProps.slice(0, -1) : inputSchemasAndProps) as InputSchemas<TInputs>
+      const toolProps = (hasToolProps ? inputSchemasAndProps[inputSchemasAndProps.length - 1] : undefined) as ToolProps<Sinks, Sources> | undefined
+
       context.addInitializer(function (this: This) {
         const metadata = getPolicyMetadata(this as object)
         setPolicyMetadata(this as object, {
@@ -118,14 +126,7 @@ export class ExoAgent<Sources extends string[], Sinks extends string[]> {
         })
       })
 
-      const last = inputSchemasAndProps[inputSchemasAndProps.length - 1]
-      const hasToolProps = last != null && !('~standard' in last)
-
-      const inputSchemas = (hasToolProps ? inputSchemasAndProps.slice(0, -1) : inputSchemasAndProps) as InputSchemas<TInputs>
-      const toolProps = (hasToolProps ? inputSchemasAndProps[inputSchemasAndProps.length - 1] : undefined) as ToolProps<Sinks, Sources> | undefined
-
       return function (this: This, ...args: TInputs): Return {
-        console.log('calling', methodName, args)
         const validatedArgs = validate(methodName, inputSchemas, args)
         return target.call(this, ...validatedArgs)
       }

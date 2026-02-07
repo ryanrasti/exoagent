@@ -219,14 +219,15 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   join<N2 extends string, F2 extends RowLikeRaw>(fromItem: FromItem<N2, F2>
     | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>) {
     const fromItemCallbackRaw = isFromItem(fromItem) ? () => fromItem : fromItem as NamespacedExpression<TN, FromItem<N2, F2>>
-    let fromItemResolved = fromItemCallbackRaw(this.arg)
-    invariant(isFromItem(fromItemResolved), `fromItem must return a FromItem: ${fromItemResolved}`)
+    let fromItemRaw = fromItemCallbackRaw(this.arg)
+    invariant(isFromItem(fromItemRaw), `fromItem must return a FromItem: ${fromItemRaw}`)
 
-    if (fromItemResolved instanceof QueryBuilder && fromItemResolved.rawTable) {
+    if (fromItemRaw instanceof QueryBuilder && fromItemRaw.rawTable) {
       // If we're joining to a raw table, use it because it might have an `onExpression`
       //  (and its more efficient to use the raw table than to re-SELECT from it)
-      fromItemResolved = fromItemResolved.rawTable as unknown as FromItem<N2, F2>
+      fromItemRaw = fromItemRaw.rawTable as unknown as FromItem<N2, F2>
     }
+    const fromItemResolved: FromItem<N2, F2> = fromItemRaw
     const alias = fromItemResolved.alias
 
     if (this.tables[alias]) {

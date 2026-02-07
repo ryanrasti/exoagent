@@ -170,7 +170,6 @@ export class Evaluator {
       }
       else {
         // TODO: ensure this works for promises too:
-        console.log('callee', callee)
         const result = Reflect.apply(callee.raw, object, args)
         return Value.of(result, callee.getTaints())
       }

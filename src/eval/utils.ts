@@ -52,7 +52,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   unwrap(): SafeEvalValueInner {
     // Arrays: unwrap each element recursively
     if (Array.isArray(this.raw)) {
-      return this.raw.map(item => item instanceof Value ? item.unwrap() : item) as SafeEvalValue
+      return this.raw.map(item => item instanceof Value ? item.unwrap() : item) as SafeEvalValueInner
     }
     // Plain objects: unwrap each property value recursively
     if (this.isPlainObject()) {
@@ -192,10 +192,8 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
   asAwaitable(): PromiseLike<Value<SafeEvalValueInner>> | Value<SafeEvalValueInner> {
     if (this.isThenable()) {
-      console.log('asAwaitable', this.raw)
       return this.raw.then(v => Value.of(v, this.getTaints()))
     }
-    console.log('asAwaitable', this.raw, 'not thenable')
     return this
   }
 
