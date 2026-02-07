@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tool } from '../rpc-toolset'
+import { tool } from '../policy'
 import { Database } from './builder'
 import { LiteralExpression } from './expression'
 import { compiledQuery, dummyDialect } from './test-helpers'

@@ -185,7 +185,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     }
     return arg instanceof SqlExpression || arg instanceof OrderByValue
   })))
-  orderBy(orderBy: (arg: TN) => OrderByItem<TN>) {
+  orderBy(orderBy: OrderByItem<TN>) {
     const raw = orderBy(this.arg)
     const rawArray = Array.isArray(raw) ? raw : [raw]
     const exprs = rawArray.map((e) => {
@@ -215,7 +215,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   join<N2 extends string, F2 extends RowLike>(fromItem: FromItem<N2, F2>
     | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>): QueryBuilder<N, TN & { [k in N2]: F2 }, S>
 
-  @tool(fn.returns(z.any()), fn.returns(z.any()).optional())
+  @tool(z.any(), z.any().optional())
   join<N2 extends string, F2 extends RowLikeRaw>(fromItem: FromItem<N2, F2>
     | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>) {
     const fromItemCallbackRaw = isFromItem(fromItem) ? () => fromItem : fromItem as NamespacedExpression<TN, FromItem<N2, F2>>
