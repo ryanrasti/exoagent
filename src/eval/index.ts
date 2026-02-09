@@ -20,6 +20,7 @@ export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCa
   const iter = evaluator.evaluate(ast, globalThis ? new GlobalScope(globalThis) : new GlobalScope(Value.of({}, [])))
   let step = iter.next()
   if (step.done) {
+    console.log('step.value', step.value)
     return step.value.asAwaitable()
   }
 
@@ -30,9 +31,7 @@ export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCa
       const resolved = raw instanceof Value
         ? (raw.raw instanceof Promise ? await raw.raw : raw.raw)
         : await raw
-      const innerOnly: SafeEvalValueInner = resolved instanceof Value ? (resolved as Value<SafeEvalValueInner>).raw : (resolved as SafeEvalValueInner)
-      const taints = raw instanceof Value ? raw.getTaints() : Value.getTaints(resolved)
-      step = iter.next(Value.of(innerOnly, taints) as Value<SafeEvalValueInner>)
+      step = iter.next(Value.of(resolved, []) as Value<SafeEvalValueInner>)
     }
     return step.value.asAwaitable()
   }

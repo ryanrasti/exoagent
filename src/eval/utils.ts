@@ -4,15 +4,18 @@ import { RpcPromise } from 'capnweb'
 import { getPolicyMetadata } from '../meta'
 
 const checkSafeMember = (member: string) => {
-  if (!('prototype' in RpcPromise) || typeof RpcPromise.prototype !== 'object' || RpcPromise.prototype === null) {
-    throw new Error('RpcPromise has no prototype')
-  }
   const unsafe
     = member in Object.prototype
-      || (member in RpcPromise.prototype)
       || member === 'constructor'
       || member === 'prototype'
       || member === '__proto__'
+      || member === 'toJSON'
+      || member === 'toString'
+      // Promise-related members - prevents constructing thenables that could
+      // bypass policy checks when used with `await`
+      || member === 'then'
+      || member === 'catch'
+      || member === 'finally'
   return !unsafe
 }
 
@@ -192,7 +195,11 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
   asAwaitable(): PromiseLike<Value<SafeEvalValueInner>> | Value<SafeEvalValueInner> {
     if (this.isThenable()) {
-      return this.raw.then(v => Value.of(v, this.getTaints()))
+      return (async() => {
+        const v = await this.raw
+        console.log('v', v)
+        return Value.of(v, this.getTaints()).asAwaitable()
+      })()
     }
     return this
   }

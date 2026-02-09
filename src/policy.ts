@@ -20,7 +20,7 @@ const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: In
     if ('~standard' in inputSchemas[i]) {
       const validation = inputSchemas[i]['~standard'].validate(values[i])
       if (validation instanceof Promise) {
-        throw new TypeError(`Validation must be synchronous`)
+        throw new TypeError(`Validation must be synchronous: ${validation} ${values[i]}`)
       }
       if (validation.issues) {
         throw new Error(`Invalid value: ${validation.issues.map(e => e.message).join(', ')}`)
