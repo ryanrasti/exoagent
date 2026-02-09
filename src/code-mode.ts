@@ -45,7 +45,6 @@ export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: s
     }),
     execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<R> => {
       const result = await safeEval(`(${code})(api)`, Value.of(api), policy.doStubCall.bind(policy))
-      console.log('result', result, result.unwrap())
       return result.unwrap()
     },
   }

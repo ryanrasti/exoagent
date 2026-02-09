@@ -752,6 +752,87 @@ describe('policy - sinks cannot accept functions or promises', () => {
 
     expect(result.raw).toContain('wrote:')
   })
+
+  it('rejects promise nested in array', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const arrayWithPromise = Value.of([
+      Value.of(1, []),
+      Value.of(Promise.resolve('sneaky'), []),
+    ], [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [arrayWithPromise],
+      )
+    }).toThrow(/Sink cannot accept promise.*at arg0\[1\]/)
+  })
+
+  it('rejects promise nested in object', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const objWithPromise = Value.of({
+      clean: Value.of('ok', []),
+      bad: Value.of(Promise.resolve('sneaky'), []),
+    }, [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [objWithPromise],
+      )
+    }).toThrow(/Sink cannot accept promise.*at arg0.bad/)
+  })
+
+  it('rejects deeply nested promise', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const deepNested = Value.of({
+      level1: Value.of({
+        level2: Value.of([
+          Value.of({ inner: Value.of(Promise.resolve('deeply sneaky'), []) }, []),
+        ], []),
+      }, []),
+    }, [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [deepNested],
+      )
+    }).toThrow(/Sink cannot accept promise.*at arg0.level1.level2\[0\].inner/)
+  })
+
+  it('rejects mixed functions and promises in nested structure', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const mixedNested = Value.of({
+      arr: Value.of([
+        Value.of('clean', []),
+        Value.of({ fn: Value.of(() => 'sneaky fn', []) }, []),
+      ], []),
+    }, [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [mixedNested],
+      )
+    }).toThrow(/Sink cannot accept function at arg0.arr\[1\].fn/)
+  })
 })
 
 describe('policy - error messages', () => {

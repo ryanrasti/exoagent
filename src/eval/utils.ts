@@ -211,7 +211,6 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     if (this.isThenable()) {
       return (async() => {
         const v = await this.raw
-        console.log('v', v)
         return Value.of(v, this.getTaints()).asAwaitable()
       })()
     }

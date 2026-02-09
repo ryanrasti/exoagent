@@ -20,7 +20,6 @@ export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCa
   const iter = evaluator.evaluate(ast, globalThis ? new GlobalScope(globalThis) : new GlobalScope(Value.of({}, [])))
   let step = iter.next()
   if (step.done) {
-    console.log('step.value', step.value)
     return step.value.asAwaitable()
   }
 
