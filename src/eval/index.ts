@@ -29,7 +29,7 @@ export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCa
       const ctrl = step.value as { value: Value<SafeEvalValueInner> | Promise<Value<SafeEvalValueInner>> }
       const raw = ctrl.value
       const resolved = raw instanceof Value
-        ? (raw.raw instanceof Promise ? await raw.raw : raw.raw)
+        ? (await raw.asAwaitable())
         : await raw
       step = iter.next(Value.of(resolved, []) as Value<SafeEvalValueInner>)
     }

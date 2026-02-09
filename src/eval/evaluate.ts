@@ -234,9 +234,11 @@ export class Evaluator {
             const iter = this.evalFunctionBody(node, scope, args)
             let step = iter.next()
             while (!step.done) {
-              step = iter.next(await step.value.value)
+              const next = step.value.value
+              const awaitable = next instanceof Value ? next.asAwaitable() : next
+              step = iter.next(await awaitable)
             }
-            return step.value
+            return step.value.asAwaitable()
           },
           [],
           { isInternalFunction: true },
