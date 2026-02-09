@@ -177,7 +177,7 @@ export class Evaluator {
     }
     else if (node.type === 'ArrayExpression') {
       const res = yield* this.evalArray(node.elements, scope)
-      return Value.of(res, Value.mergeTaints(...res))
+      return Value.of(res, Value.mergeTaints(...res), { shallow: true })
     }
     else if (node.type === 'ObjectExpression') {
       const result: { [key: string]: Value<SafeEvalValueInner> } = {}
@@ -211,7 +211,7 @@ export class Evaluator {
           result[keyVal.raw] = yield* this.evaluate(property.value, scope)
         }
       }
-      return Value.of(result, Value.mergeTaints(...Object.values(result)))
+      return Value.of(result, Value.mergeTaints(...Object.values(result)), { shallow: true })
     }
     else if (node.type === 'AwaitExpression') {
       const promise = yield* this.evaluate(node.argument, scope)
@@ -270,7 +270,14 @@ export class Evaluator {
   * evalFunctionBody(node: acorn.ArrowFunctionExpression, scope: Scope, args: Value<SafeEvalValueInner>[]): Evaluation<Value<SafeEvalValueInner>> {
     const localScope = new LocalScope(new Map(), scope)
     for (const [i, param] of node.params.entries()) {
-      yield* localScope.bind(param, args[i], this.evaluate.bind(this))
+      if (param.type === 'RestElement') {
+        // Rest parameters collect remaining args into an array
+        const restArgs = args.slice(i)
+        yield* localScope.bind(param, Value.of(restArgs, Value.mergeTaints(...restArgs), { shallow: true }), this.evaluate.bind(this))
+      }
+      else {
+        yield* localScope.bind(param, args[i] ?? Value.of(undefined, []), this.evaluate.bind(this))
+      }
     }
     const { body } = node
     if (body.type === 'BlockStatement') {

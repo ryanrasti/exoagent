@@ -30,6 +30,7 @@ export type ValueOptions = {
   isInternalFunction?: boolean
   parent?: Value<SafeEvalValueInner>
   propertyName?: string
+  shallow?: boolean
 }
 
 // Single wrapper for values in eval: raw value + taints + helpers. Wrap/unwrap only at boundaries.
@@ -47,8 +48,17 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return [...this.taints]
   }
 
-  withTaints(extra: readonly string[]): Value<T> {
-    return extra.length === 0 ? this : new Value(this.raw, [...this.taints, ...extra]) as Value<T>
+  /** Add taints deeply to this value and all nested children. */
+  withTaints(extra: readonly string[], shallow: boolean = false): Value<T> {
+    if (extra.length === 0) {
+      return this
+    }
+    if (shallow) {
+      return new Value(this.raw, [...this.taints, ...extra], this.options)
+    }
+    // Use `Value.of` to recursively taint the value with the new taints.
+    // Then any existing taints should just be shallowly added:
+    return Value.of(this.raw, extra, {...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
   }
 
   /** Recursively unwrap arrays and objects, converting Value instances back to raw values. */
@@ -81,19 +91,21 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   static of(raw: unknown, taints?: readonly string[], options?: ValueOptions): Value
   static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: ValueOptions): Value<T>
   static of(raw: unknown, taints: readonly string[] = [], options?: ValueOptions): Value {
+    const shallow = options?.shallow ?? false
+    const subTaints = options?.shallow ? [] : taints
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
-      const wrapped = raw.map(item => item instanceof Value ? item : Value.of(item as SafeEvalValueInner, []))
-      return new Value(wrapped as T, taints, options)
+      const wrapped = raw.map(item => Value.of(item as SafeEvalValueInner, subTaints, { shallow }))
+      return new Value(wrapped, taints, options)
     }
     if (typeof raw === 'object' && raw !== null) {
       const proto = Object.getPrototypeOf(raw)
       if (proto === null || proto === Object.prototype) {
         const wrapped: { [key: string]: Value<SafeEvalValueInner> } = {}
         for (const [key, val] of Object.entries(raw)) {
-          wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, taints)
+          wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, subTaints, { shallow })
         }
-        return new Value(wrapped as T, taints, options)
+        return new Value(wrapped, taints, options)
       }
     }
     if (raw instanceof Value) {

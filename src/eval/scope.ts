@@ -41,7 +41,7 @@ export abstract class Scope {
         }
         if (pat.type === 'RestElement') {
           parseInvariant(param.elements.length === i + 1, 'Rest element must be last', pat)
-          yield* this.bind(pat, Value.of(arr.slice(i), Value.mergeTaints(...arr.slice(i))), evaluate)
+          yield* this.bind(pat, Value.of(arr.slice(i), Value.mergeTaints(...arr.slice(i)), { shallow: true }), evaluate)
         }
         else {
           yield* this.bind(pat, arr[i] ?? Value.of(undefined, []), evaluate)
@@ -64,7 +64,7 @@ export abstract class Scope {
             }
             copy[key] = value.getSlot(Value.of(key, []))
           }
-          this.set(property.argument, Value.of(copy, Value.mergeTaints(...Object.values(copy))))
+          this.set(property.argument, Value.of(copy, Value.mergeTaints(...Object.values(copy)), { shallow: true }))
           break
         }
         let key: Value<SafeEvalValueInner>

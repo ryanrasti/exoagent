@@ -365,12 +365,22 @@ describe('Value.of wrapping behavior', () => {
     expect(inner.a).toBeInstanceOf(Value)
   })
 
-  it('preserves existing Value instances', () => {
+  it('applies outer taints deeply to nested Value instances', () => {
     const inner = Value.of(42, ['inner'])
     const outer = Value.of({ value: inner }, ['outer'])
     const raw = outer.raw as Record<string, Value>
+    // Deep behavior: inner value gets outer taints merged
+    expect(raw.value.getTaints()).toContain('inner')
+    expect(raw.value.getTaints()).toContain('outer')
+  })
+
+  it('preserves existing Value instances with shallow option', () => {
+    const inner = Value.of(42, ['inner'])
+    const outer = Value.of({ value: inner }, ['outer'], { shallow: true })
+    const raw = outer.raw as Record<string, Value>
     expect(raw.value).toBe(inner)
     expect(raw.value.getTaints()).toContain('inner')
+    expect(raw.value.getTaints()).not.toContain('outer')
   })
 
   it('returns same Value with merged taints if passed a Value', () => {
