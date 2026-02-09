@@ -166,6 +166,7 @@ export class Evaluator {
         // which handles policy checks and taint propagation:
         // TODO: ensure this works for promises too
         this.inv.eval(callee.options.propertyName != null, 'Method must have a name', node.callee, callee)
+        console.log('callee', callee, callee.options, object, args)
         return this.doStubCall(callee.options, callee, object, args)
       }
       else {

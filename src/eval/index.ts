@@ -11,9 +11,10 @@ export { formatCodeMessage, Invariant, Value } from './utils'
 
 export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  const evaluator = new Evaluator(code, doStubCall ?? ((method, thisVal, args) => {
+  const evaluator = new Evaluator(code, doStubCall ?? ((options, method, thisVal, args) => {
     // Default: just call the stub without policy checks
     // TODO: default should probably deny, but for now allow:
+    // TODO: what do do about `options`?
     return method.callStub(thisVal, args)
   }))
   const iter = evaluator.evaluate(ast, globalThis ? new GlobalScope(globalThis) : new GlobalScope(Value.of({}, [])))

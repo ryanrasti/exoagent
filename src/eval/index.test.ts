@@ -2,6 +2,8 @@ import { RpcTarget } from 'capnweb'
 import { describe, expect, it } from 'vitest'
 import { safeEval } from './index.js'
 import { Value } from './utils.js'
+import { tool } from '../policy.js'
+import z from 'zod'
 
 describe('capnweb-eval basic evaluation', () => {
   it('evaluates number literals', async () => {
@@ -191,53 +193,37 @@ describe('capnweb-eval complex scenarios', () => {
     expect(getAgeResult).toEqual(Value.of(expect.any(Function), []))
   })
 
-  it('supports chained method calls', async () => {
-    const objIn = {
-      getValue() {
-        return { multiply: (x: number) => x * 2 }
-      },
-    }
-    const result = await safeEval('obj', Value.of({ obj: objIn }))
-    expect(result).toEqual(Value.of(expect.objectContaining({ getValue: Value.of(expect.any(Function)) }), []))
-    const obj = result.unwrap() as typeof objIn
-    expect(obj.getValue().multiply(3)).toBe(6)
-  })
 
-  it('handles functions that return arrays', async () => {
-    const scope = Value.of({
-      range: (n: number): number[] => Array.from({ length: n }, (_, i) => i),
-    })
-    expect(await safeEval('range(5)', scope)).toEqual(Value.of([Value.of(0, []), Value.of(1, []), Value.of(2, []), Value.of(3, []), Value.of(4, [])], []))
-  })
-
-  it('handles functions that return objects', async () => {
-    const scope = Value.of({
-      createPoint: (x: number, y: number): { x: number, y: number } => ({ x, y }),
-    })
-    expect(await safeEval('createPoint(10, 20)', scope)).toEqual(Value.of({ x: Value.of(10, []), y: Value.of(20, []) }, []))
-  })
 })
 
-describe('capnweb-eval with RpcTargets', () => {
+describe('capnweb-eval with toolsets', () => {
   it('supports chained method calls', async () => {
 
-    class Global extends RpcTarget {
-      obj = new Obj()
-    }
-
-    class Obj extends RpcTarget {
+    class Obj {
+      @tool()
       getValue() {
         return { multiply: (x: number) => x * 2 }
       }
     }
-    const result = await safeEval('obj', Value.of(new Global()))
-    expect(result).toEqual(Value.of(expect.objectContaining({ getValue: Value.of(expect.any(Function)) }), []))
+
+
+    const objOrig = new Obj()
+    class Global {
+      @tool()
+      obj() {
+        return objOrig
+      }
+    }
+
+    const result = await safeEval('obj()', Value.of(new Global()))
     const obj = result.unwrap() as Obj
+    expect(obj).toEqual(objOrig)
     expect(obj.getValue().multiply(3)).toBe(6)
   })
 
   it('handles functions that return arrays', async () => {
-    class Range extends RpcTarget {
+    class Range {
+      @tool(z.number())
       range(n: number): number[] {
         return Array.from({ length: n }, (_, i) => i)
       }
@@ -246,7 +232,8 @@ describe('capnweb-eval with RpcTargets', () => {
   })
 
   it('handles functions that return objects', async () => {
-    class CreatePoint extends RpcTarget {
+    class CreatePoint {
+      @tool(z.number(), z.number())
       createPoint(x: number, y: number): { x: number, y: number } {
         return { x, y }
       }

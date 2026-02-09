@@ -84,6 +84,7 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     this.checkSourceTaintsConfigured(incomingTaints)
     this.checkDenyRules(incomingTaints, sinks)
 
+    console.log('doStubCall', options, method, thisVal, args)
     const result = method.callStub(thisVal, args)
     return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sources])
   }
