@@ -148,13 +148,13 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     }
 
     if (this.isPlainObject()) {
-      return this.raw[key.raw].withTaints(key.getTaints())
+      return (this.raw[key.raw] ?? Value.Undefined).withTaints(key.getTaints())
     }
     if (this.isArray()) {
       if (!key.isNumber()) {
         throw new Error(`Index must be a number`)
       }
-      return this.raw[key.raw].withTaints(key.getTaints())
+      return (this.raw[key.raw] ?? Value.Undefined).withTaints(key.getTaints())
     }
 
     if (typeof this.raw === 'object' && this.raw !== null) {
@@ -204,6 +204,8 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   toString(): string {
     return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${this.getTaints().join(', ')})`
   }
+
+  static Undefined = Value.of(undefined, [])
 }
 
 // Inner = unwrapped shape; inside eval we use Value<SafeEvalValueInner>.

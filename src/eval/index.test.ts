@@ -50,10 +50,12 @@ describe('capnweb-eval basic evaluation', () => {
   })
 
   it('calls functions from global scope', async () => {
-    const scope = Value.of(new class extends RpcTarget {
+    const scope = Value.of(new class {
+      @tool(z.number(), z.number())
       add(a: number, b: number) {
         return a + b
       }
+      @tool(z.number())
       square(x: number) {
         return x * x
       }
@@ -106,17 +108,30 @@ describe('capnweb-eval basic evaluation', () => {
   })
 
   it('supports arrow functions', async () => {
-    const scope = Value.of({
-      numbers: [1, 2, 3],
-      double: (x: number) => x * 2,
+    const scope = Value.of(new class {
+      @tool()
+      numbers(): number[] {
+        return [1, 2, 3]
+      }
+      
+      @tool(z.number())
+      double(x: number) {
+        return x * 2
+      }
     })
     const fn = await safeEval('x => double(x)', scope)
-    expect(fn).toEqual(Value.of(expect.any(Function), []))
-    expect(await safeEval('numbers', scope)).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
+    expect(fn).toEqual(Value.of(expect.any(Function), [], { isInternalFunction: true }))
+    expect(await safeEval('numbers()', scope)).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
   })
 
   it('supports arrow functions with multiple parameters', async () => {
-    expect(await safeEval('((a, b) => add(a, b))(5, 3)', Value.of({ add: (a: number, b: number) => a + b }))).toEqual(Value.of(8, []))
+    const scope = Value.of(new class {
+      @tool(z.number(), z.number())
+      add(a: number, b: number) {
+        return a + b
+      }
+    })
+    expect(await safeEval('((a, b) => add(a, b))(5, 3)', scope)).toEqual(Value.of(8, []))
   })
 
   it('supports array spread', async () => {
@@ -128,9 +143,15 @@ describe('capnweb-eval basic evaluation', () => {
   })
 
   it('supports nested expressions', async () => {
-    const scope = Value.of({
-      add: (a: number, b: number) => a + b,
-      multiply: (a: number, b: number) => a * b,
+    const scope = Value.of(new class {
+      @tool(z.number(), z.number())
+      add(a: number, b: number) {
+        return a + b
+      }
+      @tool(z.number(), z.number())
+      multiply(a: number, b: number) {
+        return a * b
+      }
     })
     expect(await safeEval('add(multiply(2, 3), multiply(4, 5))', scope)).toEqual(Value.of(26, []))
   })
