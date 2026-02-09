@@ -602,6 +602,158 @@ describe('fn validator', () => {
   })
 })
 
+describe('policy - sinks cannot accept functions or promises', () => {
+  const sinkExo = new ExoAgent(['source'] as const, ['sink'] as const)
+
+  class SinkToolset {
+    @sinkExo.tool({ source: ['source'] })
+    getSource() { return 'data' }
+
+    @sinkExo.tool(z.any(), { sink: ['sink'] })
+    writeSink(data: unknown) { return `wrote: ${data}` }
+
+    @sinkExo.tool(z.any()) // no sink annotation
+    noSink(data: unknown) { return `no sink: ${data}` }
+  }
+
+  it('rejects function argument to sink', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const fnArg = Value.of(() => 'sneaky', [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [fnArg],
+      )
+    }).toThrow(/Sink cannot accept function/)
+  })
+
+  it('rejects promise argument to sink', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const promiseArg = Value.of(Promise.resolve('sneaky'), [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [promiseArg],
+      )
+    }).toThrow(/Sink cannot accept promise/)
+  })
+
+  it('rejects function nested in array', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const arrayWithFn = Value.of([Value.of(1, []), Value.of(() => 'sneaky', [])], [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [arrayWithFn],
+      )
+    }).toThrow(/Sink cannot accept function at arg0\[1\]/)
+  })
+
+  it('rejects function nested in object', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const objWithFn = Value.of({ clean: Value.of('ok', []), bad: Value.of(() => 'sneaky', []) }, [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [objWithFn],
+      )
+    }).toThrow(/Sink cannot accept function at arg0.bad/)
+  })
+
+  it('rejects deeply nested function', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const deepNested = Value.of({
+      level1: Value.of({
+        level2: Value.of([
+          Value.of(() => 'deeply sneaky', []),
+        ], []),
+      }, []),
+    }, [])
+
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+        Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+        Value.of(toolset, []),
+        [deepNested],
+      )
+    }).toThrow(/Sink cannot accept function at arg0.level1.level2\[0\]/)
+  })
+
+  it('allows function argument to non-sink method', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const fnArg = Value.of(() => 'callback', [])
+
+    const result = policy.doStubCall(
+      { propertyName: 'noSink', parent: Value.of(toolset, []) },
+      Value.of(toolset.noSink, []) as Value<(d: unknown) => string>,
+      Value.of(toolset, []),
+      [fnArg],
+    )
+
+    expect(result.raw).toContain('no sink')
+  })
+
+  it('allows primitive values to sink', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const primitiveArg = Value.of('just a string', [])
+
+    const result = policy.doStubCall(
+      { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+      Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+      Value.of(toolset, []),
+      [primitiveArg],
+    )
+
+    expect(result.raw).toBe('wrote: just a string')
+  })
+
+  it('allows nested primitives to sink', () => {
+    const toolset = new SinkToolset()
+    const policy = sinkExo.policy([])
+
+    const nestedPrimitives = Value.of({
+      arr: Value.of([Value.of(1, []), Value.of(2, [])], []),
+      obj: Value.of({ a: Value.of('hello', []) }, []),
+    }, [])
+
+    const result = policy.doStubCall(
+      { propertyName: 'writeSink', parent: Value.of(toolset, []) },
+      Value.of(toolset.writeSink, []) as Value<(d: unknown) => string>,
+      Value.of(toolset, []),
+      [nestedPrimitives],
+    )
+
+    expect(result.raw).toContain('wrote:')
+  })
+})
+
 describe('policy - error messages', () => {
   it('provides clear error for missing method name', () => {
     const simpleExo = new ExoAgent([] as const, [] as const)

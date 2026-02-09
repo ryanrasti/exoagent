@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { setPolicyMetadata } from '../meta.js'
 import { formatCodeMessage, isSafeMemberRaw, Value } from './utils.js'
 
+// Helper for order-independent taint comparison
+const expectTaints = (value: Value, expected: string[]) => {
+  expect(value.getTaints().sort()).toEqual(expected.sort())
+}
+
 describe('value', () => {
   it('stores raw and taints', () => {
     const v = Value.of(42, ['a'])
@@ -12,9 +17,9 @@ describe('value', () => {
   it('withTaints merges and returns new Value', () => {
     const v = Value.of(1, ['a'])
     const v2 = v.withTaints(['b'])
-    expect(v.getTaints()).toEqual(['a'])
+    expectTaints(v, ['a'])
     expect(v2.raw).toBe(1)
-    expect(v2.getTaints()).toEqual(['a', 'b'])
+    expectTaints(v2, ['a', 'b'])
   })
 
   it('withTaints(empty) returns same', () => {
@@ -84,7 +89,7 @@ describe('value type-check methods (no .raw at call site)', () => {
     const v = Value.of({ a: 1, b: 2 }, ['obj'])
     const slotA = v.getSlot(Value.of('a', ['key']))
     expect(slotA.raw).toBe(1)
-    expect(slotA.getTaints()).toEqual(['obj', 'key'])
+    expectTaints(slotA, ['obj', 'key'])
     expect(v.getSlot(Value.of('b', [])).raw).toBe(2)
   })
 
@@ -387,7 +392,7 @@ describe('Value.of wrapping behavior', () => {
     const v = Value.of(42, ['a'])
     const v2 = Value.of(v, ['b'])
     expect(v2.raw).toBe(42)
-    expect(v2.getTaints()).toEqual(['a', 'b'])
+    expectTaints(v2, ['a', 'b'])
   })
 })
 

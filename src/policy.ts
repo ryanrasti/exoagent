@@ -10,6 +10,29 @@ const flattenArray = <T>(array: T | readonly T[]): T[] => {
   return Array.isArray(array) ? array : [array as T]
 }
 
+/**
+ * Asserts that a Value is "sinkable" - contains no functions or promises.
+ * Sinks cannot accept callbacks or promises because they could smuggle tainted data.
+ */
+function assertSinkable(value: Value, path: string = ''): void {
+  if (value.isFunction()) {
+    throw new Error(`Sink cannot accept function at ${path || 'root'}`)
+  }
+  if (value.isThenable()) {
+    throw new Error(`Sink cannot accept promise/thenable at ${path || 'root'}`)
+  }
+  if (value.isArray()) {
+    for (let i = 0; i < value.raw.length; i++) {
+      assertSinkable(value.raw[i], `${path}[${i}]`)
+    }
+  }
+  else if (value.isPlainObject()) {
+    for (const [key, val] of Object.entries(value.raw)) {
+      assertSinkable(val, path ? `${path}.${key}` : key)
+    }
+  }
+}
+
 const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: InputSchemas<Inputs>, values: unknown[]): Inputs => {
   const expectedArgs = inputSchemas.length
   if (values.length > expectedArgs) {
@@ -79,6 +102,13 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     const sources = flattenArray(toolProps.source ?? [])
     this.checkSinkTaintsConfigured(sinks)
     this.checkSourceTaintsConfigured(sources)
+
+    // If this method is a sink, ensure no args contain functions or promises
+    if (sinks.length > 0) {
+      for (let i = 0; i < args.length; i++) {
+        assertSinkable(args[i], `arg${i}`)
+      }
+    }
 
     const incomingTaints = Value.mergeTaints(thisVal, ...args)
     this.checkSourceTaintsConfigured(incomingTaints)

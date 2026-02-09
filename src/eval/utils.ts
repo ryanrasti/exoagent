@@ -92,26 +92,28 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: ValueOptions): Value<T>
   static of(raw: unknown, taints: readonly string[] = [], options?: ValueOptions): Value {
     const shallow = options?.shallow ?? false
-    const subTaints = options?.shallow ? [] : taints
+    const subTaints = shallow ? [] : taints
+    // Strip shallow from stored options - it's only used for control flow
+    const { shallow: _, ...storedOptions } = options ?? {}
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
-      const wrapped = raw.map(item => Value.of(item as SafeEvalValueInner, subTaints, { shallow }))
-      return new Value(wrapped, taints, options)
+      const wrapped = raw.map(item => item instanceof Value ? item.withTaints(subTaints) : Value.of(item as SafeEvalValueInner, subTaints, { shallow }))
+      return new Value(wrapped, taints, storedOptions)
     }
     if (typeof raw === 'object' && raw !== null) {
       const proto = Object.getPrototypeOf(raw)
       if (proto === null || proto === Object.prototype) {
         const wrapped: { [key: string]: Value<SafeEvalValueInner> } = {}
         for (const [key, val] of Object.entries(raw)) {
-          wrapped[key] = val instanceof Value ? val : Value.of(val as SafeEvalValueInner, subTaints, { shallow })
+          wrapped[key] = val instanceof Value ? val.withTaints(subTaints) : Value.of(val as SafeEvalValueInner, subTaints, { shallow })
         }
-        return new Value(wrapped, taints, options)
+        return new Value(wrapped, taints, storedOptions)
       }
     }
     if (raw instanceof Value) {
       return raw.withTaints(taints)
     }
-    return new Value(raw, taints, options)
+    return new Value(raw, taints, storedOptions)
   }
 
   static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): string[] {
