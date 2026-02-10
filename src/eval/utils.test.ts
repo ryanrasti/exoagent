@@ -104,21 +104,24 @@ describe('value type-check methods (no .raw at call site)', () => {
 })
 
 describe('unwrap', () => {
+  // No-op policy checker for tests that don't care about policy
+  const noopChecker = () => {}
+
   it('primitives pass through', () => {
-    expect(Value.of(1, []).unwrap()).toBe(1)
-    expect(Value.of('x', []).unwrap()).toBe('x')
-    expect(Value.of(null, []).unwrap()).toBe(null)
-    expect(Value.of(undefined, []).unwrap()).toBe(undefined)
+    expect(Value.of(1, []).unwrap(noopChecker)).toBe(1)
+    expect(Value.of('x', []).unwrap(noopChecker)).toBe('x')
+    expect(Value.of(null, []).unwrap(noopChecker)).toBe(null)
+    expect(Value.of(undefined, []).unwrap(noopChecker)).toBe(undefined)
   })
 
   it('array of Values unwraps recursively', () => {
     const v = Value.of([Value.of(1, []), Value.of(2, [])], [])
-    expect(v.unwrap()).toEqual([1, 2])
+    expect(v.unwrap(noopChecker)).toEqual([1, 2])
   })
 
   it('object of Values unwraps recursively', () => {
     const v = Value.of({ a: Value.of(1, []), b: Value.of(2, []) }, [])
-    expect(v.unwrap()).toEqual({ a: 1, b: 2 })
+    expect(v.unwrap(noopChecker)).toEqual({ a: 1, b: 2 })
   })
 
   it('deeply nested structures unwrap recursively', () => {
@@ -131,7 +134,7 @@ describe('unwrap', () => {
         nested: Value.of([Value.of(3, []), Value.of(4, [])], []),
       }, []),
     }, [])
-    expect(v.unwrap()).toEqual({
+    expect(v.unwrap(noopChecker)).toEqual({
       arr: [{ x: 1 }, { y: 2 }],
       obj: { nested: [3, 4] },
     })
@@ -140,7 +143,7 @@ describe('unwrap', () => {
   it('unwraps internal functions to non-wrapping functions', () => {
     const innerFn = (x: Value) => Value.of(x.raw as number * 2, [])
     const v = Value.of(innerFn, [], { isInternalFunction: true })
-    const unwrapped = v.unwrap() as (x: number) => number
+    const unwrapped = v.unwrap(noopChecker) as (x: number) => number
     expect(typeof unwrapped).toBe('function')
     expect(unwrapped(5)).toBe(10)
   })
@@ -148,7 +151,7 @@ describe('unwrap', () => {
   it('preserves non-internal functions as-is', () => {
     const fn = (x: number) => x * 2
     const v = Value.of(fn, [])
-    expect(v.unwrap()).toBe(fn)
+    expect(v.unwrap(noopChecker)).toBe(fn)
   })
 })
 
@@ -324,33 +327,6 @@ describe('Value.asAwaitable', () => {
     const result = await v.asAwaitable()
     expect(result.raw).toBe(42)
     expect(result.getTaints()).toContain('taint')
-  })
-})
-
-describe('Value.callStub', () => {
-  it('calls the function with unwrapped args and wraps result', () => {
-    const fn = (a: number, b: number) => a + b
-    const fnValue = Value.of(fn, []) as Value<(a: number, b: number) => number>
-    const thisVal = Value.of(undefined, [])
-    const args = [Value.of(3, ['arg1']), Value.of(4, ['arg2'])]
-
-    const result = fnValue.callStub(thisVal, args)
-    expect(result.raw).toBe(7)
-    expect(result.getTaints()).toContain('arg1')
-    expect(result.getTaints()).toContain('arg2')
-  })
-
-  it('preserves this context', () => {
-    const obj = {
-      value: 10,
-      getValue(this: { value: number }) { return this.value },
-    }
-    const fnValue = Value.of(obj.getValue, []) as Value<() => number>
-    const thisVal = Value.of(obj, ['this-taint'])
-
-    const result = fnValue.callStub(thisVal, [])
-    expect(result.raw).toBe(10)
-    expect(result.getTaints()).toContain('this-taint')
   })
 })
 

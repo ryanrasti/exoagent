@@ -3,7 +3,7 @@ import z from 'zod'
 import { codeMode } from './code-mode'
 import { ExoAgent } from './policy'
 
-const exo = new ExoAgent([], [])
+const exo = new ExoAgent([], ['output'] as const)
 const policy = exo.policy([])
 
 class TestToolset {
@@ -20,7 +20,7 @@ class TestToolset {
 
 describe('codeMode (capnweb-eval)', () => {
   it('executes user code that calls RpcToolset tools', async () => {
-    const wrappedTool = codeMode({ api: new TestToolset() }, policy, '')
+    const wrappedTool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
         const toolset = await api
@@ -33,7 +33,7 @@ describe('codeMode (capnweb-eval)', () => {
   })
 
   it('executes user code that chains RpcToolset tools', async () => {
-    const wrappedTool = codeMode({ api: new TestToolset() }, policy, '')
+    const wrappedTool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
         return api.subtract({ a: 20, b: 8 })
@@ -45,7 +45,7 @@ describe('codeMode (capnweb-eval)', () => {
 })
 
 describe('codeMode - async execution', () => {
-  const asyncExo = new ExoAgent([], [])
+  const asyncExo = new ExoAgent([], ['output'] as const)
   const asyncPolicy = asyncExo.policy([])
 
   class AsyncToolset {
@@ -66,7 +66,7 @@ describe('codeMode - async execution', () => {
   }
 
   it('handles async tool calls with await', async () => {
-    const wrappedTool = codeMode({ api: new AsyncToolset() }, asyncPolicy, '')
+    const wrappedTool = codeMode({ api: new AsyncToolset(), policy: asyncPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
         const doubled = await api.asyncDouble(21)
@@ -78,7 +78,7 @@ describe('codeMode - async execution', () => {
   })
 
   it('handles multiple sequential async calls', async () => {
-    const wrappedTool = codeMode({ api: new AsyncToolset() }, asyncPolicy, '')
+    const wrappedTool = codeMode({ api: new AsyncToolset(), policy: asyncPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
         const a = await api.asyncDouble(5)
@@ -91,7 +91,7 @@ describe('codeMode - async execution', () => {
   })
 
   it('handles async calls in expressions', async () => {
-    const wrappedTool = codeMode({ api: new AsyncToolset() }, asyncPolicy, '')
+    const wrappedTool = codeMode({ api: new AsyncToolset(), policy: asyncPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
         return await api.asyncAdd(await api.asyncDouble(3), await api.asyncDouble(4))
@@ -103,7 +103,7 @@ describe('codeMode - async execution', () => {
 })
 
 describe('codeMode - error propagation', () => {
-  const errorExo = new ExoAgent([], [])
+  const errorExo = new ExoAgent([], ['output'] as const)
   const errorPolicy = errorExo.policy([])
 
   class ErrorToolset {
@@ -120,21 +120,21 @@ describe('codeMode - error propagation', () => {
   }
 
   it('propagates errors from tool calls', async () => {
-    const wrappedTool = codeMode({ api: new ErrorToolset() }, errorPolicy, '')
+    const wrappedTool = codeMode({ api: new ErrorToolset(), policy: errorPolicy, outputSink: 'output' })
     await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => api.throwError("test error")`,
     })).rejects.toThrow('test error')
   })
 
   it('propagates validation errors from tools', async () => {
-    const wrappedTool = codeMode({ api: new ErrorToolset() }, errorPolicy, '')
+    const wrappedTool = codeMode({ api: new ErrorToolset(), policy: errorPolicy, outputSink: 'output' })
     await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => api.validatePositive(-5)`,
     })).rejects.toThrow('Number must be positive')
   })
 
   it('handles syntax errors in user code', async () => {
-    const wrappedTool = codeMode({ api: new ErrorToolset() }, errorPolicy, '')
+    const wrappedTool = codeMode({ api: new ErrorToolset(), policy: errorPolicy, outputSink: 'output' })
     await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => { this is not valid javascript }`,
     })).rejects.toThrow()
@@ -142,7 +142,7 @@ describe('codeMode - error propagation', () => {
 })
 
 describe('codeMode - nested object access', () => {
-  const nestedExo = new ExoAgent([], [])
+  const nestedExo = new ExoAgent([], ['output'] as const)
   const nestedPolicy = nestedExo.policy([])
 
   class OuterToolset {
@@ -162,7 +162,7 @@ describe('codeMode - nested object access', () => {
   }
 
   it('accesses nested toolset via getter method', async () => {
-    const wrappedTool = codeMode({ api: new OuterToolset() }, nestedPolicy, '')
+    const wrappedTool = codeMode({ api: new OuterToolset(), policy: nestedPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => {
         const inner = api.getInner()
@@ -175,7 +175,7 @@ describe('codeMode - nested object access', () => {
 })
 
 describe('codeMode - complex return types', () => {
-  const complexExo = new ExoAgent([], [])
+  const complexExo = new ExoAgent([], ['output'] as const)
   const complexPolicy = complexExo.policy([])
 
   class ComplexToolset {
@@ -206,7 +206,7 @@ describe('codeMode - complex return types', () => {
   }
 
   it('returns deeply nested objects', async () => {
-    const wrappedTool = codeMode({ api: new ComplexToolset() }, complexPolicy, '')
+    const wrappedTool = codeMode({ api: new ComplexToolset(), policy: complexPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => api.getNestedObject()`,
     })
@@ -222,7 +222,7 @@ describe('codeMode - complex return types', () => {
   })
 
   it('returns arrays of objects', async () => {
-    const wrappedTool = codeMode({ api: new ComplexToolset() }, complexPolicy, '')
+    const wrappedTool = codeMode({ api: new ComplexToolset(), policy: complexPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => api.getArrayOfObjects()`,
     })
@@ -234,7 +234,7 @@ describe('codeMode - complex return types', () => {
   })
 
   it('handles complex data flow through tools', async () => {
-    const wrappedTool = codeMode({ api: new ComplexToolset() }, complexPolicy, '')
+    const wrappedTool = codeMode({ api: new ComplexToolset(), policy: complexPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => {
         const users = api.getArrayOfObjects()
@@ -249,7 +249,7 @@ describe('codeMode - complex return types', () => {
   })
 
   it('constructs and returns complex objects', async () => {
-    const wrappedTool = codeMode({ api: new ComplexToolset() }, complexPolicy, '')
+    const wrappedTool = codeMode({ api: new ComplexToolset(), policy: complexPolicy, outputSink: 'output' })
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => {
         const nested = api.getNestedObject()
@@ -279,7 +279,7 @@ describe('codeMode - complex return types', () => {
 describe('codeMode - policy enforcement', () => {
   const policyExo = new ExoAgent(
     ['untrusted', 'trusted'] as const,
-    ['sensitive'] as const,
+    ['sensitive', 'output'] as const,
   )
 
   class PolicyToolset {
@@ -300,7 +300,7 @@ describe('codeMode - policy enforcement', () => {
     const denyPolicy = policyExo.policy([
       { sources: ['untrusted'], sinks: ['sensitive'] },
     ])
-    const wrappedTool = codeMode({ api: new PolicyToolset() }, denyPolicy, '')
+    const wrappedTool = codeMode({ api: new PolicyToolset(), policy: denyPolicy, outputSink: 'output' })
 
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => {
@@ -316,7 +316,7 @@ describe('codeMode - policy enforcement', () => {
     const denyPolicy = policyExo.policy([
       { sources: ['untrusted'], sinks: ['sensitive'] },
     ])
-    const wrappedTool = codeMode({ api: new PolicyToolset() }, denyPolicy, '')
+    const wrappedTool = codeMode({ api: new PolicyToolset(), policy: denyPolicy, outputSink: 'output' })
 
     await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => {
@@ -330,7 +330,7 @@ describe('codeMode - policy enforcement', () => {
     const denyPolicy = policyExo.policy([
       { sources: ['untrusted'], sinks: ['sensitive'] },
     ])
-    const wrappedTool = codeMode({ api: new PolicyToolset() }, denyPolicy, '')
+    const wrappedTool = codeMode({ api: new PolicyToolset(), policy: denyPolicy, outputSink: 'output' })
 
     await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `(api) => {
@@ -344,13 +344,13 @@ describe('codeMode - policy enforcement', () => {
 
 describe('codeMode - tool description and schema', () => {
   it('has description with API documentation', () => {
-    const tool = codeMode({ api: new TestToolset() }, policy, 'interface Api { add(a: number, b: number): number }')
+    const tool = codeMode({ api: new TestToolset(), policy, dts: 'interface Api { add(a: number, b: number): number }', outputSink: 'output' })
     expect(tool.description).toContain('interface Api')
     expect(tool.description).toContain('add')
   })
 
   it('has input schema requiring code parameter', () => {
-    const tool = codeMode({ api: new TestToolset() }, policy, '')
+    const tool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
     expect(tool.inputSchema).toBeDefined()
 
     // Validate that the schema requires 'code'

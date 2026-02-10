@@ -236,7 +236,7 @@ describe('capnweb-eval with toolsets', () => {
     }
 
     const result = await safeEval('obj()', Value.of(new Global()))
-    const obj = result.unwrap() as Obj
+    const obj = result.unwrap(() => {}) as Obj
     expect(obj).toEqual(objOrig)
     expect(obj.getValue().multiply(3)).toBe(6)
   })

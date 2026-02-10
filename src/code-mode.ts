@@ -1,12 +1,24 @@
 import type { ToolExecutionOptions } from 'ai'
+import type { PolicyChecker } from './eval/utils'
 import type { Policy } from './policy'
 import { z } from 'zod'
 import { safeEval, Value } from './eval'
 
-export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: string) => {
+export type CodeModeOptions<Sinks extends readonly string[]> = {
+  api: object
+  policy: Policy<string[], [...Sinks]>
+  dts?: string
+  /** The sink to check at the output boundary (required) */
+  outputSink: Sinks[number]
+}
+
+export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<Sinks>) {
+  const { api, policy, dts = '', outputSink } = opts
+  const checkPolicy: PolicyChecker = policy.createUnwrapChecker(outputSink)
+
   return {
     description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.
-        
+
         \`\`\`typescript
         type Primitive = string | number | boolean | null | undefined | bigint | Date | Uint8Array | Error;
         type Returnable = Primitive | { [key: string]: Returnable } | Returnable[];
@@ -29,9 +41,9 @@ export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: s
         - Async functions: \`async (a, b, c) => ...\`
         ANY OTHER FEATURES WILL RESULT IN AN ERROR.
 
-        Also, no globals are available or prototype methods on standard objects (e.g., Array.prototype.map). You 
+        Also, no globals are available or prototype methods on standard objects (e.g., Array.prototype.map). You
         only have access to the \`api\` object and its methods (recursively).
-        
+
         Example:
         \`\`\`javascript
             (api) => {
@@ -43,9 +55,9 @@ export const codeMode = (api: object, policy: Policy<string[], string[]>, dts: s
     inputSchema: z.object({
       code: z.string(),
     }),
-    execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<R> => {
-      const result = await safeEval(`(${code})(api)`, Value.of(api), policy.doStubCall.bind(policy))
-      return result.unwrap()
+    execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<unknown> => {
+      const result = await safeEval(`(${code})(api)`, Value.of({ api }), policy.doStubCall.bind(policy))
+      return result.unwrap(checkPolicy)
     },
   }
 }

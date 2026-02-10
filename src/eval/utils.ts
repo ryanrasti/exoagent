@@ -33,6 +33,13 @@ export type ValueOptions = {
   shallow?: boolean
 }
 
+/**
+ * Policy checker called during unwrap to validate taints at the boundary.
+ * @param taints - The taints on the value being unwrapped
+ * @param path - The path to this value (e.g., "result.foo[0]")
+ */
+export type PolicyChecker = (taints: readonly string[], path: string) => void
+
 // Single wrapper for values in eval: raw value + taints + helpers. Wrap/unwrap only at boundaries.
 export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint extends string = string> {
   constructor(
@@ -61,30 +68,50 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return Value.of(this.raw, extra, {...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
   }
 
-  /** Recursively unwrap arrays and objects, converting Value instances back to raw values. */
-  unwrap(): SafeEvalValueInner {
+  /**
+   * Recursively unwrap arrays and objects, converting Value instances back to raw values.
+   * Policy check is enforced at this boundary for all values including deferred ones.
+   * @param checkPolicy - Mandatory policy checker to validate taints
+   * @param path - Current path for error messages (default: 'result')
+   */
+  unwrap(checkPolicy: PolicyChecker, path: string = 'result'): SafeEvalValueInner {
+    // Check policy on this value's taints
+    checkPolicy(this.taints, path)
+
     // Arrays: unwrap each element recursively
     if (Array.isArray(this.raw)) {
-      return this.raw.map(item => item instanceof Value ? item.unwrap() : item) as SafeEvalValueInner
+      return this.raw.map((item, i) =>
+        item instanceof Value ? item.unwrap(checkPolicy, `${path}[${i}]`) : item,
+      ) as SafeEvalValueInner
     }
+
     // Plain objects: unwrap each property value recursively
     if (this.isPlainObject()) {
       const unwrapped: { [key: string]: SafeEvalValueInner } = {}
       for (const [key, val] of Object.entries(this.raw)) {
-        unwrapped[key] = val instanceof Value ? val.unwrap() : val as SafeEvalValueInner
+        unwrapped[key] = val instanceof Value ? val.unwrap(checkPolicy, `${path}.${key}`) : val as SafeEvalValueInner
       }
       return unwrapped as SafeEvalValueInner
     }
+
+    // Internal functions: wrap to check policy on result when called
     if (this.isFunction() && this.options?.isInternalFunction) {
-      // If we return an internal function, we need a new one that doesn't wrap.
       return (...args: unknown[]) => {
         const res = this.raw(...(args.map(arg => Value.of(arg))))
-        return res.unwrap()
+        // Policy check happens when function result is unwrapped
+        return res.unwrap(checkPolicy, `${path}()`)
       }
     }
-    // TODO: handle promise-like
 
-    // Primitives, functions, stubs, etc.: return raw value
+    // Promises/thenables: wrap to check policy on resolution
+    if (this.isThenable()) {
+      return (this.raw as PromiseLike<Value>).then((resolved) => {
+        const val = resolved instanceof Value ? resolved : Value.of(resolved, this.taints)
+        return val.unwrap(checkPolicy, path)
+      }) as SafeEvalValueInner
+    }
+
+    // Primitives, external functions, stubs: return raw value
     return this.raw as SafeEvalValueInner
   }
 
@@ -217,9 +244,6 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return this
   }
 
-  callStub(this: Value<(...args: unknown[]) => unknown>, thisVal: Value, args: Value[]): Value {
-    return Value.of(Reflect.apply(this.raw, thisVal.raw, args.map(a => a.unwrap())), Value.mergeTaints(thisVal, ...args))
-  }
 
   toString(): string {
     return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${this.getTaints().join(', ')})`

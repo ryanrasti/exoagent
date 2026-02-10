@@ -10,29 +10,6 @@ const flattenArray = <T>(array: T | readonly T[]): T[] => {
   return Array.isArray(array) ? array : [array as T]
 }
 
-/**
- * Asserts that a Value is "sinkable" - contains no functions or promises.
- * Sinks cannot accept callbacks or promises because they could smuggle tainted data.
- */
-function assertSinkable(value: Value, path: string = ''): void {
-  if (value.isFunction()) {
-    throw new Error(`Sink cannot accept function at ${path || 'root'}`)
-  }
-  if (value.isThenable()) {
-    throw new Error(`Sink cannot accept promise/thenable at ${path || 'root'}`)
-  }
-  if (value.isArray()) {
-    for (let i = 0; i < value.raw.length; i++) {
-      assertSinkable(value.raw[i], `${path}[${i}]`)
-    }
-  }
-  else if (value.isPlainObject()) {
-    for (const [key, val] of Object.entries(value.raw)) {
-      assertSinkable(val, path ? `${path}.${key}` : key)
-    }
-  }
-}
-
 const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: InputSchemas<Inputs>, values: unknown[]): Inputs => {
   const expectedArgs = inputSchemas.length
   if (values.length > expectedArgs) {
@@ -85,6 +62,25 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     }
   }
 
+  /**
+   * Creates a policy checker for use with Value.unwrap().
+   * Checks that the given taints don't violate any deny rules for the specified sink.
+   * @param sink - The sink(s) to check against (e.g., 'output' for sandbox boundary)
+   */
+  createUnwrapChecker(sink: Sinks[number] | readonly Sinks[number][]): (taints: readonly string[], path: string) => void {
+    const sinks = flattenArray(sink)
+    this.checkSinkTaintsConfigured(sinks)
+
+    return (taints: readonly string[], path: string) => {
+      this.checkSourceTaintsConfigured(taints)
+      for (const denyRule of this.denyRules) {
+        if (denyRule.sources.some(source => taints.includes(source)) && denyRule.sinks.some(s => sinks.includes(s))) {
+          throw new Error(`Policy violation at ${path}: taints [${taints.join(', ')}] cannot flow to sink [${sinks.join(', ')}]`)
+        }
+      }
+    }
+  }
+
   doStubCall(options: ValueOptions, method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
     if (!options.propertyName || !options.parent) {
       throw new Error(`Method must have a name and parent`)
@@ -103,18 +99,15 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     this.checkSinkTaintsConfigured(sinks)
     this.checkSourceTaintsConfigured(sources)
 
-    // If this method is a sink, ensure no args contain functions or promises
-    if (sinks.length > 0) {
-      for (let i = 0; i < args.length; i++) {
-        assertSinkable(args[i], `arg${i}`)
-      }
-    }
-
     const incomingTaints = Value.mergeTaints(thisVal, ...args)
     this.checkSourceTaintsConfigured(incomingTaints)
     this.checkDenyRules(incomingTaints, sinks)
 
-    const result = method.callStub(thisVal, args)
+    // Unwrap args with policy check against this tool's sinks
+    const checker = sinks.length > 0 ? this.createUnwrapChecker(sinks) : () => {}
+    const unwrappedArgs = args.map(a => a.unwrap(checker))
+    const rawResult = Reflect.apply(method.raw, thisVal.raw, unwrappedArgs)
+    const result = Value.of(rawResult, Value.mergeTaints(thisVal, ...args))
     return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sources])
   }
 }

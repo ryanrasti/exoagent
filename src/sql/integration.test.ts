@@ -5,7 +5,7 @@ import { Database } from './builder'
 import { sql } from './sql'
 import { pgliteDialect } from './test-helpers'
 
-const exo = new ExoAgent([], [])
+const exo = new ExoAgent([], ['output'] as const)
 const policy = exo.policy([])
 
 const db = new Database(pgliteDialect)
@@ -57,11 +57,14 @@ describe('sql integration with eval sandbox', () => {
   it('executes a basic select via CodeMode', async () => {
     const codeTool = codeMode({
       api: new Api(),
-    }, policy, `class User extends db.Table('users').as('user') {
+      policy,
+      outputSink: 'output',
+      dts: `class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
-}`)
+}`,
+    })
 
     const result = await codeTool.execute({
       code: `async ({ users }) => {
@@ -77,7 +80,9 @@ describe('sql integration with eval sandbox', () => {
   it('executes a join via CodeMode', async () => {
     const codeTool = codeMode({
       api: new Api(),
-    }, policy, `class User extends db.Table('users').as('user') {
+      policy,
+      outputSink: 'output',
+      dts: `class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
@@ -93,7 +98,8 @@ class Post extends db.Table('posts').as('post') {
   userId = this.column('user_id')
   title = this.column('title')
   content = this.column('content')
-}`)
+}`,
+    })
 
     const result = await codeTool.execute({
       code: `async ({ users }) => {
