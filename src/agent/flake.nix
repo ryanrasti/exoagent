@@ -33,6 +33,7 @@
           pkgs.libxrandr
           pkgs.libxcb
           pkgs.libgbm         # libgbm (split from mesa)
+          pkgs.libGL          # libEGL, libGLESv2
           pkgs.expat
           pkgs.libxkbcommon
           pkgs.systemdLibs    # libudev

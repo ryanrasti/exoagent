@@ -50,6 +50,30 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
     }
   }
 
+  const handleConnectGoogle = async () => {
+    setSaving('oauth')
+    try {
+      await window.api.startGoogleOAuth()
+      setStatus(s => s ? { ...s, googleTokens: true } : s)
+    } catch (err) {
+      console.warn('OAuth failed:', err)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const handleDisconnectGoogle = async () => {
+    setSaving('oauth')
+    try {
+      await window.api.clearGoogleTokens()
+      setStatus(s => s ? { ...s, googleTokens: false } : s)
+    } catch (err) {
+      console.error('Failed to disconnect:', err)
+    } finally {
+      setSaving(null)
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-6 w-full max-w-lg">
@@ -110,9 +134,13 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
         <div className="p-4 bg-neutral-800/50 rounded-lg">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-medium text-neutral-300">Google OAuth (Gmail, Calendar)</h3>
-            {status?.googleOAuthClient ? (
+            {status?.googleTokens ? (
               <span className="text-xs text-green-500 flex items-center gap-1">
-                <span>●</span> Configured
+                <span>●</span> Connected
+              </span>
+            ) : status?.googleOAuthClient ? (
+              <span className="text-xs text-yellow-500 flex items-center gap-1">
+                <span>○</span> Client configured, not connected
               </span>
             ) : (
               <span className="text-xs text-yellow-500 flex items-center gap-1">
@@ -121,7 +149,7 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
             )}
           </div>
           <p className="text-xs text-neutral-500 mb-3">
-            Upload the OAuth credentials JSON from Google Cloud Console.
+            Upload the OAuth credentials JSON from Google Cloud Console, then connect your account.
           </p>
           <input
             ref={fileInputRef}
@@ -130,13 +158,33 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
             onChange={handleFileSelect}
             className="hidden"
           />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={saving === 'google'}
-            className="px-4 py-2 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
-          >
-            {saving === 'google' ? 'Uploading...' : 'Upload credentials.json'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={saving === 'google'}
+              className="px-4 py-2 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+            >
+              {saving === 'google' ? 'Uploading...' : status?.googleOAuthClient ? 'Replace credentials' : 'Upload credentials.json'}
+            </button>
+            {status?.googleOAuthClient && !status?.googleTokens && (
+              <button
+                onClick={handleConnectGoogle}
+                disabled={saving === 'oauth'}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
+              >
+                {saving === 'oauth' ? 'Connecting...' : 'Connect Google Account'}
+              </button>
+            )}
+            {status?.googleTokens && (
+              <button
+                onClick={handleDisconnectGoogle}
+                disabled={saving === 'oauth'}
+                className="px-4 py-2 text-sm bg-red-600/80 hover:bg-red-600 disabled:opacity-50 rounded"
+              >
+                Disconnect
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

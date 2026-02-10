@@ -42,5 +42,6 @@ export async function getSecretsStatus(): Promise<Record<string, boolean>> {
   return {
     geminiApiKey: keys.has('geminiApiKey'),
     googleOAuthClient: keys.has('googleOAuthClient'),
+    googleTokens: keys.has('googleTokens'),
   }
 }

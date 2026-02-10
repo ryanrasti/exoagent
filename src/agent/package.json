@@ -21,7 +21,8 @@
     "kysely": "^0.28.11",
     "mailparser": "^3.9.3",
     "nodemailer": "^8.0.1",
-    "openid-client": "^6.8.2"
+    "openid-client": "^6.8.2",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
