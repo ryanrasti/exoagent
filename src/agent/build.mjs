@@ -5,7 +5,7 @@ const common = {
   platform: 'node',
   target: 'node20',
   format: 'cjs',
-  external: ['electron'],
+  external: ['electron', 'better-sqlite3'],
 }
 
 await Promise.all([

@@ -1,13 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-contextBridge.exposeInMainWorld('electronAPI', {
-  send: (channel: string, data: unknown) => {
-    ipcRenderer.send(channel, data)
-  },
-  on: (channel: string, callback: (...args: unknown[]) => void) => {
-    ipcRenderer.on(channel, (_event, ...args) => callback(...args))
-  },
-  invoke: (channel: string, data: unknown) => {
-    return ipcRenderer.invoke(channel, data)
-  },
+contextBridge.exposeInMainWorld('api', {
+  // Secrets
+  getSecretsStatus: () => ipcRenderer.invoke('secrets:status'),
+  setGeminiApiKey: (key: string) => ipcRenderer.invoke('secrets:setGeminiApiKey', key),
+  setGoogleOAuthClient: (json: string) => ipcRenderer.invoke('secrets:setGoogleOAuthClient', json),
+
+  // Chat
+  chat: (message: string, history: Array<{ role: 'user' | 'assistant'; content: string }>) =>
+    ipcRenderer.invoke('chat', message, history),
 })

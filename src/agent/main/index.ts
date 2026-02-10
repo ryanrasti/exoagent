@@ -1,16 +1,22 @@
 import { app, BrowserWindow, Menu } from 'electron'
 import path from 'node:path'
+import { setupIpc } from './ipc'
 
+app.setName('exoagent')
 const isDev = !app.isPackaged
 
 function createWindow() {
+  const preloadPath = path.join(__dirname, '../preload/index.cjs')
+  console.log('Preload path:', preloadPath)
+
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.cjs'),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false, // Required for preload on some Linux setups
     },
   })
 
@@ -25,6 +31,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
+  setupIpc()
   createWindow()
 
   app.on('activate', () => {
