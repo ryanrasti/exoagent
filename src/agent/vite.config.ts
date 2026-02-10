@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   root: 'renderer',
   base: './',
+  publicDir: 'public',
   build: {
     outDir: '../dist/renderer',
     emptyOutDir: true,

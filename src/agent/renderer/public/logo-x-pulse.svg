@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <style>
+    @keyframes orbit {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { r: 5; opacity: 0.8; }
+      50% { r: 7; opacity: 1; }
+    }
+    .orbiter {
+      transform-origin: 50px 50px;
+      animation: orbit 25s linear infinite;
+    }
+    .dot {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+  </style>
+
+  <!-- Dark background with rounded corners -->
+  <rect x="0" y="0" width="100" height="100" fill="#0a0a0a" rx="16" ry="16" />
+
+  <!-- X breaking through the rings -->
+  <line x1="12" y1="12" x2="88" y2="88" stroke="white" stroke-width="5" />
+  <line x1="88" y1="12" x2="12" y2="88" stroke="white" stroke-width="5" />
+
+  <!-- Two bold concentric rings -->
+  <circle cx="50" cy="50" r="25" stroke="white" stroke-width="4" opacity="0.7" />
+  <circle cx="50" cy="50" r="40" stroke="white" stroke-width="4" opacity="0.5" />
+
+  <!-- Green pulsing/glowing ball orbiting -->
+  <g class="orbiter">
+    <circle cx="90" cy="50" r="6" fill="#22c55e" filter="url(#glow)" class="dot" />
+  </g>
+</svg>
