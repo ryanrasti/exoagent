@@ -1,4 +1,3 @@
-import type { RpcTarget } from 'capnweb'
 import type { DoStubCall } from './evaluate'
 import type { SafeEvalValueInner } from './utils'
 import * as acorn from 'acorn'

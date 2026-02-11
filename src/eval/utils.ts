@@ -1,6 +1,4 @@
 import type * as acorn from 'acorn'
-import type { RpcTarget } from 'capnweb'
-import { RpcPromise } from 'capnweb'
 import { getPolicyMetadata } from '../meta'
 
 const checkSafeMember = (member: string) => {
@@ -266,7 +264,6 @@ export type SafeEvalValueInner
 export type SafeEvalHasMemberInner
   = | Value<SafeEvalValueInner>[]
     | { [key: string]: Value<SafeEvalValueInner> }
-    | RpcTarget
 
 /**
  * Formats an error message with a code snippet showing the relevant location.

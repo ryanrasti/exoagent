@@ -9,6 +9,6 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts', 'packages/capnweb-eval/**/*.test.ts'],
-
+    exclude: ['**/node_modules/**', '**/.direnv/**'],
   },
 })
