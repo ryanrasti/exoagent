@@ -6,6 +6,7 @@
   "main": "dist/main/index.cjs",
   "scripts": {
     "dev": "node build.mjs && concurrently \"vite\" \"sleep 1 && electron dist/main/index.cjs\"",
+    "dev:web": "npm rebuild better-sqlite3 && concurrently \"vite\" \"tsx --watch main/server.ts\"",
     "build": "vite build && node build.mjs",
     "pack": "npm run build && electron-builder --config electron-builder.config.js",
     "gen:schema": "tsx scripts/gen-schema.ts",
@@ -17,6 +18,8 @@
     "@google/generative-ai": "^0.24.1",
     "ai": "^6.0.78",
     "better-sqlite3": "^12.6.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
     "googleapis": "^171.4.0",
     "kysely": "^0.28.11",
     "mailparser": "^3.9.3",
@@ -27,6 +30,8 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.3",
     "@types/mailparser": "^3.4.6",
     "@types/nodemailer": "^7.0.9",
     "@types/react": "^19.2.13",

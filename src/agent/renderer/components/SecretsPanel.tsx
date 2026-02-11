@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { api } from '../api'
 
 interface Props {
   isOpen: boolean
@@ -13,7 +14,7 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
 
   useEffect(() => {
     if (isOpen) {
-      window.api.getSecretsStatus().then(setStatus)
+      api.getSecretsStatus().then(setStatus)
     }
   }, [isOpen])
 
@@ -23,7 +24,7 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
     if (!geminiKey.trim()) return
     setSaving('gemini')
     try {
-      await window.api.setGeminiApiKey(geminiKey.trim())
+      await api.setGeminiApiKey(geminiKey.trim())
       setStatus(s => s ? { ...s, geminiApiKey: true } : s)
       setGeminiKey('')
     } finally {
@@ -39,7 +40,7 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
     try {
       const content = await file.text()
       JSON.parse(content) // validate it's JSON
-      await window.api.setGoogleOAuthClient(content)
+      await api.setGoogleOAuthClient(content)
       setStatus(s => s ? { ...s, googleOAuthClient: true } : s)
     } catch (err) {
       console.error('Failed to save OAuth client:', err)
@@ -55,7 +56,7 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
     // Re-enable button after 5s while OAuth continues in background
     setTimeout(() => setSaving(null), 5000)
     try {
-      await window.api.startGoogleOAuth()
+      await api.startGoogleOAuth()
       setStatus(s => s ? { ...s, googleTokens: true } : s)
     } catch (err) {
       console.warn('OAuth failed:', err)
@@ -67,7 +68,7 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
   const handleDisconnectGoogle = async () => {
     setSaving('oauth')
     try {
-      await window.api.clearGoogleTokens()
+      await api.clearGoogleTokens()
       setStatus(s => s ? { ...s, googleTokens: false } : s)
     } catch (err) {
       console.error('Failed to disconnect:', err)

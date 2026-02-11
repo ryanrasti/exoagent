@@ -14,7 +14,8 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            nodejs
+            # Use Node 22 to match Electron 40's Node version
+            nodejs_22
             deno
           ];
         };

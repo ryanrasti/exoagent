@@ -20,6 +20,10 @@ export type CodeModeResult = {
   response: string
   data: unknown
   taints: Taint[]
+  error?: {
+    message: string
+    stack?: string
+  }
 }
 
 /** Validate that a value is a valid turn result */
@@ -109,7 +113,16 @@ export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<
       }
       catch (err) {
         console.warn('[codeMode] Execution error:', err)
-        throw err
+        // Return error as a result so it can be displayed in UI
+        return {
+          response: '',
+          data: null,
+          taints: [],
+          error: {
+            message: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          },
+        }
       }
     },
   }

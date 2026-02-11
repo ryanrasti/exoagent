@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { api } from './api'
 import { SecretsPanel } from './components/SecretsPanel'
 
 /** Display message derived from Turn for UI */
@@ -8,6 +9,8 @@ interface DisplayMessage {
   content: string
   data?: unknown
   taints?: Taint[]
+  isError?: boolean
+  errorStack?: string
 }
 
 function TaintsDisplay({ taints }: { taints: Taint[] }) {
@@ -63,6 +66,27 @@ function DataDisplay({ data }: { data: unknown }) {
   )
 }
 
+function ErrorStackDisplay({ stack }: { stack: string }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors"
+      >
+        <span>{expanded ? '▼' : '▶'}</span>
+        <span>stack trace</span>
+      </button>
+      {expanded && (
+        <pre className="mt-1 text-xs text-red-300/70 overflow-x-auto max-h-48 overflow-y-auto">
+          {stack}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
   const [isSecretsOpen, setIsSecretsOpen] = useState(false)
   const [secretsStatus, setSecretsStatus] = useState<SecretsStatus | null>(null)
@@ -72,17 +96,12 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    if (!window.api) {
-      setSecretsStatus({ geminiApiKey: false, googleOAuthClient: false })
-      return
-    }
-    window.api.getSecretsStatus().then(setSecretsStatus)
+    api.getSecretsStatus().then(setSecretsStatus)
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
-    if (!window.api) return
 
     const userContent = input.trim()
     const userTurn: Turn = { role: 'user', content: userContent }
@@ -98,7 +117,7 @@ export default function App() {
     setIsLoading(true)
 
     try {
-      const result = await window.api.chat(userContent, history)
+      const result = await api.chat(userContent, history)
 
       const assistantTurn: Turn = {
         role: 'assistant',
@@ -121,7 +140,9 @@ export default function App() {
       const errorMessage: DisplayMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        content: err instanceof Error ? err.message : 'Unknown error',
+        isError: true,
+        errorStack: err instanceof Error ? err.stack : undefined,
       }
       setMessages(prev => [...prev, errorMessage])
     }
@@ -167,12 +188,20 @@ export default function App() {
           >
             <div
               className={`max-w-[80%] px-4 py-2 rounded-lg ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-neutral-800 text-neutral-100'
+                msg.isError
+                  ? 'bg-red-900/50 border border-red-700 text-red-200'
+                  : msg.role === 'user'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-neutral-800 text-neutral-100'
               }`}
             >
+              {msg.isError && (
+                <div className="text-xs text-red-400 font-semibold mb-1">Error</div>
+              )}
               <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
+              {msg.errorStack && (
+                <ErrorStackDisplay stack={msg.errorStack} />
+              )}
               {msg.taints && msg.taints.length > 0 && (
                 <TaintsDisplay taints={msg.taints} />
               )}
@@ -215,7 +244,7 @@ export default function App() {
         isOpen={isSecretsOpen}
         onClose={() => {
           setIsSecretsOpen(false)
-          window.api?.getSecretsStatus().then(setSecretsStatus)
+          api.getSecretsStatus().then(setSecretsStatus)
         }}
       />
     </div>
