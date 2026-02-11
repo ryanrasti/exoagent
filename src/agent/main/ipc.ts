@@ -73,13 +73,13 @@ export function setupIpc(): void {
             query: z.string().describe('Gmail search query'),
           })),
           execute: async ({ maxResults, query }) => {
-            const messages = await gmail.list(maxResults, query)
+            const messages = await gmail.list({ maxResults, query })
             const emails = await Promise.all(
               messages.slice(0, 5).map(async m => {
-                const full = await gmail.get(m.id)
+                const full = await gmail.get({ id: m.id })
                 return {
                   id: full.id,
-                  from: full.from?.text,
+                  from: full.from,
                   subject: full.subject,
                   date: full.date?.toISOString(),
                   snippet: full.text?.slice(0, 200),
@@ -95,11 +95,11 @@ export function setupIpc(): void {
             id: z.string().describe('Email ID'),
           })),
           execute: async ({ id }) => {
-            const email = await gmail.get(id)
+            const email = await gmail.get({ id })
             return {
               id: email.id,
-              from: email.from?.text,
-              to: email.to?.text,
+              from: email.from,
+              to: email.to,
               subject: email.subject,
               date: email.date?.toISOString(),
               text: email.text,
@@ -110,25 +110,29 @@ export function setupIpc(): void {
         sendEmail: tool({
           description: 'Send an email',
           inputSchema: zodSchema(z.object({
-            to: z.string().describe('Recipient email address'),
+            to: z.array(z.string()).describe('Recipient email addresses'),
+            cc: z.array(z.string()).optional().describe('CC email addresses'),
+            bcc: z.array(z.string()).optional().describe('BCC email addresses'),
             subject: z.string().describe('Email subject'),
             text: z.string().describe('Email body (plain text)'),
           })),
-          execute: async ({ to, subject, text }) => {
-            const id = await gmail.send({ to, subject, text })
-            return { success: true, id }
+          execute: async ({ to, cc, bcc, subject, text }) => {
+            const result = await gmail.send({ to, cc, bcc, subject, text })
+            return result
           },
         }),
         createDraft: tool({
           description: 'Create an email draft',
           inputSchema: zodSchema(z.object({
-            to: z.string().describe('Recipient email address'),
+            to: z.array(z.string()).describe('Recipient email addresses'),
+            cc: z.array(z.string()).optional().describe('CC email addresses'),
+            bcc: z.array(z.string()).optional().describe('BCC email addresses'),
             subject: z.string().describe('Email subject'),
             text: z.string().describe('Email body (plain text)'),
           })),
-          execute: async ({ to, subject, text }) => {
-            const id = await gmail.createDraft({ to, subject, text })
-            return { success: true, draftId: id }
+          execute: async ({ to, cc, bcc, subject, text }) => {
+            const result = await gmail.createDraft({ to, cc, bcc, subject, text })
+            return result
           },
         }),
         listEvents: tool({
@@ -187,6 +191,30 @@ export function setupIpc(): void {
       stopWhen: stepCountIs(5),
     })
 
-    return response.text
+    // Extract tool calls from steps
+    const toolCalls: Array<{
+      id: string
+      name: string
+      args: Record<string, unknown>
+      result?: unknown
+      error?: string
+    }> = []
+
+    for (const step of response.steps) {
+      if (step.toolCalls) {
+        for (const tc of step.toolCalls as unknown as Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>) {
+          const toolResult = (step.toolResults as unknown as Array<{ toolCallId: string; result?: unknown; error?: unknown }> | undefined)?.find(tr => tr.toolCallId === tc.toolCallId)
+          toolCalls.push({
+            id: tc.toolCallId,
+            name: tc.toolName,
+            args: tc.args,
+            result: toolResult?.result,
+            error: toolResult?.error ? String(toolResult.error) : undefined,
+          })
+        }
+      }
+    }
+
+    return { text: response.text, toolCalls }
   })
 }

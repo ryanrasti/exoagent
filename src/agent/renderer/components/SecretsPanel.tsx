@@ -52,6 +52,8 @@ export function SecretsPanel({ isOpen, onClose }: Props) {
 
   const handleConnectGoogle = async () => {
     setSaving('oauth')
+    // Re-enable button after 5s while OAuth continues in background
+    setTimeout(() => setSaving(null), 5000)
     try {
       await window.api.startGoogleOAuth()
       setStatus(s => s ? { ...s, googleTokens: true } : s)

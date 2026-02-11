@@ -1,8 +1,14 @@
-import { google, gmail_v1 } from 'googleapis'
 import type { OAuth2Client } from 'google-auth-library'
-import type Mail from 'nodemailer/lib/mailer'
+import type { gmail_v1 } from 'googleapis'
+import type { AddressObject, ParsedMail } from 'mailparser'
+import { google } from 'googleapis'
+import { simpleParser } from 'mailparser'
 import MailComposer from 'nodemailer/lib/mail-composer'
-import { simpleParser, ParsedMail, AddressObject } from 'mailparser'
+import { z } from 'zod'
+import { ExoAgent } from '../../policy'
+
+// ExoAgent for Gmail with email as both source and sink
+export const gmailExo = new ExoAgent(['email'] as const, ['email'] as const)
 
 export interface EmailAuth {
   spf: 'pass' | 'fail' | 'none'
@@ -19,8 +25,23 @@ export interface EmailPrincipals {
   auth: EmailAuth
 }
 
+export interface EmailMessage {
+  id: string
+  threadId: string
+  labels: string[]
+  from: string | undefined
+  to: string[]
+  cc: string[]
+  subject: string | undefined
+  date: Date | undefined
+  text: string | undefined
+  html: string | false | undefined
+  principals: EmailPrincipals
+}
+
 function parseAddresses(addr: AddressObject | AddressObject[] | undefined): string[] {
-  if (!addr) return []
+  if (!addr)
+    return []
   const list = Array.isArray(addr) ? addr : [addr]
   return list.flatMap(a => a.value.map(v => v.address).filter((x): x is string => !!x))
 }
@@ -41,6 +62,18 @@ function parseAuthResults(headers: ParsedMail['headers']): EmailAuth {
   }
 }
 
+// Shared schema for send/draft operations
+const composeEmailSchema = z.object({
+  to: z.array(z.string()),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  subject: z.string(),
+  text: z.string(),
+})
+
+type ComposeEmailInput = z.infer<typeof composeEmailSchema>
+
+/** Gmail client with policy annotations for taint tracking */
 export class GmailClient {
   private gmail: gmail_v1.Gmail
 
@@ -48,16 +81,27 @@ export class GmailClient {
     this.gmail = google.gmail({ version: 'v1', auth })
   }
 
-  async list(maxResults = 10, query = 'in:inbox'): Promise<Array<{ id: string; threadId: string }>> {
+  @gmailExo.tool(z.object({
+    maxResults: z.number(),
+    query: z.string(),
+  }))
+  async list({ maxResults, query }: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>> {
     const res = await this.gmail.users.messages.list({
       userId: 'me',
       maxResults,
       q: query,
     })
-    return res.data.messages || []
+    return (res.data.messages || []).map(m => ({ id: m.id!, threadId: m.threadId! }))
   }
 
-  async get(id: string): Promise<ParsedMail & { id: string; threadId: string; labels: string[]; principals: EmailPrincipals }> {
+  // Dynamic source: email content is tainted with principals who have access
+  @gmailExo.tool(z.object({ id: z.string() }), {
+    source: (email: EmailMessage): ['email', { principals: string[] }] => [
+      'email',
+      { principals: email.principals.all },
+    ],
+  })
+  async get({ id }: { id: string }): Promise<EmailMessage> {
     const res = await this.gmail.users.messages.get({
       userId: 'me',
       id,
@@ -73,10 +117,16 @@ export class GmailClient {
     const auth = parseAuthResults(parsed.headers)
 
     return {
-      ...parsed,
       id: res.data.id!,
       threadId: res.data.threadId!,
       labels: res.data.labelIds || [],
+      from,
+      to,
+      cc,
+      subject: parsed.subject,
+      date: parsed.date,
+      text: parsed.text,
+      html: parsed.html,
       principals: {
         from,
         to,
@@ -87,27 +137,53 @@ export class GmailClient {
     }
   }
 
-  async send(options: Mail.Options): Promise<string> {
-    const raw = await this.encode(options)
+  // Dynamic sink: check recipients against incoming taints
+  @gmailExo.tool(composeEmailSchema, {
+    sink: ({ to, cc, bcc }: ComposeEmailInput): ['email', { principals: string[] }] => [
+      'email',
+      { principals: [...to, ...(cc ?? []), ...(bcc ?? [])] },
+    ],
+  })
+  async send({ to, cc, bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, id: string }> {
+    const mail = new MailComposer({
+      to: to.join(', '),
+      cc: cc?.join(', '),
+      bcc: bcc?.join(', '),
+      subject,
+      text,
+    })
+    const message = await mail.compile().build()
+    const encoded = message.toString('base64url')
+
     const res = await this.gmail.users.messages.send({
       userId: 'me',
-      requestBody: { raw },
+      requestBody: { raw: encoded },
     })
-    return res.data.id!
+    return { success: true, id: res.data.id! }
   }
 
-  async createDraft(options: Mail.Options): Promise<string> {
-    const raw = await this.encode(options)
+  // Dynamic sink: drafts also need principal checks
+  @gmailExo.tool(composeEmailSchema, {
+    sink: ({ to, cc, bcc }: ComposeEmailInput): ['email', { principals: string[] }] => [
+      'email',
+      { principals: [...to, ...(cc ?? []), ...(bcc ?? [])] },
+    ],
+  })
+  async createDraft({ to, cc, bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, draftId: string }> {
+    const mail = new MailComposer({
+      to: to.join(', '),
+      cc: cc?.join(', '),
+      bcc: bcc?.join(', '),
+      subject,
+      text,
+    })
+    const message = await mail.compile().build()
+    const encoded = message.toString('base64url')
+
     const res = await this.gmail.users.drafts.create({
       userId: 'me',
-      requestBody: { message: { raw } },
+      requestBody: { message: { raw: encoded } },
     })
-    return res.data.id!
-  }
-
-  private async encode(options: Mail.Options): Promise<string> {
-    const mail = new MailComposer(options)
-    const message = await mail.compile().build()
-    return message.toString('base64url')
+    return { success: true, draftId: res.data.id! }
   }
 }

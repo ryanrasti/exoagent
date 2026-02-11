@@ -29,13 +29,7 @@ export async function startOAuthFlow(clientJson: string): Promise<StoredTokens> 
   const { client_id, client_secret } = parseClientConfig(clientJson)
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      server.close()
-      reject(new Error('OAuth timed out'))
-    }, 5 * 1000)
-
     const server = createServer(async (req, res) => {
-      clearTimeout(timeout)
       try {
         const url = new URL(req.url!, `http://localhost`)
         const code = url.searchParams.get('code')
@@ -62,7 +56,7 @@ export async function startOAuthFlow(clientJson: string): Promise<StoredTokens> 
         const { tokens } = await client.getToken(code)
 
         res.writeHead(200, { 'Content-Type': 'text/html' })
-        res.end('<h1>Authorization successful!</h1><script>window.close()</script>')
+        res.end('<html><body style="font-family: system-ui; text-align: center; padding: 40px;"><h1>✓ Authorization successful!</h1><p>You can close this tab and return to the app.</p></body></html>')
         server.close()
 
         resolve({

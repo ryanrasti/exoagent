@@ -10,12 +10,12 @@ import { getPolicyMetadata, setPolicyMetadata } from './meta'
 export type SourceAnnotation<Sources extends string[]> =
   | Sources[number]
   | readonly Sources[number][]
-  | ((retVal: unknown) => TaintsInput)
+  | ((retVal: any) => TaintsInput)
 
 export type SinkAnnotation<Sinks extends string[]> =
   | Sinks[number]
   | readonly Sinks[number][]
-  | ((...args: unknown[]) => TaintsInput)
+  | ((...args: any[]) => TaintsInput)
 
 export type ToolProps<Sinks extends string[], Sources extends string[]> = {
   source?: SourceAnnotation<Sources>
