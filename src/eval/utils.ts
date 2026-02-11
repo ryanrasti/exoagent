@@ -1,4 +1,5 @@
 import type * as acorn from 'acorn'
+import hash from 'object-hash'
 import { getPolicyMetadata } from '../meta'
 
 // Hierarchical taint: [type, params]
@@ -27,6 +28,10 @@ function isSingleTaint(t: TaintsInput): t is Taint {
     && !Array.isArray(t[1])
 }
 
+function deduplicateTaints(taints: Taint[]): Taint[] {
+  return [...new Map(taints.map(t => [hash(t), t])).values()]
+}
+
 /** Normalize a single taint input to tuple form */
 export function normalizeTaint(t: TaintInput): Taint {
   return typeof t === 'string' ? [t, {}] : t
@@ -43,7 +48,8 @@ export function normalizeTaints(taints: TaintsInput): Taint[] {
     return [taints]
   }
   // Array of inputs
-  return (taints as readonly TaintInput[]).map(normalizeTaint)
+  const normalized = (taints as readonly TaintInput[]).map(normalizeTaint)
+  return deduplicateTaints(normalized)
 }
 
 const checkSafeMember = (member: string) => {
@@ -192,8 +198,9 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
   }
 
   static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): Taint[] {
-    // No deduplication - each taint is kept separate (different params = different taint)
-    return items.flatMap(x => (x != null ? x.getTaints() : []))
+    const all = items.flatMap(x => (x != null ? x.getTaints() : []))
+    // Deduplicate by structural equality using hash
+    return deduplicateTaints(all)
   }
 
   static getTaints(x: unknown): Taint[] {

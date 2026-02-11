@@ -9,6 +9,7 @@ interface DisplayMessage {
   content: string
   data?: unknown
   taints?: Taint[]
+  code?: string
   isError?: boolean
   errorStack?: string
   errorCode?: string
@@ -67,20 +68,28 @@ function DataDisplay({ data }: { data: unknown }) {
   )
 }
 
-function ErrorCodeDisplay({ code }: { code: string }) {
-  const [expanded, setExpanded] = useState(true)
+function CodeDisplay({ code, isError = false }: { code: string, isError?: boolean }) {
+  const [expanded, setExpanded] = useState(isError)
 
   return (
     <div className="mt-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors"
+        className={`flex items-center gap-2 text-xs transition-colors ${
+          isError
+            ? 'text-red-400 hover:text-red-300'
+            : 'text-neutral-400 hover:text-neutral-200'
+        }`}
       >
         <span>{expanded ? '▼' : '▶'}</span>
         <span>executed code</span>
       </button>
       {expanded && (
-        <pre className="mt-1 text-xs text-red-300/70 overflow-x-auto max-h-64 overflow-y-auto bg-red-950/30 p-2 rounded">
+        <pre className={`mt-1 text-xs overflow-x-auto max-h-64 overflow-y-auto p-2 rounded ${
+          isError
+            ? 'text-red-300/70 bg-red-950/30'
+            : 'text-neutral-300/70 bg-neutral-800/50'
+        }`}>
           {code}
         </pre>
       )}
@@ -153,6 +162,7 @@ export default function App() {
         content: result.response,
         data: result.data,
         taints: result.taints,
+        code: result.code,
       }
 
       setHistory(prev => [...prev, assistantTurn])
@@ -222,8 +232,8 @@ export default function App() {
                 <div className="text-xs text-red-400 font-semibold mb-1">Error</div>
               )}
               <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
-              {msg.errorCode && (
-                <ErrorCodeDisplay code={msg.errorCode} />
+              {(msg.code || msg.errorCode) && (
+                <CodeDisplay code={msg.code || msg.errorCode!} isError={msg.isError} />
               )}
               {msg.errorStack && (
                 <ErrorStackDisplay stack={msg.errorStack} />

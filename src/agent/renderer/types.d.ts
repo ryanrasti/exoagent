@@ -20,6 +20,7 @@ declare global {
     response: string
     data: unknown
     taints: Taint[]
+    code: string
   }
 
   interface Window {

@@ -71,8 +71,8 @@ function formatHistoryForLLM(history: Turn[]): Array<{ role: 'user' | 'assistant
   })
 }
 
-/** Result from llm() - a Value containing response/data with taints */
-export type LLMResult = Value<{ response: string, data: unknown }>
+/** Result from llm() - a Value containing response/data/code with taints */
+export type LLMResult = Value<{ response: string, data: unknown, code: string }>
 
 /**
  * Execute an LLM turn with the given context, capabilities, and policy.
@@ -134,6 +134,10 @@ export async function llm<Sinks extends readonly string[]>(
     throw new Error('Tool execution failed with no result. Check main process logs for details.')
   }
 
+  // Extract the executed code from the tool call
+  const toolCall = step.toolResults[0]
+  const executedCode = (toolCall.input as { code?: string })?.code ?? ''
+
   // AI SDK tool results have the result in `output`
   const toolResult = step.toolResults[0] as { output: CodeModeResult }
   const { response, data, taints, error } = toolResult.output
@@ -146,8 +150,8 @@ export async function llm<Sinks extends readonly string[]>(
     throw err
   }
 
-  // Wrap the result as a Value with the captured taints
-  const value = Value.of({ response, data }, taints)
+  // Wrap the result as a Value with the captured taints, including the executed code
+  const value = Value.of({ response, data, code: executedCode }, taints)
 
   return value
 }
@@ -308,7 +312,7 @@ export function registerHandlers(): void {
 
     // Unwrap the Value for the response (top-level, no further policy check needed)
     const taints = result.getTaints()
-    const { response, data } = result.unwrap(() => {}) as { response: string, data: unknown }
-    return { response, data, taints }
+    const { response, data, code } = result.unwrap(() => {}) as { response: string, data: unknown, code: string }
+    return { response, data, taints, code }
   })
 }
