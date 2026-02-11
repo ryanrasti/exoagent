@@ -68,13 +68,14 @@ describe('sql integration with eval sandbox', () => {
 
     const result = await codeTool.execute({
       code: `async ({ users }) => {
-        return await users()
+        const data = await users()
           .select(({ user }) => ({ id: user.id, name: user.name }))
           .execute()
+        return { response: "Got users", data: data }
       }`,
     }, { toolCallId: 'test-1', messages: [] })
 
-    expect(result).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
+    expect(result.data).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
   })
 
   it('executes a join via CodeMode', async () => {
@@ -103,13 +104,14 @@ class Post extends db.Table('posts').as('post') {
 
     const result = await codeTool.execute({
       code: `async ({ users }) => {
-        return await users()
+        const data = await users()
           .join(({ user }) => user.posts())
           .select(({ user, post }) => ({ userName: user.name, postTitle: post.title }))
           .execute()
+        return { response: "Got posts", data: data }
       }`,
     }, { toolCallId: 'test-2', messages: [] })
 
-    expect(result).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
+    expect(result.data).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
   })
 })

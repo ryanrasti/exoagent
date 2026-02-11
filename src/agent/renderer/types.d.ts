@@ -7,17 +7,19 @@ declare global {
     googleTokens?: boolean
   }
 
-  interface ToolCall {
-    id: string
-    name: string
-    args: Record<string, unknown>
-    result?: unknown
-    error?: string
-  }
+  /** Taint tuple: [type, params] */
+  type Taint = [string, { principals?: string[] }]
 
-  interface ChatResponse {
-    text: string
-    toolCalls: ToolCall[]
+  /** A turn in the conversation history */
+  type Turn =
+    | { role: 'user', content: string }
+    | { role: 'assistant', response: string, data: unknown, taints: Taint[] }
+
+  /** Result from a chat turn */
+  interface TurnResult {
+    response: string
+    data: unknown
+    taints: Taint[]
   }
 
   interface Window {
@@ -27,7 +29,7 @@ declare global {
       setGoogleOAuthClient: (json: string) => Promise<void>
       startGoogleOAuth: () => Promise<boolean>
       clearGoogleTokens: () => Promise<void>
-      chat: (message: string, history: Array<{ role: 'user' | 'assistant'; content: string }>) => Promise<ChatResponse>
+      chat: (message: string, history: Turn[]) => Promise<TurnResult>
     }
   }
 }

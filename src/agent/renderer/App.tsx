@@ -1,53 +1,19 @@
 import { useState, useEffect } from 'react'
 import { SecretsPanel } from './components/SecretsPanel'
 
-interface Message {
+/** Display message derived from Turn for UI */
+interface DisplayMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  toolCalls?: ToolCall[]
+  data?: unknown
+  taints?: Taint[]
 }
 
-function ToolCallItem({ tc }: { tc: ToolCall }) {
+function TaintsDisplay({ taints }: { taints: Taint[] }) {
   const [expanded, setExpanded] = useState(false)
-  const hasError = !!tc.error
 
-  return (
-    <div className={`border rounded mt-2 text-sm ${hasError ? 'border-red-700 bg-red-950/30' : 'border-neutral-700 bg-neutral-900'}`}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-800/50 transition-colors"
-      >
-        <span className="text-neutral-500 text-xs">{expanded ? '▼' : '▶'}</span>
-        <span className={`font-mono ${hasError ? 'text-red-400' : 'text-cyan-400'}`}>{tc.name}</span>
-        {hasError && <span className="text-xs text-red-500">error</span>}
-      </button>
-      {expanded && (
-        <div className="px-3 py-2 border-t border-neutral-700 space-y-2">
-          <div>
-            <span className="text-neutral-500 text-xs">args:</span>
-            <pre className="text-neutral-300 text-xs mt-1 overflow-x-auto">{JSON.stringify(tc.args, null, 2)}</pre>
-          </div>
-          {hasError ? (
-            <div>
-              <span className="text-red-500 text-xs">error:</span>
-              <pre className="text-red-400 text-xs mt-1">{tc.error}</pre>
-            </div>
-          ) : tc.result !== undefined && (
-            <div>
-              <span className="text-neutral-500 text-xs">result:</span>
-              <pre className="text-green-400 text-xs mt-1 overflow-x-auto max-h-48 overflow-y-auto">{JSON.stringify(tc.result, null, 2)}</pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
-  const [expanded, setExpanded] = useState(false)
-  const errorCount = toolCalls.filter(tc => tc.error).length
+  if (taints.length === 0) return null
 
   return (
     <div className="mt-2">
@@ -56,15 +22,42 @@ function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
         className="flex items-center gap-2 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
       >
         <span>{expanded ? '▼' : '▶'}</span>
-        <span>{toolCalls.length} tool call{toolCalls.length !== 1 ? 's' : ''}</span>
-        {errorCount > 0 && <span className="text-red-500">({errorCount} error{errorCount !== 1 ? 's' : ''})</span>}
+        <span>{taints.length} taint{taints.length !== 1 ? 's' : ''}</span>
       </button>
       {expanded && (
-        <div className="mt-1">
-          {toolCalls.map(tc => (
-            <ToolCallItem key={tc.id} tc={tc} />
+        <div className="mt-1 text-xs text-neutral-500">
+          {taints.map(([type, params], i) => (
+            <div key={i} className="font-mono">
+              {type}
+              {params.principals && params.principals.length > 0 && (
+                <span className="text-neutral-600"> [{params.principals.join(', ')}]</span>
+              )}
+            </div>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+function DataDisplay({ data }: { data: unknown }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (data === null || data === undefined) return null
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
+      >
+        <span>{expanded ? '▼' : '▶'}</span>
+        <span>context data</span>
+      </button>
+      {expanded && (
+        <pre className="mt-1 text-xs text-neutral-500 overflow-x-auto max-h-48 overflow-y-auto">
+          {JSON.stringify(data, null, 2)}
+        </pre>
       )}
     </div>
   )
@@ -73,7 +66,8 @@ function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
 export default function App() {
   const [isSecretsOpen, setIsSecretsOpen] = useState(false)
   const [secretsStatus, setSecretsStatus] = useState<SecretsStatus | null>(null)
-  const [messages, setMessages] = useState<Message[]>([])
+  const [history, setHistory] = useState<Turn[]>([])
+  const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -90,35 +84,48 @@ export default function App() {
     if (!input.trim() || isLoading) return
     if (!window.api) return
 
-    const userMessage: Message = {
+    const userContent = input.trim()
+    const userTurn: Turn = { role: 'user', content: userContent }
+    const userMessage: DisplayMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: input.trim(),
+      content: userContent,
     }
 
+    setHistory(prev => [...prev, userTurn])
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
 
     try {
-      const history = messages.map(m => ({ role: m.role, content: m.content }))
-      const response = await window.api.chat(userMessage.content, history)
+      const result = await window.api.chat(userContent, history)
 
-      const assistantMessage: Message = {
+      const assistantTurn: Turn = {
+        role: 'assistant',
+        response: result.response,
+        data: result.data,
+        taints: result.taints,
+      }
+      const assistantMessage: DisplayMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: response.text,
-        toolCalls: response.toolCalls,
+        content: result.response,
+        data: result.data,
+        taints: result.taints,
       }
+
+      setHistory(prev => [...prev, assistantTurn])
       setMessages(prev => [...prev, assistantMessage])
-    } catch (err) {
-      const errorMessage: Message = {
+    }
+    catch (err) {
+      const errorMessage: DisplayMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
       }
       setMessages(prev => [...prev, errorMessage])
-    } finally {
+    }
+    finally {
       setIsLoading(false)
     }
   }
@@ -166,8 +173,11 @@ export default function App() {
               }`}
             >
               <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
-              {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <ToolCallsSection toolCalls={msg.toolCalls} />
+              {msg.taints && msg.taints.length > 0 && (
+                <TaintsDisplay taints={msg.taints} />
+              )}
+              {msg.data !== undefined && (
+                <DataDisplay data={msg.data} />
               )}
             </div>
           </div>
