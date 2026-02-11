@@ -31,16 +31,111 @@ class TestPolicyToolset {
   }
 }
 
+describe('TurnPolicy - cost limiting', () => {
+  it('tracks cost and throws when max cost exceeded', () => {
+    const toolset = new TestPolicyToolset()
+    const turn = exo.policy([]).turn(2) // max 2 calls
+
+    // First call - should work
+    turn.doStubCall(
+      { propertyName: 'source1', parent: Value.of(toolset, []) },
+      Value.of(toolset.source1, []) as Value<(...args: any[]) => any>,
+      Value.of(toolset, []),
+      [],
+    )
+    expect(turn.getCostUsed()).toBe(1)
+
+    // Second call - should work
+    turn.doStubCall(
+      { propertyName: 'source2', parent: Value.of(toolset, []) },
+      Value.of(toolset.source2, []) as Value<(...args: any[]) => any>,
+      Value.of(toolset, []),
+      [],
+    )
+    expect(turn.getCostUsed()).toBe(2)
+
+    // Third call - should throw
+    expect(() => {
+      turn.doStubCall(
+        { propertyName: 'source1', parent: Value.of(toolset, []) },
+        Value.of(toolset.source1, []) as Value<(...args: any[]) => any>,
+        Value.of(toolset, []),
+        [],
+      )
+    }).toThrow(/Exceeded max cost: 2/)
+  })
+
+  it('each turn has independent cost counter', () => {
+    const toolset = new TestPolicyToolset()
+    const policy = exo.policy([])
+
+    // First turn
+    const turn1 = policy.turn(1)
+    turn1.doStubCall(
+      { propertyName: 'source1', parent: Value.of(toolset, []) },
+      Value.of(toolset.source1, []) as Value<(...args: any[]) => any>,
+      Value.of(toolset, []),
+      [],
+    )
+    expect(turn1.getCostUsed()).toBe(1)
+
+    // Second turn - fresh counter
+    const turn2 = policy.turn(1)
+    expect(turn2.getCostUsed()).toBe(0)
+    turn2.doStubCall(
+      { propertyName: 'source1', parent: Value.of(toolset, []) },
+      Value.of(toolset.source1, []) as Value<(...args: any[]) => any>,
+      Value.of(toolset, []),
+      [],
+    )
+    expect(turn2.getCostUsed()).toBe(1)
+  })
+
+  it('cost is checked before executing the method', () => {
+    let callCount = 0
+    class CountingToolset {
+      @exo.tool()
+      counted() {
+        callCount++
+        return 'called'
+      }
+    }
+
+    const toolset = new CountingToolset()
+    const turn = exo.policy([]).turn(1)
+
+    // First call executes
+    turn.doStubCall(
+      { propertyName: 'counted', parent: Value.of(toolset, []) },
+      Value.of(toolset.counted, []) as Value<() => string>,
+      Value.of(toolset, []),
+      [],
+    )
+    expect(callCount).toBe(1)
+
+    // Second call should throw before executing
+    expect(() => {
+      turn.doStubCall(
+        { propertyName: 'counted', parent: Value.of(toolset, []) },
+        Value.of(toolset.counted, []) as Value<() => string>,
+        Value.of(toolset, []),
+        [],
+      )
+    }).toThrow(/Exceeded max cost/)
+    expect(callCount).toBe(1) // Still 1, method wasn't called
+  })
+})
+
 describe('policy', () => {
   it('allows source1 -> sink flow (taint1 source to taint1 sink)', () => {
     const toolset = new TestPolicyToolset()
-    const policy = exo.policy([
+    const turn = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
-    ])
+    ]).turn(10)
 
     // Call source1 which emits taint1
     const source1Method = Value.of(toolset.source1, [])
-    const source1Result = policy.doStubCall(
+    const source1Result = turn.doStubCall(
       { propertyName: 'source1', parent: Value.of(toolset, []) },
       source1Method as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
@@ -54,7 +149,7 @@ describe('policy', () => {
     // Call sink with taint1 data - should pass
     const sinkMethod = Value.of(toolset.sink, [])
     const sinkArg = Value.of('data from source1', source1Result.getTaints())
-    const sinkResult = policy.doStubCall(
+    const sinkResult = turn.doStubCall(
       { propertyName: 'sink', parent: Value.of(toolset, []) },
       sinkMethod as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
@@ -66,13 +161,13 @@ describe('policy', () => {
 
   it('denies source2 -> sink flow (taint2 source to taint1 sink)', () => {
     const toolset = new TestPolicyToolset()
-    const policy = exo.policy([
+    const turn = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
-    ])
+    ]).turn(10)
 
     // Call source2 which emits taint2
     const source2Method = Value.of(toolset.source2, [])
-    const source2Result = policy.doStubCall(
+    const source2Result = turn.doStubCall(
       { propertyName: 'source2', parent: Value.of(toolset, []) },
       source2Method as Value<(...args: any[]) => any>,
       Value.of(toolset, []),
@@ -87,7 +182,7 @@ describe('policy', () => {
     const sinkMethod = Value.of(toolset.sink, [])
     const sinkArg = Value.of('data from source2', source2Result.getTaints())
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'sink', parent: Value.of(toolset, []) },
         sinkMethod as Value<(...args: any[]) => any>,
         Value.of(toolset, []),
@@ -98,16 +193,16 @@ describe('policy', () => {
 
   it('allows source1 -> sink flow end-to-end through evaluator', async () => {
     const toolset = new TestPolicyToolset()
-    const policy = exo.policy([
+    const turn = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
-    ])
+    ]).turn(10)
 
     // Evaluate code that calls source1 then sink
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
     const result = safeEval(
       'sink(source1())',
       Value.of(toolset, []),
-      policy.doStubCall.bind(policy),
+      turn.doStubCall.bind(turn),
     ) as Value<string>
 
     expect(result.raw).toBe('sink received: data from source1')
@@ -115,9 +210,9 @@ describe('policy', () => {
 
   it('denies source2 -> sink flow end-to-end through evaluator', async () => {
     const toolset = new TestPolicyToolset()
-    const policy = exo.policy([
+    const turn = exo.policy([
       { sources: ['taint2'], sinks: ['taint1'] }, // deny rule: taint2 source cannot go to taint1 sink
-    ])
+    ]).turn(10)
 
     // Evaluate code that calls source2 then sink - should be denied
     // Pass toolset directly as RpcStub (RpcToolset extends RpcTarget which can be wrapped in RpcStub)
@@ -125,7 +220,7 @@ describe('policy', () => {
       () => safeEval(
         'sink(source2())',
         Value.of(toolset, []),
-        policy.doStubCall.bind(policy),
+        turn.doStubCall.bind(turn),
       ),
     ).toThrow('Method call denied: taint2 are not allowed to be used as sources and taint1 are not allowed to be used as sinks')
   })
@@ -159,20 +254,20 @@ describe('policy - multiple deny rules', () => {
 
   it('enforces multiple deny rules independently', () => {
     const toolset = new MultiSourceToolset()
-    const policy = multiExo.policy([
+    const turn = multiExo.policy([
       { sources: ['userInput'], sinks: ['database'] },
       { sources: ['networkData'], sinks: ['fileSystem'] },
-    ])
+    ]).turn(10)
 
     // userInput -> database: DENIED
-    const userInput = policy.doStubCall(
+    const userInput = turn.doStubCall(
       { propertyName: 'getUserInput', parent: Value.of(toolset, []) },
       Value.of(toolset.getUserInput, []) as Value<() => string>,
       Value.of(toolset, []),
       [],
     )
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'writeToDb', parent: Value.of(toolset, []) },
         Value.of(toolset.writeToDb, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -181,7 +276,7 @@ describe('policy - multiple deny rules', () => {
     }).toThrow(/Method call denied/)
 
     // userInput -> fileSystem: ALLOWED
-    const fileResult = policy.doStubCall(
+    const fileResult = turn.doStubCall(
       { propertyName: 'writeToFile', parent: Value.of(toolset, []) },
       Value.of(toolset.writeToFile, []) as Value<(s: string) => string>,
       Value.of(toolset, []),
@@ -190,14 +285,14 @@ describe('policy - multiple deny rules', () => {
     expect(fileResult.raw).toBe('file: user data')
 
     // networkData -> fileSystem: DENIED
-    const networkData = policy.doStubCall(
+    const networkData = turn.doStubCall(
       { propertyName: 'getNetworkData', parent: Value.of(toolset, []) },
       Value.of(toolset.getNetworkData, []) as Value<() => string>,
       Value.of(toolset, []),
       [],
     )
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'writeToFile', parent: Value.of(toolset, []) },
         Value.of(toolset.writeToFile, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -206,7 +301,7 @@ describe('policy - multiple deny rules', () => {
     }).toThrow(/Method call denied/)
 
     // networkData -> database: ALLOWED
-    const dbResult = policy.doStubCall(
+    const dbResult = turn.doStubCall(
       { propertyName: 'writeToDb', parent: Value.of(toolset, []) },
       Value.of(toolset.writeToDb, []) as Value<(s: string) => string>,
       Value.of(toolset, []),
@@ -217,12 +312,12 @@ describe('policy - multiple deny rules', () => {
 
   it('handles overlapping deny rules', () => {
     const toolset = new MultiSourceToolset()
-    const policy = multiExo.policy([
+    const turn = multiExo.policy([
       { sources: ['userInput'], sinks: ['database'] },
       { sources: ['userInput'], sinks: ['network'] }, // overlapping source
-    ])
+    ]).turn(10)
 
-    const userInput = policy.doStubCall(
+    const userInput = turn.doStubCall(
       { propertyName: 'getUserInput', parent: Value.of(toolset, []) },
       Value.of(toolset.getUserInput, []) as Value<() => string>,
       Value.of(toolset, []),
@@ -231,7 +326,7 @@ describe('policy - multiple deny rules', () => {
 
     // Both sinks should be denied
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'writeToDb', parent: Value.of(toolset, []) },
         Value.of(toolset.writeToDb, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -240,7 +335,7 @@ describe('policy - multiple deny rules', () => {
     }).toThrow(/Method call denied/)
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'sendToNetwork', parent: Value.of(toolset, []) },
         Value.of(toolset.sendToNetwork, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -249,7 +344,7 @@ describe('policy - multiple deny rules', () => {
     }).toThrow(/Method call denied/)
 
     // fileSystem should be allowed
-    const fileResult = policy.doStubCall(
+    const fileResult = turn.doStubCall(
       { propertyName: 'writeToFile', parent: Value.of(toolset, []) },
       Value.of(toolset.writeToFile, []) as Value<(s: string) => string>,
       Value.of(toolset, []),
@@ -278,9 +373,9 @@ describe('policy - multiple sources and sinks on single tool', () => {
 
   it('tool with multiple sources emits all source taints', () => {
     const toolset = new MultiAnnotationToolset()
-    const policy = multiExo.policy([])
+    const turn = multiExo.policy([]).turn(10)
 
-    const result = policy.doStubCall(
+    const result = turn.doStubCall(
       { propertyName: 'dualSource', parent: Value.of(toolset, []) },
       Value.of(toolset.dualSource, []) as Value<() => string>,
       Value.of(toolset, []),
@@ -293,11 +388,11 @@ describe('policy - multiple sources and sinks on single tool', () => {
 
   it('tool with multiple sinks is denied if any sink matches deny rule', () => {
     const toolset = new MultiAnnotationToolset()
-    const policy = multiExo.policy([
+    const turn = multiExo.policy([
       { sources: ['source3'], sinks: ['sink1'] }, // Only denies sink1, but dualSink has both
-    ])
+    ]).turn(10)
 
-    const sourceData = policy.doStubCall(
+    const sourceData = turn.doStubCall(
       { propertyName: 'singleSource', parent: Value.of(toolset, []) },
       Value.of(toolset.singleSource, []) as Value<() => string>,
       Value.of(toolset, []),
@@ -305,7 +400,7 @@ describe('policy - multiple sources and sinks on single tool', () => {
     )
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'dualSink', parent: Value.of(toolset, []) },
         Value.of(toolset.dualSink, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -337,12 +432,12 @@ describe('policy - chained tool calls and taint propagation', () => {
 
   it('taint propagates through transform tool without source/sink', () => {
     const toolset = new ChainToolset()
-    const policy = chainExo.policy([
+    const turn = chainExo.policy([
       { sources: ['untrusted'], sinks: ['sensitive'] },
-    ])
+    ]).turn(10)
 
     // Get untrusted data
-    const untrusted = policy.doStubCall(
+    const untrusted = turn.doStubCall(
       { propertyName: 'getUntrusted', parent: Value.of(toolset, []) },
       Value.of(toolset.getUntrusted, []) as Value<() => string>,
       Value.of(toolset, []),
@@ -350,7 +445,7 @@ describe('policy - chained tool calls and taint propagation', () => {
     )
 
     // Transform it (should preserve taint)
-    const transformed = policy.doStubCall(
+    const transformed = turn.doStubCall(
       { propertyName: 'transform', parent: Value.of(toolset, []) },
       Value.of(toolset.transform, []) as Value<(s: string) => string>,
       Value.of(toolset, []),
@@ -360,7 +455,7 @@ describe('policy - chained tool calls and taint propagation', () => {
 
     // Should still be denied at sensitive sink
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'writeSensitive', parent: Value.of(toolset, []) },
         Value.of(toolset.writeSensitive, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -371,25 +466,25 @@ describe('policy - chained tool calls and taint propagation', () => {
 
   it('trusted data passes through chain to sensitive sink', () => {
     const toolset = new ChainToolset()
-    const policy = chainExo.policy([
+    const turn = chainExo.policy([
       { sources: ['untrusted'], sinks: ['sensitive'] },
-    ])
+    ]).turn(10)
 
-    const trusted = policy.doStubCall(
+    const trusted = turn.doStubCall(
       { propertyName: 'getTrusted', parent: Value.of(toolset, []) },
       Value.of(toolset.getTrusted, []) as Value<() => string>,
       Value.of(toolset, []),
       [],
     )
 
-    const transformed = policy.doStubCall(
+    const transformed = turn.doStubCall(
       { propertyName: 'transform', parent: Value.of(toolset, []) },
       Value.of(toolset.transform, []) as Value<(s: string) => string>,
       Value.of(toolset, []),
       [trusted],
     )
 
-    const result = policy.doStubCall(
+    const result = turn.doStubCall(
       { propertyName: 'writeSensitive', parent: Value.of(toolset, []) },
       Value.of(toolset.writeSensitive, []) as Value<(s: string) => string>,
       Value.of(toolset, []),
@@ -400,23 +495,26 @@ describe('policy - chained tool calls and taint propagation', () => {
 
   it('chained calls work through evaluator', () => {
     const toolset = new ChainToolset()
-    const policy = chainExo.policy([
+    const turn = chainExo.policy([
       { sources: ['untrusted'], sinks: ['sensitive'] },
-    ])
+    ]).turn(10)
 
     // Trusted chain should work
     const result = safeEval(
       'writeSensitive(transform(getTrusted()))',
       Value.of(toolset, []),
-      policy.doStubCall.bind(policy),
+      turn.doStubCall.bind(turn),
     ) as Value<string>
     expect(result.raw).toBe('sensitive: transformed: trusted data')
 
-    // Untrusted chain should fail
+    // Untrusted chain should fail (need fresh turn since we share cost counter)
+    const turn2 = chainExo.policy([
+      { sources: ['untrusted'], sinks: ['sensitive'] },
+    ]).turn(10)
     expect(() => safeEval(
       'writeSensitive(transform(getUntrusted()))',
       Value.of(toolset, []),
-      policy.doStubCall.bind(policy),
+      turn2.doStubCall.bind(turn2),
     )).toThrow(/Method call denied/)
   })
 })
@@ -431,15 +529,15 @@ describe('policy - taint from thisVal vs args', () => {
 
   it('checks taints from thisVal', () => {
     const toolset = new ThisToolset()
-    const policy = thisExo.policy([
+    const turn = thisExo.policy([
       { sources: ['objectTaint'], sinks: ['sink'] },
-    ])
+    ]).turn(10)
 
     const taintedThis = Value.of(toolset, ['objectTaint'])
     const cleanArg = Value.of('clean data', [])
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'process', parent: taintedThis },
         Value.of(toolset.process, []) as Value<(s: string) => string>,
         taintedThis,
@@ -450,15 +548,15 @@ describe('policy - taint from thisVal vs args', () => {
 
   it('checks taints from args', () => {
     const toolset = new ThisToolset()
-    const policy = thisExo.policy([
+    const turn = thisExo.policy([
       { sources: ['argTaint'], sinks: ['sink'] },
-    ])
+    ]).turn(10)
 
     const cleanThis = Value.of(toolset, [])
     const taintedArg = Value.of('tainted data', ['argTaint'])
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'process', parent: cleanThis },
         Value.of(toolset.process, []) as Value<(s: string) => string>,
         cleanThis,
@@ -480,10 +578,10 @@ describe('policy - unconfigured taints', () => {
     }
 
     const toolset = new BadToolset()
-    const policy = limitedExo.policy([])
+    const turn = limitedExo.policy([]).turn(10)
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'badSource', parent: Value.of(toolset, []) },
         Value.of(toolset.badSource, []) as Value<() => string>,
         Value.of(toolset, []),
@@ -500,10 +598,10 @@ describe('policy - unconfigured taints', () => {
     }
 
     const toolset = new BadToolset()
-    const policy = limitedExo.policy([])
+    const turn = limitedExo.policy([]).turn(10)
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'badSink', parent: Value.of(toolset, []) },
         Value.of(toolset.badSink, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -519,13 +617,13 @@ describe('policy - unconfigured taints', () => {
     }
 
     const toolset = new GoodToolset()
-    const policy = limitedExo.policy([])
+    const turn = limitedExo.policy([]).turn(10)
 
     // Create a value with an unconfigured taint (simulating a bug or external data)
     const badTaintedArg = Value.of('data', ['sneakyTaint'])
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'goodSink', parent: Value.of(toolset, []) },
         Value.of(toolset.goodSink, []) as Value<(s: string) => string>,
         Value.of(toolset, []),
@@ -610,10 +708,10 @@ describe('fn validator', () => {
 describe('policy - error messages', () => {
   it('provides clear error for missing method name', () => {
     const simpleExo = new ExoAgent([] as const, [] as const)
-    const policy = simpleExo.policy([])
+    const turn = simpleExo.policy([]).turn(10)
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { parent: Value.of({}, []) }, // missing propertyName
         Value.of(() => {}, []) as Value<() => void>,
         Value.of({}, []),
@@ -624,10 +722,10 @@ describe('policy - error messages', () => {
 
   it('provides clear error for missing parent', () => {
     const simpleExo = new ExoAgent([] as const, [] as const)
-    const policy = simpleExo.policy([])
+    const turn = simpleExo.policy([]).turn(10)
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'test' }, // missing parent
         Value.of(() => {}, []) as Value<() => void>,
         Value.of({}, []),
@@ -644,10 +742,10 @@ describe('policy - error messages', () => {
     }
 
     const instance = new NoToolsClass()
-    const policy = simpleExo.policy([])
+    const turn = simpleExo.policy([]).turn(10)
 
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'regularMethod', parent: Value.of(instance, []) },
         Value.of(instance.regularMethod, []) as Value<() => string>,
         Value.of(instance, []),
@@ -719,7 +817,7 @@ describe('policy - dynamic annotations (email example)', () => {
 
   it('allows sending email to original recipients (principals subset)', () => {
     const toolset = new EmailToolset()
-    const policy = emailExo.policy([
+    const turn = emailExo.policy([
       // Callback deny rule: deny if recipients are not subset of source principals
       (source, sink) => {
         if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
@@ -727,10 +825,10 @@ describe('policy - dynamic annotations (email example)', () => {
         const recipients = sink[1].principals ?? []
         return isSubset(recipients, allowed) ? 'allow' : 'deny'
       },
-    ])
+    ]).turn(10)
 
     // Get email from alice to bob (cc: charlie)
-    const emailResult = policy.doStubCall(
+    const emailResult = turn.doStubCall(
       { propertyName: 'getEmail', parent: Value.of(toolset, []) },
       Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
       Value.of(toolset, []),
@@ -745,7 +843,7 @@ describe('policy - dynamic annotations (email example)', () => {
     expect(emailTaint![1].principals).toContain('charlie@example.com')
 
     // Send to bob only - should be allowed (bob is in principals)
-    const sendResult = policy.doStubCall(
+    const sendResult = turn.doStubCall(
       { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
       Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
       Value.of(toolset, []),
@@ -757,17 +855,17 @@ describe('policy - dynamic annotations (email example)', () => {
 
   it('denies sending email to unauthorized recipients', () => {
     const toolset = new EmailToolset()
-    const policy = emailExo.policy([
+    const turn = emailExo.policy([
       (source, sink) => {
         if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
         const allowed = source[1].principals ?? []
         const recipients = sink[1].principals ?? []
         return isSubset(recipients, allowed) ? 'allow' : 'deny'
       },
-    ])
+    ]).turn(10)
 
     // Get email from alice to bob
-    const emailResult = policy.doStubCall(
+    const emailResult = turn.doStubCall(
       { propertyName: 'getEmail', parent: Value.of(toolset, []) },
       Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
       Value.of(toolset, []),
@@ -776,7 +874,7 @@ describe('policy - dynamic annotations (email example)', () => {
 
     // Try to send to eve - should be denied (eve not in principals)
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
         Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
         Value.of(toolset, []),
@@ -787,16 +885,16 @@ describe('policy - dynamic annotations (email example)', () => {
 
   it('denies when any recipient is unauthorized', () => {
     const toolset = new EmailToolset()
-    const policy = emailExo.policy([
+    const turn = emailExo.policy([
       (source, sink) => {
         if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
         const allowed = source[1].principals ?? []
         const recipients = sink[1].principals ?? []
         return isSubset(recipients, allowed) ? 'allow' : 'deny'
       },
-    ])
+    ]).turn(10)
 
-    const emailResult = policy.doStubCall(
+    const emailResult = turn.doStubCall(
       { propertyName: 'getEmail', parent: Value.of(toolset, []) },
       Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
       Value.of(toolset, []),
@@ -805,7 +903,7 @@ describe('policy - dynamic annotations (email example)', () => {
 
     // Try to send to bob AND eve - should be denied (eve not in principals)
     expect(() => {
-      policy.doStubCall(
+      turn.doStubCall(
         { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
         Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
         Value.of(toolset, []),
@@ -816,16 +914,16 @@ describe('policy - dynamic annotations (email example)', () => {
 
   it('allows sending to all original recipients (to, cc, bcc)', () => {
     const toolset = new EmailToolset()
-    const policy = emailExo.policy([
+    const turn = emailExo.policy([
       (source, sink) => {
         if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
         const allowed = source[1].principals ?? []
         const recipients = sink[1].principals ?? []
         return isSubset(recipients, allowed) ? 'allow' : 'deny'
       },
-    ])
+    ]).turn(10)
 
-    const emailResult = policy.doStubCall(
+    const emailResult = turn.doStubCall(
       { propertyName: 'getEmail', parent: Value.of(toolset, []) },
       Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
       Value.of(toolset, []),
@@ -833,7 +931,7 @@ describe('policy - dynamic annotations (email example)', () => {
     )
 
     // Send to all original recipients - should be allowed
-    const sendResult = policy.doStubCall(
+    const sendResult = turn.doStubCall(
       { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
       Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
       Value.of(toolset, []),

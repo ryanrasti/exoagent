@@ -1,5 +1,4 @@
 import type { ToolExecutionOptions } from 'ai'
-import type { PolicyChecker } from './eval/utils'
 import type { Policy } from './policy'
 import { z } from 'zod'
 import { normalizeTaint, safeEval, Value } from './eval'
@@ -10,11 +9,12 @@ export type CodeModeOptions<Sinks extends readonly string[]> = {
   dts?: string
   /** The sink to check at the output boundary (required) */
   outputSink: Sinks[number]
+  /** Maximum cost (tool calls) per turn. Defaults to 10. */
+  maxCost?: number
 }
 
 export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<Sinks>) {
-  const { api, policy, dts = '', outputSink } = opts
-  const checkPolicy: PolicyChecker = policy.createUnwrapChecker([normalizeTaint(outputSink)])
+  const { api, policy, dts = '', outputSink, maxCost = 10 } = opts
 
   return {
     description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.
@@ -56,8 +56,12 @@ export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<
       code: z.string(),
     }),
     execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<unknown> => {
+      // Create a fresh TurnPolicy for each execution (fresh cost counter)
+      const turn = policy.turn(maxCost)
+      const checkPolicy = turn.createUnwrapChecker([normalizeTaint(outputSink)])
+
       try {
-        const result = await safeEval(`(${code})(api)`, Value.of({ api }), policy.doStubCall.bind(policy))
+        const result = await safeEval(`(${code})(api)`, Value.of({ api }), turn.doStubCall.bind(turn))
         return result.unwrap(checkPolicy)
       }
       catch (err) {

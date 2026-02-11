@@ -59,7 +59,34 @@ type CallbackDenyRule = (source: Taint, sink: Taint) => 'allow' | 'deny'
 type PolicyDenyRule = SimpleDenyRule | CallbackDenyRule
 
 export class Policy<Sources extends readonly string[] = [], Sinks extends readonly string[] = []> {
-  constructor(private sources: Sources, private sinks: Sinks, private denyRules: PolicyDenyRule[] = []) {
+  constructor(
+    private sources: Sources,
+    private sinks: Sinks,
+    private denyRules: PolicyDenyRule[] = [],
+  ) {}
+
+  /**
+   * Create a TurnPolicy for a single turn of execution.
+   * Each turn has its own cost counter that resets.
+   */
+  turn(maxCost: number): TurnPolicy<Sources, Sinks> {
+    return new TurnPolicy(this.sources, this.sinks, this.denyRules, maxCost)
+  }
+}
+
+export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends readonly string[] = []> {
+  private costUsed = 0
+
+  constructor(
+    private sources: Sources,
+    private sinks: Sinks,
+    private denyRules: PolicyDenyRule[],
+    private maxCost: number,
+  ) {}
+
+  /** Get the current cost used in this turn */
+  getCostUsed(): number {
+    return this.costUsed
   }
 
   /** Check that source taint types (from tool annotations) are configured */
@@ -140,6 +167,11 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
   }
 
   doStubCall(options: ValueOptions, method: Value<(...args: any[]) => any>, thisVal: Value, args: Value[]): Value {
+    // Check cost limit
+    if (++this.costUsed > this.maxCost) {
+      throw new Error(`Exceeded max cost: ${this.maxCost}`)
+    }
+
     if (!options.propertyName || !options.parent) {
       throw new Error(`Method must have a name and parent`)
     }
