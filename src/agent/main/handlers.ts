@@ -140,8 +140,9 @@ export async function llm<Sinks extends readonly string[]>(
 
   // If there was an error, throw it with full details
   if (error) {
-    const err = new Error(error.message)
+    const err = new Error(error.message) as Error & { code?: string }
     err.stack = error.stack
+    err.code = error.code
     throw err
   }
 

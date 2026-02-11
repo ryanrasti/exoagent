@@ -23,6 +23,7 @@ export type CodeModeResult = {
   error?: {
     message: string
     stack?: string
+    code?: string
   }
 }
 
@@ -68,12 +69,18 @@ export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<
         - Arrow functions: (x) => x + 1
         - Async/await: async (api) => { const x = await api.foo(); return x; }
         - Block statements: { const a = 1; const b = 2; return { response: "", data: null }; }
+        - If/else statements: if (condition) { ... } else { ... }
+        - Ternary expressions: condition ? a : b
+        - Comparison operators: ===, !==, >, <, >=, <=
+        - Arithmetic operators: +, -, *, /, %
+        - Logical operators: &&, ||
+        - String concatenation: "hello" + " " + "world"
+        - Template literals: \`Hello \${name}\`
 
         NOT SUPPORTED (will error):
-        - if/else, for, while, switch, try/catch
+        - for, while, switch, try/catch
         - Prototype methods (no .map, .filter, .forEach, etc.)
         - Globals (no console, Math, JSON, etc.)
-        - Template literals
         - Destructuring in parameters
 
         Example:
@@ -121,6 +128,7 @@ export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<
           error: {
             message: err instanceof Error ? err.message : String(err),
             stack: err instanceof Error ? err.stack : undefined,
+            code,
           },
         }
       }

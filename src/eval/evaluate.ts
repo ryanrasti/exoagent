@@ -112,6 +112,17 @@ export class Evaluator {
     else if (node.type === 'EmptyStatement') {
       return { control: 'normal' }
     }
+    else if (node.type === 'IfStatement') {
+      const test = yield* this.evaluate(node.test, scope)
+      // Use JavaScript's truthiness for the condition
+      if (test.raw) {
+        return yield* this.evalStatement(node.consequent, scope)
+      }
+      else if (node.alternate) {
+        return yield* this.evalStatement(node.alternate, scope)
+      }
+      return { control: 'normal' }
+    }
     else {
       this.inv.parse(false, 'Unsupported statement', node)
     }
@@ -262,6 +273,101 @@ export class Evaluator {
       const value = yield* this.evaluate(node.argument, scope)
       this.inv.eval(value.isNumber(), 'Unary minus requires a number', node, value)
       return Value.of(-value.raw, value.getTaints())
+    }
+    else if (node.type === 'ConditionalExpression') {
+      const test = yield* this.evaluate(node.test, scope)
+      // Use JavaScript's truthiness for the condition
+      // The result inherits taints from the condition
+      if (test.raw) {
+        const result = yield* this.evaluate(node.consequent, scope)
+        return result.withTaints(test.getTaints())
+      }
+      else {
+        const result = yield* this.evaluate(node.alternate, scope)
+        return result.withTaints(test.getTaints())
+      }
+    }
+    else if (node.type === 'BinaryExpression') {
+      const left = yield* this.evaluate(node.left, scope)
+      const right = yield* this.evaluate(node.right, scope)
+      const taints = Value.mergeTaints(left, right)
+
+      switch (node.operator) {
+        // Comparison operators
+        case '===':
+          return Value.of(left.raw === right.raw, taints)
+        case '!==':
+          return Value.of(left.raw !== right.raw, taints)
+        case '>':
+          return Value.of(left.raw > right.raw, taints)
+        case '<':
+          return Value.of(left.raw < right.raw, taints)
+        case '>=':
+          return Value.of(left.raw >= right.raw, taints)
+        case '<=':
+          return Value.of(left.raw <= right.raw, taints)
+        // Arithmetic operators
+        case '+':
+          return Value.of(left.raw + right.raw, taints)
+        case '-':
+          return Value.of(left.raw - right.raw, taints)
+        case '*':
+          return Value.of(left.raw * right.raw, taints)
+        case '/':
+          return Value.of(left.raw / right.raw, taints)
+        case '%':
+          return Value.of(left.raw % right.raw, taints)
+        default:
+          this.inv.parse(false, `Unsupported binary operator: ${node.operator}`, node)
+      }
+    }
+    else if (node.type === 'LogicalExpression') {
+      const left = yield* this.evaluate(node.left, scope)
+
+      // Short-circuit evaluation with taint propagation
+      // If we evaluate the right side, it inherits taints from left
+      // (since left influenced whether right was evaluated)
+      if (node.operator === '&&') {
+        if (!left.raw) {
+          return left
+        }
+        const right = yield* this.evaluate(node.right, scope)
+        return right.withTaints(left.getTaints())
+      }
+      else if (node.operator === '||') {
+        if (left.raw) {
+          return left
+        }
+        const right = yield* this.evaluate(node.right, scope)
+        return right.withTaints(left.getTaints())
+      }
+      else {
+        this.inv.parse(false, `Unsupported logical operator: ${node.operator}`, node)
+      }
+    }
+    else if (node.type === 'TemplateLiteral') {
+      // Template literals: `hello ${name}`
+      // Evaluate all expressions and concatenate with the quasis (static parts)
+      const parts: Value<SafeEvalValueInner>[] = []
+
+      for (let i = 0; i < node.quasis.length; i++) {
+        // Add the static part (quasi)
+        const quasi = node.quasis[i]
+        if (quasi.value.cooked !== null) {
+          parts.push(Value.of(quasi.value.cooked, []))
+        }
+
+        // Add the expression if there is one (expressions.length === quasis.length - 1)
+        if (i < node.expressions.length) {
+          const expr = yield* this.evaluate(node.expressions[i], scope)
+          parts.push(expr)
+        }
+      }
+
+      // Concatenate all parts into a single string
+      const result = parts.map(p => String(p.raw)).join('')
+      const taints = Value.mergeTaints(...parts)
+      return Value.of(result, taints)
     }
     else {
       this.inv.parse(false, 'Unsupported expression', node)

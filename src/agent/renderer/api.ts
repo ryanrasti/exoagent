@@ -18,9 +18,12 @@ async function httpCall<T>(channel: string, ...args: unknown[]): Promise<T> {
   const json = await res.json()
 
   if (!json.ok) {
-    const err = new Error(json.error?.message || 'Unknown error')
+    const err = new Error(json.error?.message || 'Unknown error') as Error & { code?: string }
     if (json.error?.stack) {
       err.stack = json.error.stack
+    }
+    if (json.error?.code) {
+      err.code = json.error.code
     }
     throw err
   }

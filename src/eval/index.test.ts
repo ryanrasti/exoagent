@@ -167,6 +167,18 @@ describe('capnweb-eval basic evaluation', () => {
     expect((result.raw as Value<unknown>[]).length).toBe(3)
   })
 
+  it('supports array.length access', async () => {
+    const result = await safeEval('arr.length', Value.of({ arr: [1, 2, 3] }))
+    expect(result.raw).toBe(3)
+  })
+
+  it('propagates taints through array.length', async () => {
+    const scope = Value.of({ arr: Value.of([1, 2, 3], ['tainted']) })
+    const result = await safeEval('arr.length', scope)
+    expect(result.raw).toBe(3)
+    expect(result.getTaints()).toContainEqual(['tainted', {}])
+  })
+
   it('handles string indexing', async () => {
     const result = await safeEval('str', Value.of({ str: 'hello' }))
     expect(result).toEqual(Value.of('hello', []))
@@ -268,28 +280,6 @@ describe('capnweb-eval with toolsets', () => {
 })
 
 describe('evaluator edge cases - unsupported syntax', () => {
-  it('throws on binary operators', () => {
-    expect(() => safeEval('1 + 2', Value.of({}))).toThrow(/Unsupported expression/)
-  })
-
-  it('throws on logical operators', () => {
-    expect(() => safeEval('true && false', Value.of({}))).toThrow(/Unsupported expression/)
-    expect(() => safeEval('true || false', Value.of({}))).toThrow(/Unsupported expression/)
-  })
-
-  it('throws on comparison operators', () => {
-    expect(() => safeEval('1 < 2', Value.of({}))).toThrow(/Unsupported expression/)
-    expect(() => safeEval('1 === 2', Value.of({}))).toThrow(/Unsupported expression/)
-  })
-
-  it('throws on template literals', () => {
-    expect(() => safeEval('`hello ${name}`', Value.of({ name: 'world' }))).toThrow(/Unsupported expression/)
-  })
-
-  it('throws on conditional/ternary expressions', () => {
-    expect(() => safeEval('true ? 1 : 2', Value.of({}))).toThrow(/Unsupported expression/)
-  })
-
   it('throws on assignment expressions', () => {
     expect(() => safeEval('x = 5', Value.of({ x: 0 }))).toThrow(/Unsupported expression/)
   })
@@ -986,11 +976,425 @@ describe('security - statement restrictions', () => {
     expect(() => safeEval('try {} catch(e) {}', Value.of({}))).toThrow()
   })
 
-  it('if statements are not supported', () => {
-    expect(() => safeEval('if (true) { 1 }', Value.of({}))).toThrow()
-  })
-
   it('switch statements are not supported', () => {
     expect(() => safeEval('switch(1) { case 1: break; }', Value.of({}))).toThrow()
+  })
+})
+
+describe('if/else statements', () => {
+  it('evaluates if with truthy condition', async () => {
+    const result = await safeEval('(() => { if (true) { return 1 } return 2 })()', Value.of({}))
+    expect(result.raw).toBe(1)
+  })
+
+  it('evaluates if with falsy condition', async () => {
+    const result = await safeEval('(() => { if (false) { return 1 } return 2 })()', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('evaluates if-else with truthy condition', async () => {
+    const result = await safeEval('(() => { if (true) { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(1)
+  })
+
+  it('evaluates if-else with falsy condition', async () => {
+    const result = await safeEval('(() => { if (false) { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('evaluates if-else-if chain', async () => {
+    const scope = Value.of(new class {
+      @tool(z.number(), z.number())
+      eq(a: number, b: number) { return a === b }
+    })
+    const code = `(() => {
+      const x = 2
+      if (eq(x, 1)) { return "one" }
+      else if (eq(x, 2)) { return "two" }
+      else { return "other" }
+    })()`
+    const result = await safeEval(code, scope)
+    expect(result.raw).toBe('two')
+  })
+
+  it('uses JavaScript truthiness (0 is falsy)', async () => {
+    const result = await safeEval('(() => { if (0) { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('uses JavaScript truthiness (empty string is falsy)', async () => {
+    const result = await safeEval('(() => { if ("") { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('uses JavaScript truthiness (non-empty string is truthy)', async () => {
+    const result = await safeEval('(() => { if ("hello") { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(1)
+  })
+
+  it('uses JavaScript truthiness (null is falsy)', async () => {
+    const result = await safeEval('(() => { if (null) { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('uses JavaScript truthiness (undefined is falsy)', async () => {
+    const result = await safeEval('(() => { if (undefined) { return 1 } else { return 2 } })()', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('works with tool results in condition', async () => {
+    const scope = Value.of(new class {
+      @tool(z.number())
+      isPositive(x: number) { return x > 0 }
+    })
+    const result = await safeEval('(() => { if (isPositive(5)) { return "yes" } else { return "no" } })()', scope)
+    expect(result.raw).toBe('yes')
+  })
+
+  it('if without braces works', async () => {
+    const result = await safeEval('(() => { if (true) return 1; return 2 })()', Value.of({}))
+    expect(result.raw).toBe(1)
+  })
+})
+
+describe('ternary expressions', () => {
+  it('evaluates ternary with truthy condition', async () => {
+    const result = await safeEval('true ? 1 : 2', Value.of({}))
+    expect(result.raw).toBe(1)
+  })
+
+  it('evaluates ternary with falsy condition', async () => {
+    const result = await safeEval('false ? 1 : 2', Value.of({}))
+    expect(result.raw).toBe(2)
+  })
+
+  it('works with tool results in condition', async () => {
+    const scope = Value.of(new class {
+      @tool(z.number(), z.number())
+      gt(a: number, b: number) { return a > b }
+    })
+    const result = await safeEval('gt(5, 3) ? "big" : "small"', scope)
+    expect(result.raw).toBe('big')
+  })
+
+  it('works nested', async () => {
+    const scope = Value.of(new class {
+      @tool(z.number(), z.number())
+      eq(a: number, b: number) { return a === b }
+    })
+    const result = await safeEval('eq(2, 1) ? "one" : eq(2, 2) ? "two" : "other"', scope)
+    expect(result.raw).toBe('two')
+  })
+
+  it('uses JavaScript truthiness', async () => {
+    expect((await safeEval('0 ? "yes" : "no"', Value.of({}))).raw).toBe('no')
+    expect((await safeEval('"" ? "yes" : "no"', Value.of({}))).raw).toBe('no')
+    expect((await safeEval('null ? "yes" : "no"', Value.of({}))).raw).toBe('no')
+    expect((await safeEval('"hello" ? "yes" : "no"', Value.of({}))).raw).toBe('yes')
+    expect((await safeEval('1 ? "yes" : "no"', Value.of({}))).raw).toBe('yes')
+  })
+
+  it('only evaluates the branch that matches', async () => {
+    const calls: string[] = []
+    const scope = Value.of(new class {
+      @tool()
+      a() { calls.push('a'); return 'a' }
+      @tool()
+      b() { calls.push('b'); return 'b' }
+    })
+    await safeEval('true ? a() : b()', scope)
+    expect(calls).toEqual(['a'])
+  })
+
+  it('inherits taints from condition', async () => {
+    const scope = Value.of(new class {
+      @tool(z.number())
+      isPositive(x: number) { return x > 0 }
+    })
+    const result = await safeEval('isPositive(5) ? "yes" : "no"', scope)
+    expect(result.raw).toBe('yes')
+  })
+})
+
+describe('binary operators', () => {
+  describe('comparison operators', () => {
+    it('evaluates === (strict equality)', async () => {
+      expect((await safeEval('5 === 5', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('5 === "5"', Value.of({}))).raw).toBe(false)
+      expect((await safeEval('"hello" === "hello"', Value.of({}))).raw).toBe(true)
+    })
+
+    it('evaluates !== (strict inequality)', async () => {
+      expect((await safeEval('5 !== 5', Value.of({}))).raw).toBe(false)
+      expect((await safeEval('5 !== "5"', Value.of({}))).raw).toBe(true)
+    })
+
+    it('evaluates > (greater than)', async () => {
+      expect((await safeEval('5 > 3', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('3 > 5', Value.of({}))).raw).toBe(false)
+      expect((await safeEval('5 > 5', Value.of({}))).raw).toBe(false)
+    })
+
+    it('evaluates < (less than)', async () => {
+      expect((await safeEval('3 < 5', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('5 < 3', Value.of({}))).raw).toBe(false)
+      expect((await safeEval('5 < 5', Value.of({}))).raw).toBe(false)
+    })
+
+    it('evaluates >= (greater than or equal)', async () => {
+      expect((await safeEval('5 >= 3', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('5 >= 5', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('3 >= 5', Value.of({}))).raw).toBe(false)
+    })
+
+    it('evaluates <= (less than or equal)', async () => {
+      expect((await safeEval('3 <= 5', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('5 <= 5', Value.of({}))).raw).toBe(true)
+      expect((await safeEval('5 <= 3', Value.of({}))).raw).toBe(false)
+    })
+  })
+
+  describe('arithmetic operators', () => {
+    it('evaluates + (addition)', async () => {
+      expect((await safeEval('2 + 3', Value.of({}))).raw).toBe(5)
+      expect((await safeEval('2.5 + 3.5', Value.of({}))).raw).toBe(6)
+    })
+
+    it('evaluates + (string concatenation)', async () => {
+      expect((await safeEval('"hello" + " " + "world"', Value.of({}))).raw).toBe('hello world')
+      expect((await safeEval('"count: " + 5', Value.of({}))).raw).toBe('count: 5')
+    })
+
+    it('evaluates - (subtraction)', async () => {
+      expect((await safeEval('5 - 3', Value.of({}))).raw).toBe(2)
+      expect((await safeEval('3 - 5', Value.of({}))).raw).toBe(-2)
+    })
+
+    it('evaluates * (multiplication)', async () => {
+      expect((await safeEval('4 * 3', Value.of({}))).raw).toBe(12)
+      expect((await safeEval('2.5 * 4', Value.of({}))).raw).toBe(10)
+    })
+
+    it('evaluates / (division)', async () => {
+      expect((await safeEval('10 / 2', Value.of({}))).raw).toBe(5)
+      expect((await safeEval('7 / 2', Value.of({}))).raw).toBe(3.5)
+    })
+
+    it('evaluates % (modulo)', async () => {
+      expect((await safeEval('7 % 3', Value.of({}))).raw).toBe(1)
+      expect((await safeEval('10 % 5', Value.of({}))).raw).toBe(0)
+    })
+  })
+
+  describe('with variables', () => {
+    it('works with scope variables', async () => {
+      const scope = Value.of({ x: 10, y: 3 })
+      expect((await safeEval('x + y', scope)).raw).toBe(13)
+      expect((await safeEval('x - y', scope)).raw).toBe(7)
+      expect((await safeEval('x * y', scope)).raw).toBe(30)
+      expect((await safeEval('x > y', scope)).raw).toBe(true)
+    })
+  })
+})
+
+describe('logical operators', () => {
+  it('evaluates && with short-circuit (left falsy)', async () => {
+    const calls: string[] = []
+    const scope = Value.of(new class {
+      @tool()
+      a() { calls.push('a'); return false }
+      @tool()
+      b() { calls.push('b'); return true }
+    })
+    const result = await safeEval('a() && b()', scope)
+    expect(result.raw).toBe(false)
+    expect(calls).toEqual(['a']) // b should not be called
+  })
+
+  it('evaluates && with short-circuit (left truthy)', async () => {
+    const calls: string[] = []
+    const scope = Value.of(new class {
+      @tool()
+      a() { calls.push('a'); return true }
+      @tool()
+      b() { calls.push('b'); return 42 }
+    })
+    const result = await safeEval('a() && b()', scope)
+    expect(result.raw).toBe(42)
+    expect(calls).toEqual(['a', 'b'])
+  })
+
+  it('evaluates || with short-circuit (left truthy)', async () => {
+    const calls: string[] = []
+    const scope = Value.of(new class {
+      @tool()
+      a() { calls.push('a'); return 42 }
+      @tool()
+      b() { calls.push('b'); return 0 }
+    })
+    const result = await safeEval('a() || b()', scope)
+    expect(result.raw).toBe(42)
+    expect(calls).toEqual(['a']) // b should not be called
+  })
+
+  it('evaluates || with short-circuit (left falsy)', async () => {
+    const calls: string[] = []
+    const scope = Value.of(new class {
+      @tool()
+      a() { calls.push('a'); return 0 }
+      @tool()
+      b() { calls.push('b'); return 42 }
+    })
+    const result = await safeEval('a() || b()', scope)
+    expect(result.raw).toBe(42)
+    expect(calls).toEqual(['a', 'b'])
+  })
+
+  it('works with boolean values', async () => {
+    expect((await safeEval('true && false', Value.of({}))).raw).toBe(false)
+    expect((await safeEval('true && true', Value.of({}))).raw).toBe(true)
+    expect((await safeEval('false || true', Value.of({}))).raw).toBe(true)
+    expect((await safeEval('false || false', Value.of({}))).raw).toBe(false)
+  })
+
+  it('can be used in conditions', async () => {
+    const result = await safeEval('5 > 3 && 2 < 4 ? "yes" : "no"', Value.of({}))
+    expect(result.raw).toBe('yes')
+  })
+
+  describe('taint propagation', () => {
+    it('&& returns left taints when short-circuiting (left falsy)', async () => {
+      const scope = Value.of({
+        left: Value.of(false, ['left-taint']),
+        right: Value.of(true, ['right-taint']),
+      })
+      const result = await safeEval('left && right', scope)
+      expect(result.raw).toBe(false)
+      expect(taintsContain(result.getTaints(), 'left-taint')).toBe(true)
+      expect(taintsContain(result.getTaints(), 'right-taint')).toBe(false)
+    })
+
+    it('&& returns right taints plus left taints when evaluating right side', async () => {
+      const scope = Value.of({
+        left: Value.of(true, ['left-taint']),
+        right: Value.of(42, ['right-taint']),
+      })
+      const result = await safeEval('left && right', scope)
+      expect(result.raw).toBe(42)
+      expect(taintsContain(result.getTaints(), 'left-taint')).toBe(true)
+      expect(taintsContain(result.getTaints(), 'right-taint')).toBe(true)
+    })
+
+    it('|| returns left taints when short-circuiting (left truthy)', async () => {
+      const scope = Value.of({
+        left: Value.of(42, ['left-taint']),
+        right: Value.of(0, ['right-taint']),
+      })
+      const result = await safeEval('left || right', scope)
+      expect(result.raw).toBe(42)
+      expect(taintsContain(result.getTaints(), 'left-taint')).toBe(true)
+      expect(taintsContain(result.getTaints(), 'right-taint')).toBe(false)
+    })
+
+    it('|| returns right taints plus left taints when evaluating right side', async () => {
+      const scope = Value.of({
+        left: Value.of(0, ['left-taint']),
+        right: Value.of(42, ['right-taint']),
+      })
+      const result = await safeEval('left || right', scope)
+      expect(result.raw).toBe(42)
+      expect(taintsContain(result.getTaints(), 'left-taint')).toBe(true)
+      expect(taintsContain(result.getTaints(), 'right-taint')).toBe(true)
+    })
+
+    it('&& with tool calls propagates taints correctly', async () => {
+      const scope = Value.of(new class {
+        @tool()
+        getTaintedTrue() { return true }
+        @tool()
+        getTaintedValue() { return 'secret' }
+      })
+      const result = await safeEval('getTaintedTrue() && getTaintedValue()', scope)
+      expect(result.raw).toBe('secret')
+      // Both tool calls contribute taints
+    })
+
+    it('|| with tool calls propagates taints correctly', async () => {
+      const scope = Value.of(new class {
+        @tool()
+        getTaintedFalse() { return false }
+        @tool()
+        getTaintedValue() { return 'fallback' }
+      })
+      const result = await safeEval('getTaintedFalse() || getTaintedValue()', scope)
+      expect(result.raw).toBe('fallback')
+      // Both tool calls contribute taints
+    })
+  })
+})
+
+describe('template literals', () => {
+  it('evaluates simple template literal', async () => {
+    const result = await safeEval('`hello world`', Value.of({}))
+    expect(result.raw).toBe('hello world')
+  })
+
+  it('evaluates template literal with expression', async () => {
+    const scope = Value.of({ name: 'world' })
+    const result = await safeEval('`hello ${name}`', scope)
+    expect(result.raw).toBe('hello world')
+  })
+
+  it('evaluates template literal with multiple expressions', async () => {
+    const scope = Value.of({ a: 'one', b: 'two', c: 'three' })
+    const result = await safeEval('`${a} ${b} ${c}`', scope)
+    expect(result.raw).toBe('one two three')
+  })
+
+  it('evaluates template literal with numbers', async () => {
+    const scope = Value.of({ x: 42, y: 3.14 })
+    const result = await safeEval('`x is ${x} and y is ${y}`', scope)
+    expect(result.raw).toBe('x is 42 and y is 3.14')
+  })
+
+  it('evaluates template literal with nested expressions', async () => {
+    const scope = Value.of({ a: 5, b: 3 })
+    const result = await safeEval('`sum is ${a + b}`', scope)
+    expect(result.raw).toBe('sum is 8')
+  })
+
+  it('evaluates template literal with tool calls', async () => {
+    const scope = Value.of(new class {
+      @tool(z.number())
+      double(x: number) { return x * 2 }
+    })
+    const result = await safeEval('`doubled: ${double(5)}`', scope)
+    expect(result.raw).toBe('doubled: 10')
+  })
+
+  it('handles newlines in template literals', async () => {
+    const result = await safeEval('`line1\\nline2`', Value.of({}))
+    expect(result.raw).toBe('line1\nline2')
+  })
+
+  it('propagates taints from expressions', async () => {
+    const scope = Value.of({
+      tainted: Value.of('secret', ['sensitive']),
+      clean: 'public',
+    })
+    const result = await safeEval('`${clean}: ${tainted}`', scope)
+    expect(result.raw).toBe('public: secret')
+    expect(taintsContain(result.getTaints(), 'sensitive')).toBe(true)
+  })
+
+  it('merges taints from multiple tainted expressions', async () => {
+    const scope = Value.of({
+      a: Value.of('one', ['taint-a']),
+      b: Value.of('two', ['taint-b']),
+    })
+    const result = await safeEval('`${a} and ${b}`', scope)
+    expect(result.raw).toBe('one and two')
+    expect(taintsContain(result.getTaints(), 'taint-a')).toBe(true)
+    expect(taintsContain(result.getTaints(), 'taint-b')).toBe(true)
   })
 })

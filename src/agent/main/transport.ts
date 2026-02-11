@@ -61,7 +61,7 @@ export function createHttpMiddleware(): RequestHandler {
     }
     catch (err) {
       const error = err instanceof Error
-        ? { message: err.message, stack: err.stack }
+        ? { message: err.message, stack: err.stack, code: (err as Error & { code?: string }).code }
         : { message: String(err) }
       res.status(500).json({ ok: false, error })
     }

@@ -244,6 +244,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
       return (this.raw[key.raw] ?? Value.Undefined).withTaints(key.getTaints())
     }
     if (this.isArray()) {
+      // Allow accessing 'length' on arrays
+      if (key.raw === 'length') {
+        return Value.of(this.raw.length, this.getTaints()).withTaints(key.getTaints())
+      }
       if (!key.isNumber()) {
         throw new Error(`Index must be a number`)
       }

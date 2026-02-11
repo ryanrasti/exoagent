@@ -125,23 +125,29 @@ describe('codeMode - error propagation', () => {
 
   it('propagates errors from tool calls', async () => {
     const wrappedTool = codeMode({ api: new ErrorToolset(), policy: errorPolicy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => api.throwError("test error")`,
-    })).rejects.toThrow('test error')
+    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toBe('test error')
+    expect(result.error?.code).toBe(`(api) => api.throwError("test error")`)
   })
 
   it('propagates validation errors from tools', async () => {
     const wrappedTool = codeMode({ api: new ErrorToolset(), policy: errorPolicy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => api.validatePositive(-5)`,
-    })).rejects.toThrow('Number must be positive')
+    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toBe('Number must be positive')
   })
 
   it('handles syntax errors in user code', async () => {
     const wrappedTool = codeMode({ api: new ErrorToolset(), policy: errorPolicy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => { this is not valid javascript }`,
-    })).rejects.toThrow()
+    })
+    expect(result.error).toBeDefined()
   })
 })
 
@@ -332,13 +338,16 @@ describe('codeMode - policy enforcement', () => {
     ])
     const wrappedTool = codeMode({ api: new PolicyToolset(), policy: denyPolicy, outputSink: 'output' })
 
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => {
         const untrusted = api.getUntrusted()
         const written = api.writeSensitive(untrusted)
         return { response: written, data: null }
       }`,
-    })).rejects.toThrow(/Method call denied/)
+    })
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/Method call denied/)
   })
 
   it('denies untrusted data even through transformations', async () => {
@@ -347,14 +356,17 @@ describe('codeMode - policy enforcement', () => {
     ])
     const wrappedTool = codeMode({ api: new PolicyToolset(), policy: denyPolicy, outputSink: 'output' })
 
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => {
         const untrusted = api.getUntrusted()
         const transformed = api.transform(untrusted)
         const written = api.writeSensitive(transformed)
         return { response: written, data: null }
       }`,
-    })).rejects.toThrow(/Method call denied/)
+    })
+
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/Method call denied/)
   })
 })
 
@@ -381,30 +393,39 @@ describe('codeMode - tool description and schema', () => {
 describe('codeMode - return value validation', () => {
   it('rejects code that does not return an object', async () => {
     const wrappedTool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => 42`,
-    })).rejects.toThrow('Code must return an object with { response: string, data: unknown }')
+    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toBe('Code must return an object with { response: string, data: unknown }')
+    expect(result.error?.code).toBe(`(api) => 42`)
   })
 
   it('rejects code that returns object without response', async () => {
     const wrappedTool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => ({ data: 123 })`,
-    })).rejects.toThrow('Code must return an object with "response" as a string')
+    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toBe('Code must return an object with "response" as a string')
   })
 
   it('rejects code that returns object without data', async () => {
     const wrappedTool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => ({ response: "hello" })`,
-    })).rejects.toThrow('Code must return an object with a "data" field')
+    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toBe('Code must return an object with a "data" field')
   })
 
   it('rejects code that returns non-string response', async () => {
     const wrappedTool = codeMode({ api: new TestToolset(), policy, outputSink: 'output' })
-    await expect((wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `(api) => ({ response: 123, data: null })`,
-    })).rejects.toThrow('Code must return an object with "response" as a string')
+    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toBe('Code must return an object with "response" as a string')
   })
 
   it('accepts valid response with null data', async () => {

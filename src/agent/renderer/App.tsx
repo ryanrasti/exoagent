@@ -11,6 +11,7 @@ interface DisplayMessage {
   taints?: Taint[]
   isError?: boolean
   errorStack?: string
+  errorCode?: string
 }
 
 function TaintsDisplay({ taints }: { taints: Taint[] }) {
@@ -60,6 +61,27 @@ function DataDisplay({ data }: { data: unknown }) {
       {expanded && (
         <pre className="mt-1 text-xs text-neutral-500 overflow-x-auto max-h-48 overflow-y-auto">
           {JSON.stringify(data, null, 2)}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+function ErrorCodeDisplay({ code }: { code: string }) {
+  const [expanded, setExpanded] = useState(true)
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors"
+      >
+        <span>{expanded ? '▼' : '▶'}</span>
+        <span>executed code</span>
+      </button>
+      {expanded && (
+        <pre className="mt-1 text-xs text-red-300/70 overflow-x-auto max-h-64 overflow-y-auto bg-red-950/30 p-2 rounded">
+          {code}
         </pre>
       )}
     </div>
@@ -143,6 +165,7 @@ export default function App() {
         content: err instanceof Error ? err.message : 'Unknown error',
         isError: true,
         errorStack: err instanceof Error ? err.stack : undefined,
+        errorCode: err instanceof Error ? (err as Error & { code?: string }).code : undefined,
       }
       setMessages(prev => [...prev, errorMessage])
     }
@@ -199,6 +222,9 @@ export default function App() {
                 <div className="text-xs text-red-400 font-semibold mb-1">Error</div>
               )}
               <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
+              {msg.errorCode && (
+                <ErrorCodeDisplay code={msg.errorCode} />
+              )}
               {msg.errorStack && (
                 <ErrorStackDisplay stack={msg.errorStack} />
               )}
