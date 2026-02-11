@@ -285,8 +285,12 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
 
   asAwaitable(): PromiseLike<Value<SafeEvalValueInner>> | Value<SafeEvalValueInner> {
     if (this.isThenable()) {
-      return (async() => {
+      return (async () => {
         const v = await this.raw
+        // If the Promise resolved to a Value, merge taints and return it
+        if (v instanceof Value) {
+          return v.withTaints([...this.getTaints(), ...v.getTaints()])
+        }
         return Value.of(v, this.getTaints()).asAwaitable()
       })()
     }

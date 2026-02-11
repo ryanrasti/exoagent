@@ -172,17 +172,30 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     // Execute the method
     const rawResult = Reflect.apply(method.raw, thisVal.raw, unwrappedArgs)
 
-    // Compute source taints (static or dynamic based on return value)
-    const sourceTaints: Taint[] = typeof toolProps.source === 'function'
-      ? normalizeTaints(toolProps.source(rawResult))
-      : normalizeTaints(flattenArray(toolProps.source ?? []))
+    // Helper to compute final Value with source taints
+    const computeResult = (resolvedResult: unknown): Value => {
+      // Compute source taints (static or dynamic based on return value)
+      const sourceTaints: Taint[] = typeof toolProps.source === 'function'
+        ? normalizeTaints(toolProps.source(resolvedResult))
+        : normalizeTaints(flattenArray(toolProps.source ?? []))
 
-    // Check source taint types are configured
-    this.checkSourceTypesConfigured(sourceTaints.map(([type]) => type))
+      // Check source taint types are configured
+      this.checkSourceTypesConfigured(sourceTaints.map(([type]) => type))
 
-    // Build result with merged incoming taints + source taints
-    const result = Value.of(rawResult, Value.mergeTaints(thisVal, ...args))
-    return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sourceTaints])
+      // Build result with merged incoming taints + source taints
+      const result = Value.of(resolvedResult, Value.mergeTaints(thisVal, ...args))
+      return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sourceTaints])
+    }
+
+    // If result is a Promise, wrap it so the resolved value gets tainted
+    if (rawResult instanceof Promise) {
+      const wrappedPromise = rawResult.then((resolvedResult: unknown) => computeResult(resolvedResult))
+      // Return a Value wrapping the promise, with incoming taints
+      // The promise resolves to a Value which will be handled by the evaluator
+      return Value.of(wrappedPromise, Value.mergeTaints(thisVal, ...args))
+    }
+
+    return computeResult(rawResult)
   }
 }
 

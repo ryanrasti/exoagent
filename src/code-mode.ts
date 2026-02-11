@@ -39,7 +39,7 @@ export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<
         - Await expression: \`await ...\`
         - Arrow functions: \`(a, b, c) => ...\`
         - Async functions: \`async (a, b, c) => ...\`
-        ANY OTHER FEATURES WILL RESULT IN AN ERROR.
+        ANY OTHER FEATURES WILL RESULT IN AN ERROR (e.g., \`if/else\`, \`for/while\`, \`try/catch\`, \`switch/case\`, etc.).
 
         Also, no globals are available or prototype methods on standard objects (e.g., Array.prototype.map). You
         only have access to the \`api\` object and its methods (recursively).
@@ -56,8 +56,14 @@ export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<
       code: z.string(),
     }),
     execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<unknown> => {
-      const result = await safeEval(`(${code})(api)`, Value.of({ api }), policy.doStubCall.bind(policy))
-      return result.unwrap(checkPolicy)
+      try {
+        const result = await safeEval(`(${code})(api)`, Value.of({ api }), policy.doStubCall.bind(policy))
+        return result.unwrap(checkPolicy)
+      }
+      catch (err) {
+        console.warn('[codeMode] Execution error:', err)
+        throw err
+      }
     },
   }
 }
