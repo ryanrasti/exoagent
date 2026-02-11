@@ -1,6 +1,6 @@
 import type * as acorn from 'acorn'
 import type { Evaluation } from './evaluate'
-import type { SafeEvalValueInner } from './utils'
+import type { SafeEvalValueInner, Taint } from './utils'
 import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
 
 export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<Value<SafeEvalValueInner>>
@@ -9,7 +9,7 @@ export abstract class Scope {
   abstract get(node: acorn.Identifier): Evaluation<Value<SafeEvalValueInner> | undefined>
   abstract set(name: acorn.Identifier, value: Value<SafeEvalValueInner>): void
   /** Taints from the execution path that led here (e.g. condition). Merged into values when binding. */
-  getContextTaints(): string[] { return [] }
+  getContextTaints(): Taint[] { return [] }
 
   /** Value with scope context taints merged in (for storing in this scope). */
   withContextTaints(value: Value<SafeEvalValueInner>): Value<SafeEvalValueInner> {

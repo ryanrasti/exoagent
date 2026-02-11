@@ -1,6 +1,28 @@
 import type * as acorn from 'acorn'
 import { getPolicyMetadata } from '../meta'
 
+// Hierarchical taint: [type, params]
+// params can carry context like principals (email addresses who have access)
+export type TaintParams = {
+  principals?: string[]
+}
+
+export type Taint = [string, TaintParams]
+
+// Input types for convenience - strings are normalized to tuples
+export type TaintInput = string | Taint
+export type TaintsInput = readonly TaintInput[]
+
+/** Normalize a single taint input to tuple form */
+export function normalizeTaint(t: TaintInput): Taint {
+  return typeof t === 'string' ? [t, {}] : t
+}
+
+/** Normalize taint inputs to tuple array */
+export function normalizeTaints(taints: TaintsInput): Taint[] {
+  return taints.map(normalizeTaint)
+}
+
 const checkSafeMember = (member: string) => {
   const unsafe
     = member in Object.prototype
@@ -33,18 +55,22 @@ export type ValueOptions = {
 
 /**
  * Policy checker called during unwrap to validate taints at the boundary.
- * @param taints - The taints on the value being unwrapped
+ * @param taints - The taints on the value being unwrapped (hierarchical tuples)
  * @param path - The path to this value (e.g., "result.foo[0]")
  */
-export type PolicyChecker = (taints: readonly string[], path: string) => void
+export type PolicyChecker = (taints: readonly Taint[], path: string) => void
 
 // Single wrapper for values in eval: raw value + taints + helpers. Wrap/unwrap only at boundaries.
-export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint extends string = string> {
+export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
+  public readonly taints: readonly Taint[]
+
   constructor(
     public readonly raw: T,
-    public readonly taints: readonly Taint[] = [],
+    taints: TaintsInput = [],
     public readonly options: ValueOptions = {},
   ) {
+    // Normalize string taints to tuple form
+    this.taints = normalizeTaints(taints)
     // TODO: implicit in all of this is that objects and arrays must be
     //  wrapped in Value objects; this is not enforced (yet).
   }
@@ -54,16 +80,17 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
   }
 
   /** Add taints deeply to this value and all nested children. */
-  withTaints(extra: readonly string[], shallow: boolean = false): Value<T> {
+  withTaints(extra: TaintsInput, shallow: boolean = false): Value<T> {
     if (extra.length === 0) {
       return this
     }
+    const normalizedExtra = normalizeTaints(extra)
     if (shallow) {
-      return new Value(this.raw, [...this.taints, ...extra], this.options)
+      return new Value(this.raw, [...this.taints, ...normalizedExtra], this.options)
     }
     // Use `Value.of` to recursively taint the value with the new taints.
     // Then any existing taints should just be shallowly added:
-    return Value.of(this.raw, extra, {...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
+    return Value.of(this.raw, normalizedExtra, {...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
   }
 
   /**
@@ -113,9 +140,9 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return this.raw as SafeEvalValueInner
   }
 
-  static of(raw: unknown, taints?: readonly string[], options?: ValueOptions): Value
-  static of<T extends SafeEvalValueInner>(raw: T, taints?: readonly string[], options?: ValueOptions): Value<T>
-  static of(raw: unknown, taints: readonly string[] = [], options?: ValueOptions): Value {
+  static of(raw: unknown, taints?: TaintsInput, options?: ValueOptions): Value
+  static of<T extends SafeEvalValueInner>(raw: T, taints?: TaintsInput, options?: ValueOptions): Value<T>
+  static of(raw: unknown, taints: TaintsInput = [], options?: ValueOptions): Value {
     const shallow = options?.shallow ?? false
     const subTaints = shallow ? [] : taints
     // Strip shallow from stored options - it's only used for control flow
@@ -141,11 +168,12 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
     return new Value(raw, taints, storedOptions)
   }
 
-  static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): string[] {
-    return [...new Set(items.flatMap(x => (x != null ? x.getTaints() : [])))]
+  static mergeTaints(...items: (Value<SafeEvalValueInner> | undefined)[]): Taint[] {
+    // No deduplication - each taint is kept separate (different params = different taint)
+    return items.flatMap(x => (x != null ? x.getTaints() : []))
   }
 
-  static getTaints(x: unknown): string[] {
+  static getTaints(x: unknown): Taint[] {
     return x instanceof Value ? x.getTaints() : []
   }
 
@@ -244,7 +272,11 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner, Taint exte
 
 
   toString(): string {
-    return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${this.getTaints().join(', ')})`
+    const taintStrs = this.taints.map(([type, params]) => {
+      const paramStr = Object.keys(params).length > 0 ? JSON.stringify(params) : ''
+      return paramStr ? `${type}${paramStr}` : type
+    })
+    return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${taintStrs.join(', ')})`
   }
 
   static Undefined = Value.of(undefined, [])

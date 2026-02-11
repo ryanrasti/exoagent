@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { ValueOptions } from './eval/utils'
+import type { Taint, ValueOptions } from './eval/utils'
 import z from 'zod'
 import { Value } from './eval'
 import { getPolicyMetadata, setPolicyMetadata } from './meta'
@@ -40,8 +40,17 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
   constructor(private sources: Sources, private sinks: Sinks, private denyRules: PolicyDenyRule[] = []) {
   }
 
-  private checkSourceTaintsConfigured(taints: readonly string[]): asserts taints is Sources {
-    const unconfigured = taints.filter(taint => !this.sources.includes(taint))
+  /** Check that source taint types (from tool annotations) are configured */
+  private checkSourceTypesConfigured(types: readonly string[]): void {
+    const unconfigured = types.filter(type => !this.sources.includes(type))
+    if (unconfigured.length > 0) {
+      throw new Error(`Source taint ${unconfigured.join(', ')} is not configured`)
+    }
+  }
+
+  /** Check that incoming taints (Taint tuples) have configured source types */
+  private checkIncomingTaintsConfigured(taints: readonly Taint[]): void {
+    const unconfigured = taints.filter(([type]) => !this.sources.includes(type)).map(([type]) => type)
     if (unconfigured.length > 0) {
       throw new Error(`Source taint ${unconfigured.join(', ')} is not configured`)
     }
@@ -54,9 +63,11 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     }
   }
 
-  private checkDenyRules(incomingTaints: Sources, sinks: Sinks): void {
+  private checkDenyRules(incomingTaints: readonly Taint[], sinks: Sinks): void {
     for (const denyRule of this.denyRules) {
-      if (denyRule.sources.some(source => incomingTaints.includes(source)) && denyRule.sinks.some(sink => sinks.includes(sink))) {
+      const hasMatchingSource = denyRule.sources.some(source => incomingTaints.some(([type]) => type === source))
+      const hasMatchingSink = denyRule.sinks.some(sink => sinks.includes(sink))
+      if (hasMatchingSource && hasMatchingSink) {
         throw new Error(`Method call denied: ${denyRule.sources.join(', ')} are not allowed to be used as sources and ${denyRule.sinks.join(', ')} are not allowed to be used as sinks`)
       }
     }
@@ -67,15 +78,18 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
    * Checks that the given taints don't violate any deny rules for the specified sink.
    * @param sink - The sink(s) to check against (e.g., 'output' for sandbox boundary)
    */
-  createUnwrapChecker(sink: Sinks[number] | readonly Sinks[number][]): (taints: readonly string[], path: string) => void {
+  createUnwrapChecker(sink: Sinks[number] | readonly Sinks[number][]): (taints: readonly Taint[], path: string) => void {
     const sinks = flattenArray(sink)
     this.checkSinkTaintsConfigured(sinks)
 
-    return (taints: readonly string[], path: string) => {
-      this.checkSourceTaintsConfigured(taints)
+    return (taints: readonly Taint[], path: string) => {
+      this.checkIncomingTaintsConfigured(taints)
       for (const denyRule of this.denyRules) {
-        if (denyRule.sources.some(source => taints.includes(source)) && denyRule.sinks.some(s => sinks.includes(s))) {
-          throw new Error(`Policy violation at ${path}: taints [${taints.join(', ')}] cannot flow to sink [${sinks.join(', ')}]`)
+        const hasMatchingSource = denyRule.sources.some(source => taints.some(([type]) => type === source))
+        const hasMatchingSink = denyRule.sinks.some(s => sinks.includes(s))
+        if (hasMatchingSource && hasMatchingSink) {
+          const taintTypes = taints.map(([type]) => type)
+          throw new Error(`Policy violation at ${path}: taints [${taintTypes.join(', ')}] cannot flow to sink [${sinks.join(', ')}]`)
         }
       }
     }
@@ -97,10 +111,10 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     const sinks = flattenArray(toolProps.sink ?? [])
     const sources = flattenArray(toolProps.source ?? [])
     this.checkSinkTaintsConfigured(sinks)
-    this.checkSourceTaintsConfigured(sources)
+    this.checkSourceTypesConfigured(sources)
 
     const incomingTaints = Value.mergeTaints(thisVal, ...args)
-    this.checkSourceTaintsConfigured(incomingTaints)
+    this.checkIncomingTaintsConfigured(incomingTaints)
     this.checkDenyRules(incomingTaints, sinks)
 
     // Unwrap args with policy check against this tool's sinks

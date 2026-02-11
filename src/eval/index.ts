@@ -6,7 +6,8 @@ import { GlobalScope } from './scope'
 import { Value } from './utils'
 
 export { Evaluator } from './evaluate'
-export { formatCodeMessage, Invariant, Value } from './utils'
+export { formatCodeMessage, Invariant, Value, normalizeTaint, normalizeTaints } from './utils'
+export type { Taint, TaintParams, TaintInput, TaintsInput, PolicyChecker } from './utils'
 
 export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })

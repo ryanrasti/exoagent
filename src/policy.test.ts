@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import z from 'zod'
 import { safeEval, Value } from './eval'
+import type { Taint } from './eval'
 import { ExoAgent, fn, tool } from './policy'
+
+// Helper to check if taints contain a specific taint type
+const taintsContain = (taints: Taint[], type: string) =>
+  taints.some(t => t[0] === type)
 
 const exo = new ExoAgent(['taint1', 'taint2'], ['taint1'])
 
@@ -43,7 +48,7 @@ describe('policy', () => {
     )
 
     // Verify source1 result has taint1
-    expect(source1Result.getTaints()).toContain('taint1')
+    expect(taintsContain(source1Result.getTaints(), 'taint1')).toBe(true)
     expect(source1Result.raw).toBe('data from source1')
 
     // Call sink with taint1 data - should pass
@@ -75,7 +80,7 @@ describe('policy', () => {
     )
 
     // Verify source2 result has taint2
-    expect(source2Result.getTaints()).toContain('taint2')
+    expect(taintsContain(source2Result.getTaints(), 'taint2')).toBe(true)
     expect(source2Result.raw).toBe('data from source2')
 
     // Call sink with taint2 data - should be denied by deny rule
@@ -282,8 +287,8 @@ describe('policy - multiple sources and sinks on single tool', () => {
       [],
     )
 
-    expect(result.getTaints()).toContain('source1')
-    expect(result.getTaints()).toContain('source2')
+    expect(taintsContain(result.getTaints(), 'source1')).toBe(true)
+    expect(taintsContain(result.getTaints(), 'source2')).toBe(true)
   })
 
   it('tool with multiple sinks is denied if any sink matches deny rule', () => {
@@ -351,7 +356,7 @@ describe('policy - chained tool calls and taint propagation', () => {
       Value.of(toolset, []),
       [untrusted],
     )
-    expect(transformed.getTaints()).toContain('untrusted')
+    expect(taintsContain(transformed.getTaints(), 'untrusted')).toBe(true)
 
     // Should still be denied at sensitive sink
     expect(() => {

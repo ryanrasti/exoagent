@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { setPolicyMetadata } from '../meta.js'
-import { formatCodeMessage, isSafeMemberRaw, Value } from './utils.js'
+import { formatCodeMessage, isSafeMemberRaw, normalizeTaints, Value } from './utils.js'
+import type { Taint } from './utils.js'
 
-// Helper for order-independent taint comparison
+// Helper for order-independent taint comparison (accepts string[] for convenience)
 const expectTaints = (value: Value, expected: string[]) => {
-  expect(value.getTaints().sort()).toEqual(expected.sort())
+  const actual = value.getTaints().map(t => t[0]).sort()
+  expect(actual).toEqual(expected.sort())
 }
+
+// Helper to check if taints contain a specific taint type
+const taintsContain = (taints: Taint[], type: string) =>
+  taints.some(t => t[0] === type)
 
 describe('value', () => {
   it('stores raw and taints', () => {
     const v = Value.of(42, ['a'])
     expect(v.raw).toBe(42)
-    expect(v.getTaints()).toEqual(['a'])
+    expect(v.getTaints()).toEqual([['a', {}]])
   })
 
   it('withTaints merges and returns new Value', () => {
@@ -27,15 +33,16 @@ describe('value', () => {
     expect(v.withTaints([])).toBe(v)
   })
 
-  it('value.mergeTaints deduplicates', () => {
+  it('value.mergeTaints concatenates (no dedup - different params means different taint)', () => {
     const a = Value.of(1, ['x', 'y'])
     const b = Value.of(2, ['y', 'z'])
-    expect(Value.mergeTaints(a, b)).toEqual(['x', 'y', 'z'])
+    // No deduplication - all taints kept separate
+    expect(Value.mergeTaints(a, b)).toEqual([['x', {}], ['y', {}], ['y', {}], ['z', {}]])
   })
 
   it('value.mergeTaints skips undefined', () => {
     const a = Value.of(1, ['a'])
-    expect(Value.mergeTaints(a, undefined)).toEqual(['a'])
+    expect(Value.mergeTaints(a, undefined)).toEqual([['a', {}]])
   })
 
   it('value.getTaints returns [] for non-Value', () => {
@@ -326,7 +333,7 @@ describe('Value.asAwaitable', () => {
     const v = Value.of(promise, ['taint'])
     const result = await v.asAwaitable()
     expect(result.raw).toBe(42)
-    expect(result.getTaints()).toContain('taint')
+    expect(taintsContain(result.getTaints(), 'taint')).toBe(true)
   })
 })
 
@@ -351,8 +358,8 @@ describe('Value.of wrapping behavior', () => {
     const outer = Value.of({ value: inner }, ['outer'])
     const raw = outer.raw as Record<string, Value>
     // Deep behavior: inner value gets outer taints merged
-    expect(raw.value.getTaints()).toContain('inner')
-    expect(raw.value.getTaints()).toContain('outer')
+    expect(taintsContain(raw.value.getTaints(), 'inner')).toBe(true)
+    expect(taintsContain(raw.value.getTaints(), 'outer')).toBe(true)
   })
 
   it('preserves existing Value instances with shallow option', () => {
@@ -360,8 +367,8 @@ describe('Value.of wrapping behavior', () => {
     const outer = Value.of({ value: inner }, ['outer'], { shallow: true })
     const raw = outer.raw as Record<string, Value>
     expect(raw.value).toBe(inner)
-    expect(raw.value.getTaints()).toContain('inner')
-    expect(raw.value.getTaints()).not.toContain('outer')
+    expect(taintsContain(raw.value.getTaints(), 'inner')).toBe(true)
+    expect(taintsContain(raw.value.getTaints(), 'outer')).toBe(false)
   })
 
   it('returns same Value with merged taints if passed a Value', () => {
@@ -375,7 +382,9 @@ describe('Value.of wrapping behavior', () => {
 describe('Value.toString', () => {
   it('formats value with raw and taints', () => {
     const v = Value.of(42, ['a', 'b'])
-    expect(v.toString()).toBe('Value(raw: 42, taints: a, b)')
+    // toString now shows tuple format
+    expect(v.toString()).toContain('Value(raw: 42')
+    expect(v.toString()).toContain('taints:')
   })
 
   it('handles objects in toString', () => {

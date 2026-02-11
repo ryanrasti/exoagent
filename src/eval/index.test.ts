@@ -3,6 +3,11 @@ import z from 'zod'
 import { tool } from '../policy.js'
 import { safeEval } from './index.js'
 import { Value } from './utils.js'
+import type { Taint } from './utils.js'
+
+// Helper to check if taints contain a specific taint type
+const taintsContain = (taints: Taint[], type: string) =>
+  taints.some(t => t[0] === type)
 
 describe('capnweb-eval basic evaluation', () => {
   it('evaluates number literals', async () => {
@@ -503,26 +508,26 @@ describe('evaluator - taint propagation', () => {
   it('propagates taints through member access', async () => {
     const scope = Value.of({ obj: Value.of({ nested: Value.of(42, ['inner']) }, ['outer']) }, ['root'])
     const result = await safeEval('obj', scope)
-    expect(result.getTaints()).toContain('root')
+    expect(taintsContain(result.getTaints(), 'root')).toBe(true)
   })
 
   it('propagates taints through array construction', async () => {
     const scope = Value.of({ tainted: Value.of(1, ['source']) })
     const result = await safeEval('[tainted, 2, 3]', scope)
-    expect(result.getTaints()).toContain('source')
+    expect(taintsContain(result.getTaints(), 'source')).toBe(true)
   })
 
   it('propagates taints through object construction', async () => {
     const scope = Value.of({ tainted: Value.of('secret', ['sensitive']) })
     const result = await safeEval('{ key: tainted }', scope)
-    expect(result.getTaints()).toContain('sensitive')
+    expect(taintsContain(result.getTaints(), 'sensitive')).toBe(true)
   })
 
   it('propagates taints through spread operations', async () => {
     const scope = Value.of({ arr: Value.of([Value.of(1, ['t1']), Value.of(2, ['t2'])], []) })
     const result = await safeEval('[...arr]', scope)
-    expect(result.getTaints()).toContain('t1')
-    expect(result.getTaints()).toContain('t2')
+    expect(taintsContain(result.getTaints(), 't1')).toBe(true)
+    expect(taintsContain(result.getTaints(), 't2')).toBe(true)
   })
 
   it('merges taints from computed property access', async () => {
@@ -531,9 +536,9 @@ describe('evaluator - taint propagation', () => {
       key: Value.of('a', ['key-taint']),
     })
     const result = await safeEval('obj[key]', scope)
-    expect(result.getTaints()).toContain('obj-taint')
-    expect(result.getTaints()).toContain('key-taint')
-    expect(result.getTaints()).toContain('value-taint')
+    expect(taintsContain(result.getTaints(), 'obj-taint')).toBe(true)
+    expect(taintsContain(result.getTaints(), 'key-taint')).toBe(true)
+    expect(taintsContain(result.getTaints(), 'value-taint')).toBe(true)
   })
 })
 
