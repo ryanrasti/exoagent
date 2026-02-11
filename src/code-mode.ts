@@ -2,7 +2,7 @@ import type { ToolExecutionOptions } from 'ai'
 import type { PolicyChecker } from './eval/utils'
 import type { Policy } from './policy'
 import { z } from 'zod'
-import { safeEval, Value } from './eval'
+import { normalizeTaint, safeEval, Value } from './eval'
 
 export type CodeModeOptions<Sinks extends readonly string[]> = {
   api: object
@@ -14,7 +14,7 @@ export type CodeModeOptions<Sinks extends readonly string[]> = {
 
 export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<Sinks>) {
   const { api, policy, dts = '', outputSink } = opts
-  const checkPolicy: PolicyChecker = policy.createUnwrapChecker(outputSink)
+  const checkPolicy: PolicyChecker = policy.createUnwrapChecker([normalizeTaint(outputSink)])
 
   return {
     description: `Execute code using the following API. You MUST call this tool to run any code - never output code directly in your response.

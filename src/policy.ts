@@ -1,10 +1,26 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { Taint, ValueOptions } from './eval/utils'
+import type { Taint, TaintInput, TaintsInput, ValueOptions } from './eval/utils'
 import z from 'zod'
-import { Value } from './eval'
+import { normalizeTaint, normalizeTaints, Value } from './eval'
 import { getPolicyMetadata, setPolicyMetadata } from './meta'
 
-export type ToolProps<Sinks extends string[], Sources extends string[]> = { source?: Sources[number] | readonly Sources[number][], sink?: Sinks[number] | readonly Sinks[number][] }
+// Static source/sink: just taint type names
+// Dynamic source: function that takes return value and produces taints
+// Dynamic sink: function that takes args and produces taints
+export type SourceAnnotation<Sources extends string[]> =
+  | Sources[number]
+  | readonly Sources[number][]
+  | ((retVal: unknown) => TaintsInput)
+
+export type SinkAnnotation<Sinks extends string[]> =
+  | Sinks[number]
+  | readonly Sinks[number][]
+  | ((...args: unknown[]) => TaintsInput)
+
+export type ToolProps<Sinks extends string[], Sources extends string[]> = {
+  source?: SourceAnnotation<Sources>
+  sink?: SinkAnnotation<Sinks>
+}
 
 const flattenArray = <T>(array: T | readonly T[]): T[] => {
   return Array.isArray(array) ? array : [array as T]
@@ -31,10 +47,16 @@ const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: In
   return ret as Inputs
 }
 
-type PolicyDenyRule = {
+// Simple deny rule: match by taint type names
+type SimpleDenyRule = {
   sources: string[]
   sinks: string[]
 }
+
+// Callback deny rule: full control over allow/deny decision
+type CallbackDenyRule = (source: Taint, sink: Taint) => 'allow' | 'deny'
+
+type PolicyDenyRule = SimpleDenyRule | CallbackDenyRule
 
 export class Policy<Sources extends readonly string[] = [], Sinks extends readonly string[] = []> {
   constructor(private sources: Sources, private sinks: Sinks, private denyRules: PolicyDenyRule[] = []) {
@@ -63,12 +85,24 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     }
   }
 
-  private checkDenyRules(incomingTaints: readonly Taint[], sinks: Sinks): void {
+  private checkDenyRules(incomingTaints: readonly Taint[], sinkTaints: readonly Taint[]): void {
     for (const denyRule of this.denyRules) {
-      const hasMatchingSource = denyRule.sources.some(source => incomingTaints.some(([type]) => type === source))
-      const hasMatchingSink = denyRule.sinks.some(sink => sinks.includes(sink))
-      if (hasMatchingSource && hasMatchingSink) {
-        throw new Error(`Method call denied: ${denyRule.sources.join(', ')} are not allowed to be used as sources and ${denyRule.sinks.join(', ')} are not allowed to be used as sinks`)
+      if (typeof denyRule === 'function') {
+        // Callback deny rule: check every source/sink pair
+        for (const source of incomingTaints) {
+          for (const sink of sinkTaints) {
+            if (denyRule(source, sink) === 'deny') {
+              throw new Error(`Method call denied: source ${source[0]} cannot flow to sink ${sink[0]}`)
+            }
+          }
+        }
+      } else {
+        // Simple deny rule: match by type names
+        const hasMatchingSource = denyRule.sources.some(source => incomingTaints.some(([type]) => type === source))
+        const hasMatchingSink = denyRule.sinks.some(sink => sinkTaints.some(([type]) => type === sink))
+        if (hasMatchingSource && hasMatchingSink) {
+          throw new Error(`Method call denied: ${denyRule.sources.join(', ')} are not allowed to be used as sources and ${denyRule.sinks.join(', ')} are not allowed to be used as sinks`)
+        }
       }
     }
   }
@@ -76,20 +110,30 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
   /**
    * Creates a policy checker for use with Value.unwrap().
    * Checks that the given taints don't violate any deny rules for the specified sink.
-   * @param sink - The sink(s) to check against (e.g., 'output' for sandbox boundary)
+   * @param sinkTaints - The sink taint(s) to check against
    */
-  createUnwrapChecker(sink: Sinks[number] | readonly Sinks[number][]): (taints: readonly Taint[], path: string) => void {
-    const sinks = flattenArray(sink)
-    this.checkSinkTaintsConfigured(sinks)
+  createUnwrapChecker(sinkTaints: readonly Taint[]): (taints: readonly Taint[], path: string) => void {
+    this.checkSinkTaintsConfigured(sinkTaints.map(([type]) => type))
 
     return (taints: readonly Taint[], path: string) => {
       this.checkIncomingTaintsConfigured(taints)
       for (const denyRule of this.denyRules) {
-        const hasMatchingSource = denyRule.sources.some(source => taints.some(([type]) => type === source))
-        const hasMatchingSink = denyRule.sinks.some(s => sinks.includes(s))
-        if (hasMatchingSource && hasMatchingSink) {
-          const taintTypes = taints.map(([type]) => type)
-          throw new Error(`Policy violation at ${path}: taints [${taintTypes.join(', ')}] cannot flow to sink [${sinks.join(', ')}]`)
+        if (typeof denyRule === 'function') {
+          for (const source of taints) {
+            for (const sink of sinkTaints) {
+              if (denyRule(source, sink) === 'deny') {
+                throw new Error(`Policy violation at ${path}: source ${source[0]} cannot flow to sink ${sink[0]}`)
+              }
+            }
+          }
+        } else {
+          const hasMatchingSource = denyRule.sources.some(source => taints.some(([type]) => type === source))
+          const hasMatchingSink = denyRule.sinks.some(s => sinkTaints.some(([type]) => type === s))
+          if (hasMatchingSource && hasMatchingSink) {
+            const taintTypes = taints.map(([type]) => type)
+            const sinkTypes = sinkTaints.map(([type]) => type)
+            throw new Error(`Policy violation at ${path}: taints [${taintTypes.join(', ')}] cannot flow to sink [${sinkTypes.join(', ')}]`)
+          }
         }
       }
     }
@@ -104,25 +148,41 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
     if (!meta) {
       throw new Error(`Method ${options.propertyName} does not have any @tool annotations: ${options.parent.raw}`)
     }
-    const toolProps = meta[options.propertyName]
+    const toolProps = meta[options.propertyName] as ToolProps<string[], string[]> | undefined
     if (!toolProps) {
       throw new Error(`Method ${thisVal.raw}.${method.raw} is not a tool`)
     }
-    const sinks = flattenArray(toolProps.sink ?? [])
-    const sources = flattenArray(toolProps.source ?? [])
-    this.checkSinkTaintsConfigured(sinks)
-    this.checkSourceTypesConfigured(sources)
 
+    // Unwrap args first (needed for dynamic sink computation)
+    const unwrappedArgs = args.map(a => a.unwrap(() => {}))
+
+    // Compute sink taints (static or dynamic)
+    const sinkTaints: Taint[] = typeof toolProps.sink === 'function'
+      ? normalizeTaints(toolProps.sink(...unwrappedArgs))
+      : normalizeTaints(flattenArray(toolProps.sink ?? []))
+
+    // Check sink taint types are configured
+    this.checkSinkTaintsConfigured(sinkTaints.map(([type]) => type))
+
+    // Check incoming taints against deny rules
     const incomingTaints = Value.mergeTaints(thisVal, ...args)
     this.checkIncomingTaintsConfigured(incomingTaints)
-    this.checkDenyRules(incomingTaints, sinks)
+    this.checkDenyRules(incomingTaints, sinkTaints)
 
-    // Unwrap args with policy check against this tool's sinks
-    const checker = sinks.length > 0 ? this.createUnwrapChecker(sinks) : () => {}
-    const unwrappedArgs = args.map(a => a.unwrap(checker))
+    // Execute the method
     const rawResult = Reflect.apply(method.raw, thisVal.raw, unwrappedArgs)
+
+    // Compute source taints (static or dynamic based on return value)
+    const sourceTaints: Taint[] = typeof toolProps.source === 'function'
+      ? normalizeTaints(toolProps.source(rawResult))
+      : normalizeTaints(flattenArray(toolProps.source ?? []))
+
+    // Check source taint types are configured
+    this.checkSourceTypesConfigured(sourceTaints.map(([type]) => type))
+
+    // Build result with merged incoming taints + source taints
     const result = Value.of(rawResult, Value.mergeTaints(thisVal, ...args))
-    return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sources])
+    return result.withTaints([...Value.mergeTaints(thisVal, ...args), ...sourceTaints])
   }
 }
 

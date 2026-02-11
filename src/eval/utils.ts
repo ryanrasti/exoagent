@@ -11,7 +11,21 @@ export type Taint = [string, TaintParams]
 
 // Input types for convenience - strings are normalized to tuples
 export type TaintInput = string | Taint
-export type TaintsInput = readonly TaintInput[]
+// TaintsInput can be:
+// - A single string: 'email' -> [['email', {}]]
+// - A single tuple: ['email', {principals: [...]}] -> [['email', {principals: [...]}]]
+// - An array of strings/tuples: ['email', ['calendar', {}]] -> [['email', {}], ['calendar', {}]]
+export type TaintsInput = TaintInput | readonly TaintInput[]
+
+/** Check if value is a single Taint tuple (not an array of taints) */
+function isSingleTaint(t: TaintsInput): t is Taint {
+  return Array.isArray(t)
+    && t.length === 2
+    && typeof t[0] === 'string'
+    && typeof t[1] === 'object'
+    && t[1] !== null
+    && !Array.isArray(t[1])
+}
 
 /** Normalize a single taint input to tuple form */
 export function normalizeTaint(t: TaintInput): Taint {
@@ -20,7 +34,16 @@ export function normalizeTaint(t: TaintInput): Taint {
 
 /** Normalize taint inputs to tuple array */
 export function normalizeTaints(taints: TaintsInput): Taint[] {
-  return taints.map(normalizeTaint)
+  // Single string: 'email' -> [['email', {}]]
+  if (typeof taints === 'string') {
+    return [[taints, {}]]
+  }
+  // Single tuple: ['email', {principals}] -> [['email', {principals}]]
+  if (isSingleTaint(taints)) {
+    return [taints]
+  }
+  // Array of inputs
+  return (taints as readonly TaintInput[]).map(normalizeTaint)
 }
 
 const checkSafeMember = (member: string) => {

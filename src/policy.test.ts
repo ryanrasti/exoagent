@@ -656,3 +656,195 @@ describe('policy - error messages', () => {
     }).toThrow(/does not have any @tool annotations/)
   })
 })
+
+describe('policy - dynamic annotations (email example)', () => {
+  const emailExo = new ExoAgent(['email'] as const, ['email'] as const)
+
+  // Email type for testing
+  type Email = {
+    id: string
+    from: string
+    to: string[]
+    cc: string[]
+    bcc: string[]
+    subject: string
+    body: string
+  }
+
+  class EmailToolset {
+    // Dynamic source: annotate with principals from email headers
+    @emailExo.tool(z.string(), {
+      source: (email: Email) => [
+        'email',
+        { principals: [email.from, ...email.to, ...email.cc, ...email.bcc] },
+      ],
+    })
+    getEmail(id: string): Email {
+      // Mock email data
+      return {
+        id,
+        from: 'alice@example.com',
+        to: ['bob@example.com'],
+        cc: ['charlie@example.com'],
+        bcc: [],
+        subject: 'Test',
+        body: 'Hello',
+      }
+    }
+
+    // Dynamic sink: annotate with recipients
+    @emailExo.tool(
+      z.object({
+        to: z.array(z.string()),
+        cc: z.array(z.string()).optional(),
+        bcc: z.array(z.string()).optional(),
+        subject: z.string(),
+        body: z.string(),
+      }),
+      {
+        sink: ({ to, cc, bcc }: { to: string[], cc?: string[], bcc?: string[] }) => [
+          'email',
+          { principals: [...to, ...(cc ?? []), ...(bcc ?? [])] },
+        ],
+      },
+    )
+    sendEmail(opts: { to: string[], cc?: string[], bcc?: string[], subject: string, body: string }) {
+      return `sent to ${opts.to.join(', ')}`
+    }
+  }
+
+  // Helper: check if all recipients are in allowed principals
+  const isSubset = (recipients: string[], allowed: string[]) =>
+    recipients.every(r => allowed.includes(r))
+
+  it('allows sending email to original recipients (principals subset)', () => {
+    const toolset = new EmailToolset()
+    const policy = emailExo.policy([
+      // Callback deny rule: deny if recipients are not subset of source principals
+      (source, sink) => {
+        if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
+        const allowed = source[1].principals ?? []
+        const recipients = sink[1].principals ?? []
+        return isSubset(recipients, allowed) ? 'allow' : 'deny'
+      },
+    ])
+
+    // Get email from alice to bob (cc: charlie)
+    const emailResult = policy.doStubCall(
+      { propertyName: 'getEmail', parent: Value.of(toolset, []) },
+      Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
+      Value.of(toolset, []),
+      [Value.of('123', [])],
+    )
+
+    // Verify email has correct principals
+    const emailTaint = emailResult.getTaints().find(([type]) => type === 'email')
+    expect(emailTaint).toBeDefined()
+    expect(emailTaint![1].principals).toContain('alice@example.com')
+    expect(emailTaint![1].principals).toContain('bob@example.com')
+    expect(emailTaint![1].principals).toContain('charlie@example.com')
+
+    // Send to bob only - should be allowed (bob is in principals)
+    const sendResult = policy.doStubCall(
+      { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
+      Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
+      Value.of(toolset, []),
+      [Value.of({ to: ['bob@example.com'], subject: 'Re: Test', body: 'Reply' }, emailResult.getTaints())],
+    )
+
+    expect(sendResult.raw).toBe('sent to bob@example.com')
+  })
+
+  it('denies sending email to unauthorized recipients', () => {
+    const toolset = new EmailToolset()
+    const policy = emailExo.policy([
+      (source, sink) => {
+        if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
+        const allowed = source[1].principals ?? []
+        const recipients = sink[1].principals ?? []
+        return isSubset(recipients, allowed) ? 'allow' : 'deny'
+      },
+    ])
+
+    // Get email from alice to bob
+    const emailResult = policy.doStubCall(
+      { propertyName: 'getEmail', parent: Value.of(toolset, []) },
+      Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
+      Value.of(toolset, []),
+      [Value.of('123', [])],
+    )
+
+    // Try to send to eve - should be denied (eve not in principals)
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
+        Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
+        Value.of(toolset, []),
+        [Value.of({ to: ['eve@example.com'], subject: 'Forwarded', body: 'Secret' }, emailResult.getTaints())],
+      )
+    }).toThrow(/Method call denied/)
+  })
+
+  it('denies when any recipient is unauthorized', () => {
+    const toolset = new EmailToolset()
+    const policy = emailExo.policy([
+      (source, sink) => {
+        if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
+        const allowed = source[1].principals ?? []
+        const recipients = sink[1].principals ?? []
+        return isSubset(recipients, allowed) ? 'allow' : 'deny'
+      },
+    ])
+
+    const emailResult = policy.doStubCall(
+      { propertyName: 'getEmail', parent: Value.of(toolset, []) },
+      Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
+      Value.of(toolset, []),
+      [Value.of('123', [])],
+    )
+
+    // Try to send to bob AND eve - should be denied (eve not in principals)
+    expect(() => {
+      policy.doStubCall(
+        { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
+        Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
+        Value.of(toolset, []),
+        [Value.of({ to: ['bob@example.com', 'eve@example.com'], subject: 'FW', body: 'Hey' }, emailResult.getTaints())],
+      )
+    }).toThrow(/Method call denied/)
+  })
+
+  it('allows sending to all original recipients (to, cc, bcc)', () => {
+    const toolset = new EmailToolset()
+    const policy = emailExo.policy([
+      (source, sink) => {
+        if (source[0] !== 'email' || sink[0] !== 'email') return 'allow'
+        const allowed = source[1].principals ?? []
+        const recipients = sink[1].principals ?? []
+        return isSubset(recipients, allowed) ? 'allow' : 'deny'
+      },
+    ])
+
+    const emailResult = policy.doStubCall(
+      { propertyName: 'getEmail', parent: Value.of(toolset, []) },
+      Value.of(toolset.getEmail, []) as Value<(id: string) => Email>,
+      Value.of(toolset, []),
+      [Value.of('123', [])],
+    )
+
+    // Send to all original recipients - should be allowed
+    const sendResult = policy.doStubCall(
+      { propertyName: 'sendEmail', parent: Value.of(toolset, []) },
+      Value.of(toolset.sendEmail, []) as Value<(opts: any) => string>,
+      Value.of(toolset, []),
+      [Value.of({
+        to: ['alice@example.com', 'bob@example.com'],
+        cc: ['charlie@example.com'],
+        subject: 'Reply All',
+        body: 'Thanks',
+      }, emailResult.getTaints())],
+    )
+
+    expect(sendResult.raw).toBe('sent to alice@example.com, bob@example.com')
+  })
+})
