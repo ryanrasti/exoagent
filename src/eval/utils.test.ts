@@ -33,11 +33,11 @@ describe('value', () => {
     expect(v.withTaints([])).toBe(v)
   })
 
-  it('value.mergeTaints concatenates (no dedup - different params means different taint)', () => {
+  it('value.mergeTaints concatenates and deduplicates by structural equality', () => {
     const a = Value.of(1, ['x', 'y'])
     const b = Value.of(2, ['y', 'z'])
-    // No deduplication - all taints kept separate
-    expect(Value.mergeTaints(a, b)).toEqual([['x', {}], ['y', {}], ['y', {}], ['z', {}]])
+    // Duplicates are removed based on structural equality
+    expect(Value.mergeTaints(a, b)).toEqual([['x', {}], ['y', {}], ['z', {}]])
   })
 
   it('value.mergeTaints skips undefined', () => {

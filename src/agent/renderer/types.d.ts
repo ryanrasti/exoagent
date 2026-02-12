@@ -10,13 +10,30 @@ declare global {
   /** Taint tuple: [type, params] */
   type Taint = [string, { principals?: string[] }]
 
-  /** A turn in the conversation history */
-  type Turn =
-    | { role: 'user', content: string }
-    | { role: 'assistant', response: string, data: unknown, taints: Taint[] }
+  /** Thread metadata */
+  interface Thread {
+    id: string
+    title: string | null
+    pinned: number
+    status: string
+    created_at: number | null
+    updated_at: number | null
+  }
+
+  /** Message in a thread */
+  interface Message {
+    id: string
+    thread_id: string
+    role: 'user' | 'assistant'
+    content: string
+    data: unknown
+    taints: Taint[]
+    code: string | null
+    created_at: number | null
+  }
 
   /** Result from a chat turn */
-  interface TurnResult {
+  interface ChatResult {
     response: string
     data: unknown
     taints: Taint[]
@@ -30,7 +47,13 @@ declare global {
       setGoogleOAuthClient: (json: string) => Promise<void>
       startGoogleOAuth: () => Promise<boolean>
       clearGoogleTokens: () => Promise<void>
-      chat: (message: string, history: Turn[]) => Promise<TurnResult>
+      listThreads: () => Promise<Thread[]>
+      createThread: () => Promise<Thread>
+      getThread: (threadId: string) => Promise<{ thread: Thread, messages: Message[] }>
+      chat: (threadId: string, message: string) => Promise<ChatResult>
+      pinThread: (threadId: string) => Promise<void>
+      unpinThread: (threadId: string) => Promise<void>
+      deleteThread: (threadId: string) => Promise<void>
     }
   }
 }

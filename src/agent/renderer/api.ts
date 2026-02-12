@@ -58,8 +58,38 @@ export const api = {
     return httpCall('secrets:clearGoogleTokens')
   },
 
-  chat: (message: string, history: Turn[]): Promise<TurnResult> => {
-    if (isElectron) return window.api.chat(message, history)
-    return httpCall('chat', message, history)
+  listThreads: (): Promise<Thread[]> => {
+    if (isElectron) return window.api.listThreads()
+    return httpCall('threads:list')
+  },
+
+  createThread: (): Promise<Thread> => {
+    if (isElectron) return window.api.createThread()
+    return httpCall('threads:create')
+  },
+
+  getThread: (threadId: string): Promise<{ thread: Thread, messages: Message[] }> => {
+    if (isElectron) return window.api.getThread(threadId)
+    return httpCall('threads:get', threadId)
+  },
+
+  chat: (threadId: string, message: string): Promise<ChatResult> => {
+    if (isElectron) return window.api.chat(threadId, message)
+    return httpCall('chat', threadId, message)
+  },
+
+  pinThread: (threadId: string): Promise<void> => {
+    if (isElectron) return window.api.pinThread(threadId)
+    return httpCall('threads:pin', threadId)
+  },
+
+  unpinThread: (threadId: string): Promise<void> => {
+    if (isElectron) return window.api.unpinThread(threadId)
+    return httpCall('threads:unpin', threadId)
+  },
+
+  deleteThread: (threadId: string): Promise<void> => {
+    if (isElectron) return window.api.deleteThread(threadId)
+    return httpCall('threads:delete', threadId)
   },
 }

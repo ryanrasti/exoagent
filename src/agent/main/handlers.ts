@@ -14,7 +14,25 @@ import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '..
 import { CalendarClient } from '../google/calendar'
 import { GmailClient } from '../google/gmail'
 import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
+import { addMessage, createThread, deleteThread, getMessages, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
 import { handle } from './transport'
+
+/** Generate a short title for a thread based on the user's first message */
+async function generateThreadTitle(threadId: string, userMessage: string, apiKey: string): Promise<void> {
+  const google = createGoogleGenerativeAI({ apiKey })
+
+  const result = await generateText({
+    model: google('gemini-2.0-flash'),
+    system: 'Generate a very short title (3-6 words max) summarizing the user\'s request. Reply with ONLY the title, no quotes or punctuation.',
+    messages: [{ role: 'user', content: userMessage }],
+    maxRetries: 0,
+  })
+
+  const title = result.text.trim()
+  if (title) {
+    await updateThreadTitle(threadId, title)
+  }
+}
 
 /** A turn in the conversation history */
 export type Turn =
@@ -167,6 +185,8 @@ IMPORTANT:
   - "response": The message to show the user
   - "data": Any data you want to remember for future turns (not shown to user)
 - If you don't need to call any APIs, still use the execute tool with simple code that returns the response.
+- DO NOT use array methods like .map(), .filter(), .reduce(), .forEach(), etc. Use for loops instead.
+- DO NOT use object methods like Object.keys(), Object.values(), Object.entries(), etc. Use for...in loops instead.
 
 When you receive previous assistant turns, they will contain the "response" that was shown to the user and "data" that you stored. Use the "data" to maintain context across turns.
 `
@@ -256,8 +276,39 @@ export function registerHandlers(): void {
     await deleteSecret('googleTokens')
   })
 
-  // Chat - uses the generic llm() function with gmail/calendar config
-  handle('chat', async (message: string, history: Turn[]) => {
+  // Thread management
+  handle('threads:list', async () => {
+    return listThreads()
+  })
+
+  handle('threads:create', async () => {
+    const id = crypto.randomUUID()
+    return createThread(id)
+  })
+
+  handle('threads:get', async (threadId: string) => {
+    const thread = await getThread(threadId)
+    if (!thread) {
+      throw new Error(`Thread not found: ${threadId}`)
+    }
+    const messages = await getMessages(threadId)
+    return { thread, messages }
+  })
+
+  handle('threads:pin', async (threadId: string) => {
+    await pinThread(threadId)
+  })
+
+  handle('threads:unpin', async (threadId: string) => {
+    await unpinThread(threadId)
+  })
+
+  handle('threads:delete', async (threadId: string) => {
+    await deleteThread(threadId)
+  })
+
+  // Chat - now takes threadId instead of history
+  handle('chat', async (threadId: string, message: string) => {
     const apiKey = await getSecret('geminiApiKey')
     if (!apiKey) {
       throw new Error('API key not configured')
@@ -270,6 +321,24 @@ export function registerHandlers(): void {
     if (!clientJson || !tokensJson) {
       throw new Error('Google APIs not configured. Please set up OAuth first.')
     }
+
+    // Get or create thread
+    let thread = await getThread(threadId)
+    const needsTitle = !thread || !thread.title
+    if (!thread) {
+      thread = await createThread(threadId)
+    }
+
+    // Get existing messages and convert to turns
+    const existingMessages = await getMessages(threadId)
+    const history = messagesToTurns(existingMessages)
+
+    // Save user message
+    await addMessage(threadId, {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: message,
+    })
 
     const tokens = JSON.parse(tokensJson)
     const authClient = createAuthenticatedClient(clientJson, tokens)
@@ -313,6 +382,26 @@ export function registerHandlers(): void {
     // Unwrap the Value for the response (top-level, no further policy check needed)
     const taints = result.getTaints()
     const { response, data, code } = result.unwrap(() => {}) as { response: string, data: unknown, code: string }
+
+    // Save assistant message
+    await addMessage(threadId, {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: response,
+      data,
+      taints,
+      code,
+    })
+
+    // Generate title for threads without one
+    if (needsTitle) {
+      try {
+        await generateThreadTitle(threadId, message, apiKey)
+      } catch (err) {
+        console.error('[chat] Failed to generate thread title:', err)
+      }
+    }
+
     return { response, data, taints, code }
   })
 }
