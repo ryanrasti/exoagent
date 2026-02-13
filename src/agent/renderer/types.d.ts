@@ -10,12 +10,20 @@ declare global {
   /** Taint tuple: [type, params] */
   type Taint = [string, { principals?: string[] }]
 
+  /** A redaction marker for content moved to a subthread */
+  interface Redaction {
+    subthread_id: string
+    taints: Taint[]
+  }
+
   /** Thread metadata */
   interface Thread {
     id: string
+    parent_id: string | null
     title: string | null
     pinned: number
     status: string
+    taints: Taint[]
     created_at: number | null
     updated_at: number | null
   }
@@ -38,6 +46,11 @@ declare global {
     data: unknown
     taints: Taint[]
     code: string
+    /** If the response was forked to a subthread */
+    forked?: {
+      subthreadId: string
+      taints: Taint[]
+    }
   }
 
   interface Window {
@@ -50,6 +63,8 @@ declare global {
       listThreads: () => Promise<Thread[]>
       createThread: () => Promise<Thread>
       getThread: (threadId: string) => Promise<{ thread: Thread, messages: Message[] }>
+      getSubthreads: (parentId: string) => Promise<Thread[]>
+      notifyMainThread: (subthreadId: string, messageContent: string) => Promise<{ success: boolean, parentId: string }>
       chat: (threadId: string, message: string) => Promise<ChatResult>
       pinThread: (threadId: string) => Promise<void>
       unpinThread: (threadId: string) => Promise<void>

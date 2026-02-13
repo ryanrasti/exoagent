@@ -13,9 +13,11 @@ export interface Config {
 
 export interface Threads {
   id: string
+  parent_id: string | null
   title: string | null
   pinned: Generated<number>
   status: Generated<string>
+  taints: Generated<string>
   created_at: Generated<number | null>
   updated_at: Generated<number | null>
 }

@@ -3,9 +3,11 @@ import type { Taint } from '../../../eval/utils'
 
 export interface ThreadRow {
   id: string
+  parent_id: string | null
   title: string | null
   pinned: number
   status: string
+  taints: Taint[]
   created_at: number | null
   updated_at: number | null
 }
@@ -21,37 +23,94 @@ export interface MessageRow {
   created_at: number | null
 }
 
-/** Create a new thread */
+/** Create a new main thread */
 export async function createThread(id: string, title?: string): Promise<ThreadRow> {
   const db = await getDb()
   const now = Date.now()
 
   await db.insertInto('threads').values({
     id,
+    parent_id: null,
     title: title ?? null,
+    taints: '[]',
     status: 'active',
     created_at: now,
     updated_at: now,
   }).execute()
 
-  return { id, title: title ?? null, pinned: 0, status: 'active', created_at: now, updated_at: now }
+  return { id, parent_id: null, title: title ?? null, pinned: 0, status: 'active', taints: [], created_at: now, updated_at: now }
+}
+
+/** Create a subthread forked from a parent thread */
+export async function createSubthread(
+  id: string,
+  parentId: string,
+  taints: Taint[],
+  title?: string,
+): Promise<ThreadRow> {
+  const db = await getDb()
+  const now = Date.now()
+
+  await db.insertInto('threads').values({
+    id,
+    parent_id: parentId,
+    title: title ?? null,
+    taints: JSON.stringify(taints),
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  }).execute()
+
+  return { id, parent_id: parentId, title: title ?? null, pinned: 0, status: 'active', taints, created_at: now, updated_at: now }
+}
+
+/** Get all subthreads for a parent thread */
+export async function getSubthreads(parentId: string): Promise<ThreadRow[]> {
+  const db = await getDb()
+  const rows = await db.selectFrom('threads')
+    .selectAll()
+    .where('parent_id', '=', parentId)
+    .orderBy('created_at', 'asc')
+    .execute()
+
+  return rows.map(row => ({
+    ...row,
+    taints: JSON.parse(row.taints),
+  }))
+}
+
+/** Add taints to an existing thread (for accumulation in subthreads) */
+export async function addTaintsToThread(id: string, newTaints: Taint[]): Promise<void> {
+  const db = await getDb()
+  const thread = await getThread(id)
+  if (!thread) throw new Error(`Thread ${id} not found`)
+
+  const merged = [...thread.taints, ...newTaints]
+  await db.updateTable('threads')
+    .set({ taints: JSON.stringify(merged), updated_at: Date.now() })
+    .where('id', '=', id)
+    .execute()
 }
 
 /** Get a thread by ID */
 export async function getThread(id: string): Promise<ThreadRow | null> {
   const db = await getDb()
   const row = await db.selectFrom('threads').selectAll().where('id', '=', id).executeTakeFirst()
-  return row ?? null
+  if (!row) return null
+  return { ...row, taints: JSON.parse(row.taints) }
 }
 
-/** Get all threads ordered by pinned first, then most recent */
+/** Get all main threads (no parent) ordered by pinned first, then most recent */
 export async function listThreads(): Promise<ThreadRow[]> {
   const db = await getDb()
-  return db.selectFrom('threads')
+  const rows = await db.selectFrom('threads')
     .selectAll()
+    .where('parent_id', 'is', null)
     .orderBy('pinned', 'desc')
     .orderBy('updated_at', 'desc')
     .execute()
+
+  return rows.map(row => ({ ...row, taints: JSON.parse(row.taints) }))
 }
 
 /** Pin a thread */

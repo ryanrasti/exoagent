@@ -14,7 +14,7 @@ import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '..
 import { CalendarClient } from '../google/calendar'
 import { GmailClient } from '../google/gmail'
 import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
-import { addMessage, createThread, deleteThread, getMessages, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
+import { addMessage, addTaintsToThread, createThread, createSubthread, deleteThread, getMessages, getSubthreads, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
 import { handle } from './transport'
 
 /** Generate a short title for a thread based on the user's first message */
@@ -38,6 +38,20 @@ async function generateThreadTitle(threadId: string, userMessage: string, apiKey
 export type Turn =
   | { role: 'user', content: string }
   | { role: 'assistant', response: string, data: unknown, taints: Taint[] }
+
+/** A redaction marker for content moved to a subthread */
+export type Redaction = {
+  subthread_id: string
+  taints: Taint[]
+}
+
+/** Format taints for display in redaction marker */
+function formatTaintsForContext(taints: Taint[]): string {
+  return taints.map(([type, params]) => {
+    const principals = params.principals?.join(',') ?? ''
+    return principals ? `${type}{principals:${principals}}` : type
+  }).join(' ')
+}
 
 /** Context for an LLM call */
 export type LLMContext = {
@@ -307,6 +321,33 @@ export function registerHandlers(): void {
     await deleteThread(threadId)
   })
 
+  handle('threads:subthreads', async (parentId: string) => {
+    return getSubthreads(parentId)
+  })
+
+  // Notify main thread from subthread - surfaces content with user approval
+  handle('threads:notifyMain', async (subthreadId: string, messageContent: string) => {
+    const thread = await getThread(subthreadId)
+    if (!thread) {
+      throw new Error(`Thread not found: ${subthreadId}`)
+    }
+    if (!thread.parent_id) {
+      throw new Error(`Thread ${subthreadId} is not a subthread`)
+    }
+
+    // Add message to main thread
+    const notificationContent = `From subthread ${subthreadId}:\n${messageContent}`
+    await addMessage(thread.parent_id, {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: notificationContent,
+      data: { fromSubthread: subthreadId },
+      taints: [], // User approved, so no taints on main thread
+    })
+
+    return { success: true, parentId: thread.parent_id }
+  })
+
   // Chat - now takes threadId instead of history
   handle('chat', async (threadId: string, message: string) => {
     const apiKey = await getSecret('geminiApiKey')
@@ -383,7 +424,67 @@ export function registerHandlers(): void {
     const taints = result.getTaints()
     const { response, data, code } = result.unwrap(() => {}) as { response: string, data: unknown, code: string }
 
-    // Save assistant message
+    console.log('[chat] Result taints:', JSON.stringify(taints))
+    console.log('[chat] Thread parent_id:', thread.parent_id)
+    console.log('[chat] Should fork?', thread.parent_id === null && taints.length > 0)
+
+    // Check if we need to fork to a subthread
+    // Fork if: main thread (no parent) AND result has taints
+    if (thread.parent_id === null && taints.length > 0) {
+      console.log('[chat] Forking to subthread...')
+      // Create subthread with the taints
+      const subthreadId = crypto.randomUUID()
+      console.log('[chat] Creating subthread:', subthreadId, 'with taints:', JSON.stringify(taints))
+      await createSubthread(subthreadId, threadId, taints)
+      console.log('[chat] Subthread created successfully')
+
+      // Save the full response in the subthread
+      await addMessage(subthreadId, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: response,
+        data,
+        taints,
+        code,
+      })
+
+      // Create redaction marker for main thread
+      const redaction: Redaction = { subthread_id: subthreadId, taints }
+      const redactedContent = `[subthread:${subthreadId} taints:${formatTaintsForContext(taints)}]`
+
+      // Save redacted message in main thread
+      await addMessage(threadId, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: redactedContent,
+        data: { redaction },
+        taints: [], // Main thread stays clean
+        code,
+      })
+
+      // Generate title for threads without one
+      if (needsTitle) {
+        try {
+          await generateThreadTitle(threadId, message, apiKey)
+        }
+        catch (err) {
+          console.error('[chat] Failed to generate thread title:', err)
+        }
+      }
+
+      console.log('[chat] Returning forked response with redaction')
+      return { response: redactedContent, data: { redaction }, taints: [], code, forked: { subthreadId, taints } }
+    }
+
+    console.log('[chat] No fork needed, saving to current thread')
+
+    // If in a subthread and we have new taints, accumulate them
+    if (thread.parent_id !== null && taints.length > 0) {
+      console.log('[chat] Accumulating taints in subthread:', JSON.stringify(taints))
+      await addTaintsToThread(threadId, taints)
+    }
+
+    // Save message to current thread
     await addMessage(threadId, {
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -397,7 +498,8 @@ export function registerHandlers(): void {
     if (needsTitle) {
       try {
         await generateThreadTitle(threadId, message, apiKey)
-      } catch (err) {
+      }
+      catch (err) {
         console.error('[chat] Failed to generate thread title:', err)
       }
     }

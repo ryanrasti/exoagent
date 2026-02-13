@@ -73,6 +73,16 @@ export const api = {
     return httpCall('threads:get', threadId)
   },
 
+  getSubthreads: (parentId: string): Promise<Thread[]> => {
+    if (isElectron) return window.api.getSubthreads(parentId)
+    return httpCall('threads:subthreads', parentId)
+  },
+
+  notifyMainThread: (subthreadId: string, messageContent: string): Promise<{ success: boolean, parentId: string }> => {
+    if (isElectron) return window.api.notifyMainThread(subthreadId, messageContent)
+    return httpCall('threads:notifyMain', subthreadId, messageContent)
+  },
+
   chat: (threadId: string, message: string): Promise<ChatResult> => {
     if (isElectron) return window.api.chat(threadId, message)
     return httpCall('chat', threadId, message)

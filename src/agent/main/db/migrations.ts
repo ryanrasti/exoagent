@@ -3,12 +3,14 @@ import { Migrator } from 'kysely'
 
 // Import migrations
 import * as m001 from './migrations/001_initial'
+import * as m002 from './migrations/002_subthreads'
 
 // Custom migration provider that uses imported modules
 class StaticMigrationProvider implements MigrationProvider {
   async getMigrations(): Promise<Record<string, Migration>> {
     return {
       '001_initial': m001,
+      '002_subthreads': m002,
     }
   }
 }
