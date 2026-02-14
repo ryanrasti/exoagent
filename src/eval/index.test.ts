@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import z from 'zod'
 import { tool } from '../policy.js'
-import { safeEval } from './index.js'
+import { GlobalScope, safeEval, serializeScope, deserializeScope } from './index.js'
 import { Value } from './utils.js'
 import type { Taint } from './utils.js'
 
@@ -95,8 +95,8 @@ describe('capnweb-eval basic evaluation', () => {
   })
 
   it('creates objects', async () => {
-    expect(await safeEval('{foo: 123, bar: "hello"}', Value.of({}))).toEqual(Value.of({ foo: Value.of(123, []), bar: Value.of('hello', []) }, []))
-    expect(await safeEval('{}', Value.of({}))).toEqual(Value.of({}, []))
+    expect(await safeEval('({foo: 123, bar: "hello"})', Value.of({}))).toEqual(Value.of({ foo: Value.of(123, []), bar: Value.of('hello', []) }, []))
+    expect(await safeEval('({})', Value.of({}))).toEqual(Value.of({}, []))
   })
 
   it('supports computed property access', async () => {
@@ -124,7 +124,7 @@ describe('capnweb-eval basic evaluation', () => {
       }
     })
     const fn = await safeEval('x => double(x)', scope)
-    expect(fn).toEqual(Value.of(expect.any(Function), [], { isInternalFunction: true }))
+    expect(fn).toEqual(Value.of(expect.any(Function), [], { fnNode: expect.any(Object) }))
     expect(await safeEval('numbers()', scope)).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))
   })
 
@@ -143,7 +143,7 @@ describe('capnweb-eval basic evaluation', () => {
   })
 
   it('supports object spread', async () => {
-    expect(await safeEval('{a: 1, ...{b: 2}}', Value.of({}))).toEqual(Value.of({ a: Value.of(1, []), b: Value.of(2, []) }, []))
+    expect(await safeEval('({a: 1, ...{b: 2}})', Value.of({}))).toEqual(Value.of({ a: Value.of(1, []), b: Value.of(2, []) }, []))
   })
 
   it('supports nested expressions', async () => {
@@ -317,7 +317,7 @@ describe('evaluator edge cases - arrow functions', () => {
       double(x: number) { return x * 2 }
     })
     const result = await safeEval('((multiplier) => (x) => double(x))(2)', scope)
-    expect(result.options.isInternalFunction).toBe(true)
+    expect(result.options.fnNode).toBeDefined()
   })
 
   it('supports deeply nested arrow function closures', async () => {
@@ -509,7 +509,7 @@ describe('evaluator - taint propagation', () => {
 
   it('propagates taints through object construction', async () => {
     const scope = Value.of({ tainted: Value.of('secret', ['sensitive']) })
-    const result = await safeEval('{ key: tainted }', scope)
+    const result = await safeEval('({ key: tainted })', scope)
     expect(taintsContain(result.getTaints(), 'sensitive')).toBe(true)
   })
 
@@ -917,20 +917,20 @@ describe('security - RegExp safety', () => {
 describe('security - thenable/Promise escape hatch prevention', () => {
   it('blocks constructing objects with "then" property', () => {
     // This prevents creating fake thenables that could bypass policy via await
-    expect(() => safeEval('{ then: 1 }', Value.of({}))).toThrow(/safe string or number/)
+    expect(() => safeEval('({ then: 1 })', Value.of({}))).toThrow(/safe string or number/)
   })
 
   it('blocks constructing objects with "catch" property', () => {
-    expect(() => safeEval('{ catch: 1 }', Value.of({}))).toThrow(/safe string or number/)
+    expect(() => safeEval('({ catch: 1 })', Value.of({}))).toThrow(/safe string or number/)
   })
 
   it('blocks constructing objects with "finally" property', () => {
-    expect(() => safeEval('{ finally: 1 }', Value.of({}))).toThrow(/safe string or number/)
+    expect(() => safeEval('({ finally: 1 })', Value.of({}))).toThrow(/safe string or number/)
   })
 
   it('blocks computed "then" property', () => {
     const scope = Value.of({ key: 'then' })
-    expect(() => safeEval('{ [key]: 1 }', scope)).toThrow(/safe string or number/)
+    expect(() => safeEval('({ [key]: 1 })', scope)).toThrow(/safe string or number/)
   })
 
   it('blocks accessing "then" on objects', () => {
@@ -1396,5 +1396,122 @@ describe('template literals', () => {
     expect(result.raw).toBe('one and two')
     expect(taintsContain(result.getTaints(), 'taint-a')).toBe(true)
     expect(taintsContain(result.getTaints(), 'taint-b')).toBe(true)
+  })
+})
+
+describe('scope checkpointing', () => {
+  it('round-trips primitive values', async () => {
+    // Session 1: create some values
+    const scope1 = new GlobalScope(Value.of({}, [], { shallow: true }), false)
+    await safeEval('const num = 42; const str = "hello"; const bool = true', scope1)
+
+    // Serialize
+    const serialized = serializeScope(scope1)
+
+    // Session 2: deserialize and use
+    const scope2 = deserializeScope(serialized)
+    expect((await safeEval('num + 1', scope2)).raw).toBe(43)
+    expect((await safeEval('str', scope2)).raw).toBe('hello')
+    expect((await safeEval('bool', scope2)).raw).toBe(true)
+  })
+
+  it('round-trips values with taints', async () => {
+    const scope1 = new GlobalScope(
+      Value.of({ secret: Value.of('password123', [['auth', { principals: ['alice@example.com'] }]]) }, [], { shallow: true }),
+      false,
+    )
+
+    const serialized = serializeScope(scope1)
+    const scope2 = deserializeScope(serialized)
+
+    const result = await safeEval('secret', scope2)
+    expect(result.raw).toBe('password123')
+    expect(result.getTaints()).toEqual([['auth', { principals: ['alice@example.com'] }]])
+  })
+
+  it('round-trips arrays', async () => {
+    const scope1 = new GlobalScope(Value.of({}, [], { shallow: true }), false)
+    await safeEval('const arr = [1, 2, 3]', scope1)
+
+    const serialized = serializeScope(scope1)
+    const scope2 = deserializeScope(serialized)
+
+    expect((await safeEval('arr[1]', scope2)).raw).toBe(2)
+  })
+
+  it('round-trips objects', async () => {
+    const scope1 = new GlobalScope(Value.of({}, [], { shallow: true }), false)
+    await safeEval('const obj = { x: 10, y: 20 }', scope1)
+
+    const serialized = serializeScope(scope1)
+    const scope2 = deserializeScope(serialized)
+
+    expect((await safeEval('obj.x + obj.y', scope2)).raw).toBe(30)
+  })
+
+  it('round-trips internal functions', async () => {
+    // Session 1: create a function
+    const scope1 = new GlobalScope(Value.of({}, [], { shallow: true }), false)
+    await safeEval('const double = x => x * 2', scope1)
+
+    // Serialize
+    const serialized = serializeScope(scope1)
+
+    // Session 2: deserialize and call the function
+    const scope2 = deserializeScope(serialized)
+    expect((await safeEval('double(21)', scope2)).raw).toBe(42)
+  })
+
+  it('round-trips complex nested structures', async () => {
+    const scope1 = new GlobalScope(Value.of({}, [], { shallow: true }), false)
+    const data = await safeEval('({ users: [{ name: "Alice" }, { name: "Bob" }] })', scope1)
+    // Add taints manually to demonstrate taint preservation
+    ;(data.raw.users as Value[]).raw[0].raw.name = Value.of('Alice', [['pii', {}]])
+    ;(data.raw.users as Value[]).raw[1].raw.name = Value.of('Bob', [['pii', {}]])
+    scope1.set({ type: 'Identifier', name: 'data', start: 0, end: 0 }, data)
+
+    const serialized = serializeScope(scope1)
+    const scope2 = deserializeScope(serialized)
+
+    const result = await safeEval('data.users[0].name', scope2)
+    expect(result.raw).toBe('Alice')
+    expect(taintsContain(result.getTaints(), 'pii')).toBe(true)
+  })
+
+  it('preserves taints through function calls after round-trip', async () => {
+    const scope1 = new GlobalScope(
+      Value.of({ secret: Value.of('sensitive', [['confidential', {}]]) }, [], { shallow: true }),
+      false,
+    )
+    await safeEval('const identity = x => x', scope1)
+
+    const serialized = serializeScope(scope1)
+    const scope2 = deserializeScope(serialized)
+
+    const result = await safeEval('identity(secret)', scope2)
+    expect(result.raw).toBe('sensitive')
+    expect(taintsContain(result.getTaints(), 'confidential')).toBe(true)
+  })
+
+  it('survives multiple round-trips with functions', async () => {
+    // Session 1: create a function
+    const scope1 = new GlobalScope(Value.of({}, [], { shallow: true }), false)
+    await safeEval('const add = (a, b) => a + b', scope1)
+
+    // First round-trip
+    const serialized1 = serializeScope(scope1)
+    const scope2 = deserializeScope(serialized1)
+    expect((await safeEval('add(1, 2)', scope2)).raw).toBe(3)
+
+    // Second round-trip
+    const serialized2 = serializeScope(scope2)
+    const scope3 = deserializeScope(serialized2)
+    expect((await safeEval('add(10, 20)', scope3)).raw).toBe(30)
+
+    // Third round-trip with additional state
+    await safeEval('const mul = (a, b) => a * b', scope3)
+    const serialized3 = serializeScope(scope3)
+    const scope4 = deserializeScope(serialized3)
+    expect((await safeEval('add(mul(2, 3), mul(4, 5))', scope4)).raw).toBe(26)
   })
 })

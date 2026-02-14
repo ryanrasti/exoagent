@@ -60,6 +60,7 @@
     "ai": "^6.0.0"
   },
   "dependencies": {
+    "astring": "^1.9.0",
     "camelcase": "^9.0.0",
     "capnweb": "file:dist/capnweb",
     "json-schema": "^0.4.0",

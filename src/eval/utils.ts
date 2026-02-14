@@ -1,6 +1,7 @@
 import type * as acorn from 'acorn'
 import hash from 'object-hash'
 import { getPolicyMetadata } from '../meta'
+import * as b from './ast'
 
 // Hierarchical taint: [type, params]
 // params can carry context like principals (email addresses who have access)
@@ -76,7 +77,8 @@ export function isSafeMemberRaw(member: unknown): member is string | number {
 }
 
 export type ValueOptions = {
-  isInternalFunction?: boolean
+  /** AST node for internal functions (presence implies isInternalFunction) */
+  fnNode?: acorn.ArrowFunctionExpression
   parent?: Value<SafeEvalValueInner>
   propertyName?: string
   shallow?: boolean
@@ -122,6 +124,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     return Value.of(this.raw, normalizedExtra, {...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
   }
 
+  withOptions(opts: Partial<ValueOptions>): Value<T> {
+    return new Value(this.raw, this.taints, { ...this.options, ...opts })
+  }
+
   /**
    * Recursively unwrap arrays and objects, converting Value instances back to raw values.
    * Policy check is enforced at this boundary for all values including deferred ones.
@@ -149,7 +155,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     }
 
     // Internal functions: wrap to check policy on result when called
-    if (this.isFunction() && this.options?.isInternalFunction) {
+    if (this.isFunction() && this.options?.fnNode) {
       return (...args: unknown[]) => {
         const res = this.raw(...(args.map(arg => Value.of(arg))))
         // Policy check happens when function result is unwrapped
@@ -315,6 +321,81 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
       return paramStr ? `${type}${paramStr}` : type
     })
     return `Value(raw: ${JSON.stringify(this.raw)}, taints: ${taintStrs.join(', ')})`
+  }
+
+  /**
+   * Serialize this Value to an AST node (CallExpression for Value.of(...))
+   * Throws if the value cannot be serialized (class instances, external functions)
+   */
+  toAST(): acorn.CallExpression {
+    return b.call(
+      b.member(b.id('Value'), b.id('of')),
+      [this.rawToAST(), this.taintsToAST(), ...this.optionsToAST()],
+    )
+  }
+
+  private rawToAST(): acorn.Expression {
+    const raw = this.raw
+
+    // Primitives
+    if (raw === null || raw === undefined || typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+      return b.literal(raw)
+    }
+
+    if (typeof raw === 'bigint') {
+      return b.bigintLiteral(raw)
+    }
+
+    // Arrays (contain Value instances)
+    if (Array.isArray(raw)) {
+      return b.array(raw.map((item) => {
+        if (!(item instanceof Value)) {
+          throw new Error(`Array element is not a Value: ${item}`)
+        }
+        return item.toAST()
+      }))
+    }
+
+    // Internal functions - use the stored AST node
+    if (typeof raw === 'function') {
+      if (!this.options.fnNode) {
+        throw new Error('Cannot serialize external function (no fnNode)')
+      }
+      return this.options.fnNode
+    }
+
+    // Plain objects (contain Value instances)
+    if (typeof raw === 'object') {
+      const proto = Object.getPrototypeOf(raw)
+      if (proto !== null && proto !== Object.prototype) {
+        throw new Error('Cannot serialize class instance')
+      }
+      return b.object(Object.entries(raw).map(([key, val]) => {
+        if (!(val instanceof Value)) {
+          throw new Error(`Object property "${key}" is not a Value: ${val}`)
+        }
+        return b.prop(key, val.toAST())
+      }))
+    }
+
+    throw new Error(`Cannot serialize value of type ${typeof raw}`)
+  }
+
+  private taintsToAST(): acorn.ArrayExpression {
+    return b.array(this.taints.map(taint =>
+      b.array([
+        b.literal(taint[0]),
+        b.object(Object.entries(taint[1]).map(([k, v]) =>
+          b.prop(k, b.literal(v as string | number | boolean | null)),
+        )),
+      ]),
+    ))
+  }
+
+  private optionsToAST(): acorn.ObjectExpression[] {
+    // fnNode is not serialized as an option - it's preserved in the raw
+    // function value when the evaluator processes the arrow expression
+    return []
   }
 
   static Undefined = Value.of(undefined, [])

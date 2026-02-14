@@ -149,7 +149,9 @@ describe('unwrap', () => {
 
   it('unwraps internal functions to non-wrapping functions', () => {
     const innerFn = (x: Value) => Value.of(x.raw as number * 2, [])
-    const v = Value.of(innerFn, [], { isInternalFunction: true })
+    // fnNode presence implies internal function - use a stub node for testing
+    const stubNode = { type: 'ArrowFunctionExpression' } as any
+    const v = Value.of(innerFn, [], { fnNode: stubNode })
     const unwrapped = v.unwrap(noopChecker) as (x: number) => number
     expect(typeof unwrapped).toBe('function')
     expect(unwrapped(5)).toBe(10)

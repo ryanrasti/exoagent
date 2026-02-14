@@ -1,4 +1,5 @@
 import type { DoStubCall } from './evaluate'
+import type { Scope } from './scope'
 import type { SafeEvalValueInner } from './utils'
 import * as acorn from 'acorn'
 import { Evaluator } from './evaluate'
@@ -6,22 +7,31 @@ import { GlobalScope } from './scope'
 import { Value } from './utils'
 
 export { Evaluator } from './evaluate'
+export { GlobalScope, LocalScope, serializeScope, deserializeScope } from './scope'
+export type { SerializedScope } from './scope'
 export { formatCodeMessage, Invariant, Value, normalizeTaint, normalizeTaints } from './utils'
 export type { Taint, TaintParams, TaintInput, TaintsInput, PolicyChecker } from './utils'
 
-export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
-  const ast = acorn.parseExpressionAt(code, 0, { ecmaVersion: 'latest' })
-  const evaluator = new Evaluator(code, doStubCall ?? ((options, method, thisVal, args) => {
+export const safeEval = (code: string, globalThis?: Value | Scope, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
+  const defaultStubCall: DoStubCall = (_options, method, thisVal, args) => {
     // Default: just call the stub without policy checks
     // Unwrap args (no policy check), call method, wrap result
     const unwrappedArgs = args.map(a => a.unwrap(() => {}))
     const rawResult = Reflect.apply(method.raw, thisVal.raw, unwrappedArgs)
     return Value.of(rawResult, Value.mergeTaints(thisVal, ...args))
-  }))
-  const iter = evaluator.evaluate(ast, globalThis ? new GlobalScope(globalThis) : new GlobalScope(Value.of({}, [])))
+  }
+  const evaluator = new Evaluator(code, doStubCall ?? defaultStubCall)
+  const scope = globalThis instanceof Value
+    ? new GlobalScope(globalThis)
+    : globalThis ?? new GlobalScope(Value.of({}, []))
+
+  const ast = acorn.parse(code, { ecmaVersion: 'latest' })
+  const iter = evaluator.evalStatements(ast.body, scope)
+
   let step = iter.next()
   if (step.done) {
-    return step.value.asAwaitable()
+    const val = step.value
+    return (val instanceof Value ? val : Value.of(undefined, [])).asAwaitable()
   }
 
   const fn = async (): Promise<Value<SafeEvalValueInner>> => {
@@ -33,7 +43,8 @@ export const safeEval = (code: string, globalThis?: Value, doStubCall?: DoStubCa
         : await raw
       step = iter.next(Value.of(resolved, []) as Value<SafeEvalValueInner>)
     }
-    return step.value.asAwaitable()
+    const val = step.value
+    return (val instanceof Value ? val : Value.of(undefined, [])).asAwaitable()
   }
   return fn()
 }

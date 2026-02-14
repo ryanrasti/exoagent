@@ -11,6 +11,7 @@ type StatementResult = {
   value?: Value<SafeEvalValueInner>
 } | {
   control: 'normal'
+  value?: Value<SafeEvalValueInner>
 }
 
 export type DoStubCall = (options: ValueOptions, method: Value<(...args: any[]) => any>, thisVal: Value<SafeEvalValueInner>, args: Value<SafeEvalValueInner>[]) => Value<SafeEvalValueInner>
@@ -106,8 +107,8 @@ export class Evaluator {
       return { control: 'normal' }
     }
     else if (node.type === 'ExpressionStatement') {
-      yield* this.evaluate(node.expression, scope)
-      return { control: 'normal' }
+      const value = yield* this.evaluate(node.expression, scope)
+      return { control: 'normal', value }
     }
     else if (node.type === 'EmptyStatement') {
       return { control: 'normal' }
@@ -160,6 +161,10 @@ export class Evaluator {
         const { object: obj, prop } = yield* this.evalMemberExpression(node.callee, scope)
         object = obj
         callee = object.getSlot(prop)
+        // Set propertyName for plain object methods so doStubCall knows the method name
+        if (object.isPlainObject() && callee.isFunction() && typeof prop.raw === 'string') {
+          callee = callee.withOptions({ propertyName: prop.raw, parent: object })
+        }
       }
       else {
         object = Value.of(undefined, [])
@@ -172,15 +177,14 @@ export class Evaluator {
       //         allowed if either:
       //          - the function is a @tool
       //          - the function is defined in the evaluation context
-      if (!callee.options.isInternalFunction) {
+      if (!callee.options.fnNode) {
         // If we're calling a method outside of the evaluation context, use doStubCall
         // which handles policy checks and taint propagation:
-        // TODO: ensure this works for promises too
         this.inv.eval(callee.options.propertyName != null, 'Method must have a name', node.callee, callee)
         return this.doStubCall(callee.options, callee, object, args)
       }
       else {
-        // TODO: ensure this works for promises too:
+        // Internal function - call it directly (closure captures scope)
         const result = Reflect.apply(callee.raw, object, args)
         return Value.of(result, callee.getTaints())
       }
@@ -251,7 +255,7 @@ export class Evaluator {
             return step.value.asAwaitable()
           },
           [],
-          { isInternalFunction: true },
+          { fnNode: node },
         )
       }
       else {
@@ -263,7 +267,7 @@ export class Evaluator {
             return step.value
           },
           [],
-          { isInternalFunction: true },
+          { fnNode: node },
         )
       }
     }
@@ -411,5 +415,21 @@ export class Evaluator {
       return Value.of(undefined, [])
     }
     return yield* this.evaluate(body, localScope)
+  }
+
+  /**
+   * Evaluate a list of statements, binding variables to the scope.
+   * Returns the value of the last statement (like JS eval behavior).
+   */
+  * evalStatements(statements: acorn.Statement[], scope: Scope): Evaluation<Value<SafeEvalValueInner> | undefined> {
+    let lastValue: Value<SafeEvalValueInner> | undefined
+    for (const stmt of statements) {
+      const result = yield* this.evalStatement(stmt, scope)
+      if (result.control === 'return') {
+        return result.value
+      }
+      lastValue = result.value
+    }
+    return lastValue
   }
 }
