@@ -288,16 +288,30 @@ export class Evaluator {
       }
     }
     else if (node.type === 'BinaryExpression') {
+      this.inv.parse(node.left.type !== 'PrivateIdentifier', 'Private identifiers are not allowed', node)
       const left = yield* this.evaluate(node.left, scope)
       const right = yield* this.evaluate(node.right, scope)
       const taints = Value.mergeTaints(left, right)
 
+      if (node.operator === '===') {
+        return Value.of(left.raw === right.raw, taints)
+      }
+      if (node.operator === '!==') {
+        return Value.of(left.raw !== right.raw, taints)
+      }
+      if (node.operator === '+') {
+        if (left.isNumber() && right.isNumber()) {
+          return Value.of(left.raw + right.raw, taints)
+        }
+        if (left.isString() && (right.isString() || right.isNumber())) {
+          return Value.of(left.raw + right.raw, taints)
+        }
+        this.inv.eval(false, 'Addition requires numbers or strings', node, { left, right })
+      }
+
+      this.inv.eval(left.isNumber() && right.isNumber(), 'Comparison operators require numbers', node, { left, right })
+
       switch (node.operator) {
-        // Comparison operators
-        case '===':
-          return Value.of(left.raw === right.raw, taints)
-        case '!==':
-          return Value.of(left.raw !== right.raw, taints)
         case '>':
           return Value.of(left.raw > right.raw, taints)
         case '<':
@@ -307,8 +321,6 @@ export class Evaluator {
         case '<=':
           return Value.of(left.raw <= right.raw, taints)
         // Arithmetic operators
-        case '+':
-          return Value.of(left.raw + right.raw, taints)
         case '-':
           return Value.of(left.raw - right.raw, taints)
         case '*':
