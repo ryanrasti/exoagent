@@ -58,6 +58,24 @@ type CallbackDenyRule = (source: Taint, sink: Taint) => 'allow' | 'deny'
 
 type PolicyDenyRule = SimpleDenyRule | CallbackDenyRule
 
+/** An exception that allows a specific source->sink flow */
+export type PolicyException = {
+  source: string
+  sink: string
+}
+
+/** Error thrown when policy denies a method call */
+export class PolicyDenialError extends Error {
+  constructor(
+    message: string,
+    public readonly source: string,
+    public readonly sink: string,
+  ) {
+    super(message)
+    this.name = 'PolicyDenialError'
+  }
+}
+
 export class Policy<Sources extends readonly string[] = [], Sinks extends readonly string[] = []> {
   constructor(
     private sources: Sources,
