@@ -136,8 +136,50 @@ export const MOCK_SLACK_SEED: { channels: SlackChannel[], messages: SlackMessage
   ],
 }
 
+/** Type definitions for LLM */
+export const SLACK_DTS = `
+interface SlackChannel {
+  id: string
+  name: string
+  isPrivate: boolean
+  members: string[]
+}
+
+interface SlackMessage {
+  id: string
+  channelId: string
+  channelName: string
+  userId: string
+  userName: string
+  text: string
+  timestamp: string
+  threadTs?: string
+}
+
+interface Slack {
+  /** List all channels */
+  listChannels(): Promise<SlackChannel[]>
+
+  /** Get channel details */
+  getChannel(opts: { channelId: string }): Promise<SlackChannel>
+
+  /** List messages in a channel */
+  listMessages(opts: { channelId: string, limit?: number }): Promise<SlackMessage[]>
+
+  /** Get a specific message */
+  getMessage(opts: { channelId: string, messageId: string }): Promise<SlackMessage>
+
+  /** Send a message to a channel */
+  sendMessage(opts: { channelId: string, text: string, threadTs?: string }): Promise<{ success: boolean, id: string }>
+
+  /** Send a direct message to a user */
+  sendDM(opts: { userId: string, text: string }): Promise<{ success: boolean, id: string }>
+}
+`
+
 /** Mock Slack client with in-memory state for testing */
 export class MockSlackClient implements ISlack {
+  static dts = SLACK_DTS
   private channels: Map<string, SlackChannel> = new Map()
   private messages: Map<string, SlackMessage> = new Map()
   private nextMsgId = 1

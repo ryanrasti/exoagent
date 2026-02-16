@@ -13,10 +13,14 @@ import { ExoAgent } from '../../policy'
 import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '../google/auth'
 import { CalendarClient, MockCalendarClient } from '../google/calendar'
 import { GmailClient, MockGmailClient } from '../google/gmail'
+import { createMockAgent, COMBINED_DTS, mockPolicy } from '../mock'
 
-// Mock instances (state persists across requests)
-const mockGmail = new MockGmailClient()
-const mockCalendar = new MockCalendarClient()
+// Combined mock agent (state persists across requests)
+const mockAgent = createMockAgent()
+
+// Legacy mock instances for backwards compat
+const mockGmail = mockAgent.clients.gmail
+const mockCalendar = mockAgent.clients.calendar
 
 import { z } from 'zod'
 import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
@@ -245,13 +249,13 @@ export async function llm<Sinks extends readonly string[]>(
   return value as LLMResult
 }
 
-// Gmail/Calendar specific configuration
-const GMAIL_CALENDAR_SYSTEM_PROMPT = `You are an AI assistant that helps users manage their email and calendar.
+// Combined agent system prompt
+const MOCK_AGENT_SYSTEM_PROMPT = `You are an AI assistant that helps users manage their email, calendar, Slack, files, and web browsing.
 
 You have access to a single tool called "execute" that runs JavaScript code.
 
 Two globals are available:
-- \`api\`: Gmail and Calendar APIs (api.gmail, api.calendar)
+- \`api\`: All integrations (api.gmail, api.calendar, api.slack, api.filesystem, api.web)
 - \`builtin\`: Agent control functions (builtin.respond, builtin.setToolCallResult)
 
 IMPORTANT:
@@ -264,64 +268,9 @@ IMPORTANT:
 When you receive previous assistant turns, they will contain the "response" that was shown to the user and "data" that you stored. Use the "data" to maintain context across turns.
 `
 
-const GMAIL_CALENDAR_DTS = `
-interface EmailMessage {
-  id: string
-  threadId: string
-  labels: string[]
-  from: string | undefined
-  to: string[]
-  cc: string[]
-  subject: string | undefined
-  date: Date | undefined
-  text: string | undefined
-  html: string | false | undefined
-}
+// Legacy Gmail/Calendar prompt for backwards compat
+const GMAIL_CALENDAR_SYSTEM_PROMPT = MOCK_AGENT_SYSTEM_PROMPT
 
-interface CalendarEvent {
-  id: string
-  summary: string | undefined
-  description: string | undefined
-  location: string | undefined
-  start: { dateTime?: string; date?: string } | undefined
-  end: { dateTime?: string; date?: string } | undefined
-  htmlLink: string | undefined
-  attendees: string[]
-}
-
-interface Gmail {
-  list(opts: { maxResults: number; query: string }): Promise<Array<{ id: string; threadId: string }>>
-  get(opts: { id: string }): Promise<EmailMessage>
-  send(opts: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string }): Promise<{ success: boolean; id: string }>
-  createDraft(opts: { to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string }): Promise<{ success: boolean; draftId: string }>
-}
-
-interface Calendar {
-  list(opts: { maxResults: number; timeMin: string; timeMax?: string; calendarId?: string }): Promise<CalendarEvent[]>
-  get(opts: { eventId: string; calendarId?: string }): Promise<CalendarEvent>
-  create(opts: { summary: string; start: string; end: string; description?: string; location?: string; attendees?: string[]; calendarId?: string }): Promise<CalendarEvent>
-  update(opts: { eventId: string; summary?: string; description?: string; location?: string; start?: string; end?: string; attendees?: string[]; calendarId?: string }): Promise<CalendarEvent>
-  delete(opts: { eventId: string; calendarId?: string }): Promise<{ success: boolean }>
-  quickAdd(opts: { text: string; calendarId?: string }): Promise<CalendarEvent>
-}
-
-interface Api {
-  gmail: Gmail
-  calendar: Calendar
-}
-
-interface Builtin {
-  /** Send a response message to the user */
-  respond(message: string): void
-  /** Set structured data visible to agent in subsequent turns */
-  setToolCallResult(result: unknown): void
-}
-
-/** Global: api */
-declare const api: Api
-/** Global: builtin */
-declare const builtin: Builtin
-`
 
 /** Chat result type */
 export interface ChatResult {
@@ -359,34 +308,18 @@ export async function handleChat(threadId: string, message: string, apiKey: stri
     content: message,
   })
 
-  // Use mock clients
-  const gmail = mockGmail
-  const calendar = mockCalendar
-
-  // Create policy with deny rules for cross-principal data flow
-  const policy = agentExo.policy([
-    (source, sink) => {
-      const sourcePrincipals = source[1].principals ?? []
-      const sinkPrincipals = sink[1].principals ?? []
-      if (sourcePrincipals.length === 0) return 'allow'
-      if (sinkPrincipals.length === 0) return 'allow'
-      const allowed = sinkPrincipals.every(p => sourcePrincipals.includes(p))
-      return allowed ? 'allow' : 'deny'
-    },
-  ])
-
-  // Use the generic llm() function
+  // Use the generic llm() function with combined mock agent
   const result = await llm({
     context: {
-      system: GMAIL_CALENDAR_SYSTEM_PROMPT,
+      system: MOCK_AGENT_SYSTEM_PROMPT,
       history,
       message,
-      dts: GMAIL_CALENDAR_DTS,
+      dts: COMBINED_DTS,
     },
     capabilities: {
-      api: { gmail, calendar },
+      api: mockAgent.api,
     },
-    policy,
+    policy: mockPolicy,
     outputSink: 'email',
     apiKey,
   })
@@ -461,21 +394,27 @@ export async function handleChat(threadId: string, message: string, apiKey: stri
 export function registerHandlers(): void {
   // Mock state management (for testing)
   handle('mock:seed', async (data: { emails?: any[], events?: any[] }) => {
-    if (data.emails) mockGmail.seed(data.emails)
-    if (data.events) mockCalendar.seed(data.events)
+    if (data.emails) mockAgent.clients.gmail.seed(data.emails)
+    if (data.events) mockAgent.clients.calendar.seed(data.events)
     return { ok: true }
   })
 
   handle('mock:state', async () => {
     return {
-      gmail: mockGmail.getState(),
-      calendar: mockCalendar.getState(),
+      gmail: mockAgent.clients.gmail.getState(),
+      calendar: mockAgent.clients.calendar.getState(),
+      slack: mockAgent.clients.slack.getState(),
+      filesystem: mockAgent.clients.filesystem.getState(),
+      web: mockAgent.clients.web.getPostLog(),
     }
   })
 
   handle('mock:clear', async () => {
-    mockGmail.clear()
-    mockCalendar.clear()
+    mockAgent.clients.gmail.clear()
+    mockAgent.clients.calendar.clear()
+    mockAgent.clients.slack.clear()
+    mockAgent.clients.filesystem.clear()
+    mockAgent.clients.web.clearPostLog()
     return { ok: true }
   })
 

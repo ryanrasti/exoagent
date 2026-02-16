@@ -209,8 +209,43 @@ export const MOCK_CALENDAR_SEED: CalendarEvent[] = [
   },
 ]
 
+/** Type definitions for LLM */
+export const CALENDAR_DTS = `
+interface CalendarEvent {
+  id: string
+  summary: string | undefined
+  description: string | undefined
+  location: string | undefined
+  start: { dateTime?: string; date?: string } | undefined
+  end: { dateTime?: string; date?: string } | undefined
+  htmlLink: string | undefined
+  attendees: string[]
+}
+
+interface Calendar {
+  /** List events in a time range */
+  list(opts: { maxResults: number, timeMin: string, timeMax?: string, calendarId?: string }): Promise<CalendarEvent[]>
+
+  /** Get a specific event */
+  get(opts: { eventId: string, calendarId?: string }): Promise<CalendarEvent>
+
+  /** Create a new event */
+  create(opts: { summary: string, description?: string, location?: string, start: string, end: string, attendees?: string[], calendarId?: string }): Promise<CalendarEvent>
+
+  /** Update an existing event */
+  update(opts: { eventId: string, summary?: string, description?: string, location?: string, start?: string, end?: string, attendees?: string[], calendarId?: string }): Promise<CalendarEvent>
+
+  /** Delete an event */
+  delete(opts: { eventId: string, calendarId?: string }): Promise<{ success: boolean }>
+
+  /** Quick add event from natural language */
+  quickAdd(opts: { text: string, calendarId?: string }): Promise<CalendarEvent>
+}
+`
+
 /** Mock Calendar client with in-memory state for testing */
 export class MockCalendarClient implements ICalendar {
+  static dts = CALENDAR_DTS
   private events: Map<string, CalendarEvent> = new Map()
   private nextId = 1
 

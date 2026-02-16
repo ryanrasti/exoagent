@@ -101,8 +101,46 @@ export const MOCK_FS_SEED: Map<string, { content: string, isDirectory: boolean }
   ['/home/user/.ssh/id_rsa.pub', { content: 'ssh-rsa AAAA... user@host', isDirectory: false }],
 ])
 
+/** Type definitions for LLM */
+export const FILESYSTEM_DTS = `
+interface FileInfo {
+  path: string
+  name: string
+  isDirectory: boolean
+  size: number
+  modifiedAt: Date
+}
+
+interface FileContent {
+  path: string
+  content: string
+  encoding: 'utf8' | 'base64'
+}
+
+interface Filesystem {
+  /** List files in a directory */
+  list(opts: { path: string }): Promise<FileInfo[]>
+
+  /** Read file content */
+  read(opts: { path: string }): Promise<FileContent>
+
+  /** Write content to a file */
+  write(opts: { path: string, content: string }): Promise<{ success: boolean }>
+
+  /** Delete a file */
+  delete(opts: { path: string }): Promise<{ success: boolean }>
+
+  /** Copy a file */
+  copy(opts: { source: string, destination: string }): Promise<{ success: boolean }>
+
+  /** Move a file */
+  move(opts: { source: string, destination: string }): Promise<{ success: boolean }>
+}
+`
+
 /** Mock filesystem client with in-memory state for testing */
 export class MockFilesystemClient implements IFilesystem {
+  static dts = FILESYSTEM_DTS
   private files: Map<string, { content: string, isDirectory: boolean, modifiedAt: Date }> = new Map()
 
   constructor(seedData: Map<string, { content: string, isDirectory: boolean }> = MOCK_FS_SEED) {

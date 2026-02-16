@@ -238,8 +238,39 @@ export const MOCK_GMAIL_SEED: EmailMessage[] = [
   },
 ]
 
+/** Type definitions for LLM */
+export const GMAIL_DTS = `
+interface EmailMessage {
+  id: string
+  threadId: string
+  labels: string[]
+  from: string | undefined
+  to: string[]
+  cc: string[]
+  subject: string | undefined
+  date: Date | undefined
+  text: string | undefined
+  html: string | false | undefined
+}
+
+interface Gmail {
+  /** List emails matching a query */
+  list(opts: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>>
+
+  /** Get a specific email by ID */
+  get(opts: { id: string }): Promise<EmailMessage>
+
+  /** Send an email */
+  send(opts: { to: string[], cc?: string[], bcc?: string[], subject: string, text: string }): Promise<{ success: boolean, id: string }>
+
+  /** Create a draft email */
+  createDraft(opts: { to: string[], cc?: string[], bcc?: string[], subject: string, text: string }): Promise<{ success: boolean, draftId: string }>
+}
+`
+
 /** Mock Gmail client with in-memory state for testing */
 export class MockGmailClient implements IGmail {
+  static dts = GMAIL_DTS
   private emails: Map<string, EmailMessage> = new Map()
   private drafts: Map<string, EmailMessage> = new Map()
   private nextId = 1

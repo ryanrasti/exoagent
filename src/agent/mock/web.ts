@@ -129,8 +129,42 @@ export interface MockWebConfig {
   searchResults?: Array<{ title: string, url: string, snippet: string }>
 }
 
+/** Type definitions for LLM */
+export const WEB_DTS = `
+interface WebResponse {
+  url: string
+  status: number
+  headers: Record<string, string>
+  body: string
+}
+
+interface WebPostResult {
+  url: string
+  status: number
+  success: boolean
+}
+
+interface SearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
+interface Web {
+  /** Fetch content from a URL */
+  fetch(opts: { url: string, headers?: Record<string, string> }): Promise<WebResponse>
+
+  /** POST data to a URL */
+  post(opts: { url: string, body: string, headers?: Record<string, string> }): Promise<WebPostResult>
+
+  /** Search the web */
+  search(opts: { query: string }): Promise<SearchResult[]>
+}
+`
+
 /** Mock web client with configurable responses */
 export class MockWebClient implements IWeb {
+  static dts = WEB_DTS
   private internalDomains: string[]
   private responses: Map<string, { status: number, headers: Record<string, string>, body: string }>
   private searchResults: Array<{ title: string, url: string, snippet: string }>
