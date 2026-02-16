@@ -2,10 +2,16 @@ import type { ToolExecutionOptions } from 'ai'
 import type { Taint } from './eval/utils'
 import type { Policy } from './policy'
 import { z } from 'zod'
-import { normalizeTaint, safeEval, Value } from './eval'
+import { GlobalScope, normalizeTaint, safeEval, Value } from './eval'
 
 export type CodeModeOptions<Sinks extends readonly string[]> = {
-  api: object
+  /** Global scope object - all properties become globals in the REPL */
+  globals: {
+    /** API object (methods require @tool annotations) */
+    api: object
+    /** Builtin functions (methods require @tool annotations) */
+    builtin: object
+  }
   policy: Policy<string[], [...Sinks]>
   dts?: string
   /** The sink to check at the output boundary (required) */
@@ -17,8 +23,6 @@ export type CodeModeOptions<Sinks extends readonly string[]> = {
 
 /** Result from a codeMode execution */
 export type CodeModeResult = {
-  response: string
-  data: unknown
   taints: Taint[]
   error?: {
     message: string
@@ -27,103 +31,82 @@ export type CodeModeResult = {
   }
 }
 
-/** Validate that a value is a valid turn result */
-function validateTurnResult(value: unknown): { response: string, data: unknown } {
-  if (typeof value !== 'object' || value === null) {
-    throw new Error('Code must return an object with { response: string, data: unknown }')
-  }
-  const obj = value as Record<string, unknown>
-  if (typeof obj.response !== 'string') {
-    throw new Error('Code must return an object with "response" as a string')
-  }
-  if (!('data' in obj)) {
-    throw new Error('Code must return an object with a "data" field')
-  }
-  return { response: obj.response, data: obj.data }
-}
-
 export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<Sinks>) {
-  const { api, policy, dts = '', outputSink, maxCost = 10 } = opts
+  const { globals, policy, dts = '', outputSink, inputTaints, maxCost = 10 } = opts
 
   return {
-    description: `Execute code to interact with the API. Your code MUST return an object with this shape:
+    description: `Execute JavaScript code. All capabilities are available as globals.
 
-        { response: string, data: unknown }
+Available globals:
+\`\`\`typescript
+${dts || '// No type definitions provided'}
+\`\`\`
 
-        - "response": The message to show the user. This is what they will see.
-        - "data": Any data you want to preserve in context for future turns. This is NOT shown to the user but will be available to you in subsequent turns.
+IMPORTANT - The interpreter is LIMITED to:
+- Literals: strings, numbers, booleans, null, undefined, bigint
+- Object/array literals: { key: "value" }, [1, 2, 3]
+- Member access: obj.prop
+- Function calls: gmail.list({ query: "is:unread" })
+- Variable declarations: const x = ...
+- Arrow functions: (x) => x + 1
+- Async/await: const result = await gmail.list(...)
+- Block statements with return
+- If/else statements
+- Ternary expressions: condition ? a : b
+- Comparison operators: ===, !==, >, <, >=, <=
+- Arithmetic operators: +, -, *, /, %
+- Logical operators: &&, ||
+- String concatenation and template literals
 
-        Available API:
-        \`\`\`typescript
-        ${dts || '// No API types provided'}
-        \`\`\`
+NOT SUPPORTED (will error):
+- for, while, switch, try/catch
+- Prototype methods (no .map, .filter, .forEach, etc.)
+- Built-in globals (no console, Math, JSON, etc.)
 
-        Your code must be a valid **JavaScript** (NOT TypeScript) arrow function taking \`api\` as its argument.
+IMPORTANT:
+- builtin.respond(message) is the ONLY output shown to the user
+- builtin.setToolCallResult(data) stores data for future turns (NOT shown to user)
+- Write code on multiple lines for readability
 
-        IMPORTANT - The interpreter is LIMITED to:
-        - Literals: strings, numbers, booleans, null, undefined, bigint
-        - Object/array literals: { key: "value" }, [1, 2, 3]
-        - Member access: api.gmail.get
-        - Function calls: api.gmail.get({ id: "123" })
-        - Variable declarations: const x = ...
-        - Arrow functions: (x) => x + 1
-        - Async/await: async (api) => { const x = await api.foo(); return x; }
-        - Block statements: { const a = 1; const b = 2; return { response: "", data: null }; }
-        - If/else statements: if (condition) { ... } else { ... }
-        - Ternary expressions: condition ? a : b
-        - Comparison operators: ===, !==, >, <, >=, <=
-        - Arithmetic operators: +, -, *, /, %
-        - Logical operators: &&, ||
-        - String concatenation: "hello" + " " + "world"
-        - Template literals: \`Hello \${name}\`
+Example:
+\`\`\`javascript
+const emails = await api.gmail.list({ maxResults: 5, query: "is:unread" })
 
-        NOT SUPPORTED (will error):
-        - for, while, switch, try/catch
-        - Prototype methods (no .map, .filter, .forEach, etc.)
-        - Globals (no console, Math, JSON, etc.)
-        - Destructuring in parameters
-
-        Example:
-        \`\`\`javascript
-        async (api) => {
-          const emails = await api.gmail.list({ maxResults: 5, query: "is:unread" })
-          return {
-            response: "You have " + emails.length + " unread emails",
-            data: { emailIds: emails }
-          }
-        }
-        \`\`\`
-        `,
+builtin.respond(\`You have \${emails.length} unread emails\`)
+builtin.setToolCallResult({ emailCount: emails.length })
+\`\`\`
+`,
     inputSchema: z.object({
       code: z.string(),
     }),
     execute: async ({ code }: { code: string }, _opts: ToolExecutionOptions): Promise<CodeModeResult> => {
       // Create a fresh TurnPolicy for each execution (fresh cost counter)
-      const turn = policy.turn(maxCost)
+      // Pass inputTaints as ambient taints - they apply to all egress points
+      const turn = policy.turn(maxCost, inputTaints)
       const checkPolicy = turn.createUnwrapChecker([normalizeTaint(outputSink)])
 
       try {
-        const result = await safeEval(`(${code})(api)`, Value.of({ api }), turn.doStubCall.bind(turn))
+        // Wrap globals as Values and create a GlobalScope
+        // Both api and builtin methods go through policy (require @tool annotations)
+        const wrappedGlobals: { [key: string]: Value } = {
+          api: Value.of(globals.api, [], { shallow: true }),
+          builtin: Value.of(globals.builtin, [], { shallow: true }),
+        }
+        const scope = new GlobalScope(Value.of(wrappedGlobals, [], { shallow: true }), false)
+
+        const result = await safeEval(code, scope, turn.doStubCall.bind(turn))
 
         // Capture taints before unwrapping
         const taints = result.getTaints()
 
-        // Unwrap and validate
-        const unwrapped = result.unwrap(checkPolicy)
-        const validated = validateTurnResult(unwrapped)
+        // Unwrap to run policy checks on any returned value
+        result.unwrap(checkPolicy)
 
-        return {
-          response: validated.response,
-          data: validated.data,
-          taints,
-        }
+        return { taints }
       }
       catch (err) {
         console.warn('[codeMode] Execution error:', err)
-        // Return error as a result so it can be displayed in UI
         return {
-          response: '',
-          data: null,
           taints: [],
           error: {
             message: err instanceof Error ? err.message : String(err),

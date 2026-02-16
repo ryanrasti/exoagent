@@ -68,9 +68,10 @@ export class Policy<Sources extends readonly string[] = [], Sinks extends readon
   /**
    * Create a TurnPolicy for a single turn of execution.
    * Each turn has its own cost counter that resets.
+   * @param ambientTaints - Taints to apply to all egress points (from LLM context)
    */
-  turn(maxCost: number): TurnPolicy<Sources, Sinks> {
-    return new TurnPolicy(this.sources, this.sinks, this.denyRules, maxCost)
+  turn(maxCost: number, ambientTaints: Taint[] = []): TurnPolicy<Sources, Sinks> {
+    return new TurnPolicy(this.sources, this.sinks, this.denyRules, maxCost, ambientTaints)
   }
 }
 
@@ -82,6 +83,7 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
     private sinks: Sinks,
     private denyRules: PolicyDenyRule[],
     private maxCost: number,
+    private ambientTaints: Taint[] = [],
   ) {}
 
   /** Get the current cost used in this turn */
@@ -196,8 +198,8 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
     // Check sink taint types are configured
     this.checkSinkTaintsConfigured(sinkTaints.map(([type]) => type))
 
-    // Check incoming taints against deny rules
-    const incomingTaints = Value.mergeTaints(thisVal, ...args)
+    // Check incoming taints against deny rules (including ambient taints from LLM context)
+    const incomingTaints = [...Value.mergeTaints(thisVal, ...args), ...this.ambientTaints]
     this.checkIncomingTaintsConfigured(incomingTaints)
     this.checkDenyRules(incomingTaints, sinkTaints)
 

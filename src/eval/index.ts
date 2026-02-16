@@ -25,7 +25,7 @@ export const safeEval = (code: string, globalThis?: Value | Scope, doStubCall?: 
     ? new GlobalScope(globalThis)
     : globalThis ?? new GlobalScope(Value.of({}, []))
 
-  const ast = acorn.parse(code, { ecmaVersion: 'latest' })
+  const ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module' })
   const iter = evaluator.evalStatements(ast.body, scope)
 
   let step = iter.next()

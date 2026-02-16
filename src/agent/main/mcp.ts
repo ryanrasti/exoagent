@@ -59,10 +59,11 @@ server.registerTool('chat', {
     }
   }
   catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err))
+    const error = err as Error & { code?: string }
+    const codeBlock = error.code ? `\n\nCode:\n${error.code}` : ''
     return {
-      content: [{ type: 'text', text: `Error: ${error.message}` }],
-      structuredContent: { error: error.message, stack: error.stack },
+      content: [{ type: 'text', text: `Error: ${error.message}${codeBlock}` }],
+      structuredContent: { error: error.message, stack: error.stack, code: error.code },
       isError: true,
     }
   }

@@ -32,7 +32,17 @@ function toCalendarEvent(event: Event): CalendarEvent {
   }
 }
 
-export class CalendarClient {
+/** Interface for Calendar operations */
+export interface ICalendar {
+  list(opts: { maxResults: number, timeMin: string, timeMax?: string, calendarId?: string }): Promise<CalendarEvent[]>
+  get(opts: { eventId: string, calendarId?: string }): Promise<CalendarEvent>
+  create(opts: { summary: string, description?: string, location?: string, start: string, end: string, attendees?: string[], calendarId?: string }): Promise<CalendarEvent>
+  update(opts: { eventId: string, summary?: string, description?: string, location?: string, start?: string, end?: string, attendees?: string[], calendarId?: string }): Promise<CalendarEvent>
+  delete(opts: { eventId: string, calendarId?: string }): Promise<{ success: boolean }>
+  quickAdd(opts: { text: string, calendarId?: string }): Promise<CalendarEvent>
+}
+
+export class CalendarClient implements ICalendar {
   private calendar: calendar_v3.Calendar
 
   constructor(auth: OAuth2Client) {
@@ -182,5 +192,207 @@ export class CalendarClient {
       text,
     })
     return toCalendarEvent(res.data)
+  }
+}
+
+/** Default seed data for mock Calendar */
+export const MOCK_CALENDAR_SEED: CalendarEvent[] = [
+  {
+    id: 'event-1',
+    summary: 'Team standup',
+    description: 'Daily standup meeting',
+    location: 'Conference Room A',
+    start: { dateTime: '2024-01-16T09:00:00Z' },
+    end: { dateTime: '2024-01-16T09:30:00Z' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-1',
+    attendees: ['me@example.com', 'alice@example.com'],
+  },
+]
+
+/** Mock Calendar client with in-memory state for testing */
+export class MockCalendarClient implements ICalendar {
+  private events: Map<string, CalendarEvent> = new Map()
+  private nextId = 1
+
+  constructor(seedData: CalendarEvent[] = MOCK_CALENDAR_SEED) {
+    this.seed(seedData)
+  }
+
+  /** Seed events for testing */
+  seed(events: CalendarEvent[]): void {
+    for (const event of events) {
+      this.events.set(event.id, event)
+    }
+  }
+
+  /** Get current state for assertions */
+  getState(): { events: CalendarEvent[] } {
+    return { events: [...this.events.values()] }
+  }
+
+  /** Clear all state */
+  clear(): void {
+    this.events.clear()
+    this.nextId = 1
+  }
+
+  @calendarExo.tool(z.object({
+    maxResults: z.number(),
+    timeMin: z.string(),
+    timeMax: z.string().optional(),
+    calendarId: z.string().optional(),
+  }), {
+    source: 'calendar',
+  })
+  async list({ maxResults, timeMin, timeMax }: {
+    maxResults: number
+    timeMin: string
+    timeMax?: string
+    calendarId?: string
+  }): Promise<CalendarEvent[]> {
+    const minDate = new Date(timeMin)
+    const maxDate = timeMax ? new Date(timeMax) : null
+
+    const events = [...this.events.values()].filter((e) => {
+      const startStr = e.start?.dateTime || e.start?.date
+      if (!startStr) return false
+      const start = new Date(startStr)
+      if (start < minDate) return false
+      if (maxDate && start > maxDate) return false
+      return true
+    })
+
+    return events.slice(0, maxResults)
+  }
+
+  @calendarExo.tool(z.object({
+    eventId: z.string(),
+    calendarId: z.string().optional(),
+  }), {
+    source: (event: CalendarEvent): ['calendar', { principals: string[] }] => [
+      'calendar',
+      { principals: event.attendees },
+    ],
+  })
+  async get({ eventId }: { eventId: string, calendarId?: string }): Promise<CalendarEvent> {
+    const event = this.events.get(eventId)
+    if (!event) {
+      throw new Error(`Event not found: ${eventId}`)
+    }
+    return event
+  }
+
+  @calendarExo.tool(z.object({
+    summary: z.string(),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    start: z.string(),
+    end: z.string(),
+    attendees: z.array(z.string()).optional(),
+    calendarId: z.string().optional(),
+  }), {
+    sink: ({ attendees }: { attendees?: string[] }): ['calendar', { principals: string[] }] => [
+      'calendar',
+      { principals: attendees ?? [] },
+    ],
+  })
+  async create({ summary, description, location, start, end, attendees }: {
+    summary: string
+    description?: string
+    location?: string
+    start: string
+    end: string
+    attendees?: string[]
+    calendarId?: string
+  }): Promise<CalendarEvent> {
+    const id = `event-${this.nextId++}`
+    const event: CalendarEvent = {
+      id,
+      summary,
+      description,
+      location,
+      start: { dateTime: start },
+      end: { dateTime: end },
+      htmlLink: `https://calendar.google.com/event?eid=${id}`,
+      attendees: attendees ?? [],
+    }
+    this.events.set(id, event)
+    return event
+  }
+
+  @calendarExo.tool(z.object({
+    eventId: z.string(),
+    summary: z.string().optional(),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    start: z.string().optional(),
+    end: z.string().optional(),
+    attendees: z.array(z.string()).optional(),
+    calendarId: z.string().optional(),
+  }), {
+    sink: ({ attendees }: { attendees?: string[] }): ['calendar', { principals: string[] }] => [
+      'calendar',
+      { principals: attendees ?? [] },
+    ],
+  })
+  async update({ eventId, summary, description, location, start, end, attendees }: {
+    eventId: string
+    summary?: string
+    description?: string
+    location?: string
+    start?: string
+    end?: string
+    attendees?: string[]
+    calendarId?: string
+  }): Promise<CalendarEvent> {
+    const existing = this.events.get(eventId)
+    if (!existing) {
+      throw new Error(`Event not found: ${eventId}`)
+    }
+    const updated: CalendarEvent = {
+      ...existing,
+      summary: summary ?? existing.summary,
+      description: description ?? existing.description,
+      location: location ?? existing.location,
+      start: start ? { dateTime: start } : existing.start,
+      end: end ? { dateTime: end } : existing.end,
+      attendees: attendees ?? existing.attendees,
+    }
+    this.events.set(eventId, updated)
+    return updated
+  }
+
+  @calendarExo.tool(z.object({
+    eventId: z.string(),
+    calendarId: z.string().optional(),
+  }))
+  async delete({ eventId }: { eventId: string, calendarId?: string }): Promise<{ success: boolean }> {
+    if (!this.events.has(eventId)) {
+      throw new Error(`Event not found: ${eventId}`)
+    }
+    this.events.delete(eventId)
+    return { success: true }
+  }
+
+  @calendarExo.tool(z.object({
+    text: z.string(),
+    calendarId: z.string().optional(),
+  }))
+  async quickAdd({ text }: { text: string, calendarId?: string }): Promise<CalendarEvent> {
+    // Simple parsing: assume format like "Meeting tomorrow at 3pm"
+    const id = `event-${this.nextId++}`
+    const now = new Date()
+    const event: CalendarEvent = {
+      id,
+      summary: text,
+      description: undefined,
+      location: undefined,
+      start: { dateTime: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString() },
+      end: { dateTime: new Date(now.getTime() + 25 * 60 * 60 * 1000).toISOString() },
+      htmlLink: `https://calendar.google.com/event?eid=${id}`,
+      attendees: [],
+    }
+    this.events.set(id, event)
+    return event
   }
 }

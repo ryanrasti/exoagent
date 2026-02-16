@@ -115,6 +115,13 @@ export class Evaluator {
     }
     else if (node.type === 'IfStatement') {
       const test = yield* this.evaluate(node.test, scope)
+      // TODO: Context taint propagation bug - the condition's taints should propagate
+      // into the executed branch's scope as "context taints". Currently, values bound
+      // inside the branch don't inherit taints from the condition that caused them to
+      // be evaluated. This matters for callLlm/spawnAgent: even if you pass "clean"
+      // context, the decision to make the call was influenced by tainted data.
+      // Fix: create a child scope with contextTaints: test.getTaints(), and merge
+      // scope.getContextTaints() into any values bound or returned in that scope.
       // Use JavaScript's truthiness for the condition
       if (test.raw) {
         return yield* this.evalStatement(node.consequent, scope)
@@ -280,6 +287,11 @@ export class Evaluator {
     }
     else if (node.type === 'ConditionalExpression') {
       const test = yield* this.evaluate(node.test, scope)
+      // TODO: Same context taint propagation issue as IfStatement. We correctly
+      // taint the final result with test.getTaints(), but if the branch contains
+      // nested calls (e.g., callLlm, spawnAgent), those calls don't see the condition
+      // taints in their scope context. The condition taints should propagate into
+      // the evaluation scope of the branch, not just be merged at the end.
       // Use JavaScript's truthiness for the condition
       // The result inherits taints from the condition
       if (test.raw) {

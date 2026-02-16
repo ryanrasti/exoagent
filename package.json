@@ -50,6 +50,7 @@
     "prepublishOnly": "npm run build",
     "release": "bumpp",
     "start": "tsx src/index.ts",
+    "mcp": "tsx src/agent/main/mcp.ts",
     "test": "vitest --run",
     "typecheck": "tsc",
     "ci:capnweb": "cd packages/capnweb && npm ci && npm run build",
@@ -60,6 +61,7 @@
     "ai": "^6.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "astring": "^1.9.0",
     "camelcase": "^9.0.0",
     "capnweb": "file:dist/capnweb",

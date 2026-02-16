@@ -11,9 +11,40 @@ import { codeMode } from '../../code-mode'
 import { Value } from '../../eval'
 import { ExoAgent } from '../../policy'
 import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '../google/auth'
-import { CalendarClient } from '../google/calendar'
-import { GmailClient } from '../google/gmail'
+import { CalendarClient, MockCalendarClient } from '../google/calendar'
+import { GmailClient, MockGmailClient } from '../google/gmail'
+
+// Mock instances (state persists across requests)
+const mockGmail = new MockGmailClient()
+const mockCalendar = new MockCalendarClient()
+
+import { z } from 'zod'
 import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
+
+// Combined ExoAgent for both email and calendar
+const agentExo = new ExoAgent(
+  ['email', 'calendar'] as const,
+  ['email', 'calendar'] as const,
+)
+
+/** Builtin toolset with @tool decorators for policy enforcement */
+class BuiltinToolset {
+  constructor(
+    private onRespond: (msg: string) => void = () => {},
+    private onSetResult: (result: unknown) => void = () => {},
+  ) {}
+
+  @agentExo.tool(z.string())
+  respond(msg: string) {
+    this.onRespond(msg)
+  }
+
+  @agentExo.tool(z.unknown())
+  setToolCallResult(result: unknown) {
+    this.onSetResult(result)
+  }
+}
+
 import { addMessage, addTaintsToThread, createThread, createSubthread, deleteThread, getMessages, getSubthreads, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
 import { handle } from './transport'
 
@@ -65,10 +96,21 @@ export type LLMContext = {
   dts?: string
 }
 
+/** Built-in capabilities for agent control flow */
+export type BuiltinCaps = {
+  /** Send a response message to the user */
+  respond: (message: string) => void
+  /** Set structured data visible to agent in subsequent turns */
+  setToolCallResult: (result: unknown) => void
+  // TODO: callLlm and spawnAgent will be added later
+}
+
 /** Capabilities exposed to the LLM */
 export type LLMCapabilities = {
-  /** The API object exposed to codeMode */
+  /** The API object exposed to codeMode (gmail, calendar, etc.) */
   api: object
+  /** Built-in caps - if not provided, llm() creates default ones */
+  builtinCaps?: BuiltinCaps
 }
 
 /** Options for the LLM function */
@@ -104,7 +146,7 @@ function formatHistoryForLLM(history: Turn[]): Array<{ role: 'user' | 'assistant
 }
 
 /** Result from llm() - a Value containing response/data/code with taints */
-export type LLMResult = Value<{ response: string, data: unknown, code: string }>
+export type LLMResult = Value & { raw: { response: string, data: unknown, code: string } }
 
 /**
  * Execute an LLM turn with the given context, capabilities, and policy.
@@ -120,16 +162,30 @@ export async function llm<Sinks extends readonly string[]>(
 ): Promise<LLMResult> {
   const { context, capabilities, policy, outputSink, maxCost = 10, apiKey } = opts
 
+  // State captured by builtin caps during execution
+  let responseMessage = ''
+  let toolResultData: unknown = null
+
+  // Create builtin caps - use BuiltinToolset for proper @tool decorators
+  const builtinCaps = capabilities.builtinCaps ?? new BuiltinToolset(
+    (msg) => { responseMessage = msg },
+    (result) => { toolResultData = result },
+  )
+
+  // Globals: api (user caps) and builtin (respond, setToolCallResult, etc.)
+  const globals = { api: capabilities.api, builtin: builtinCaps }
+
   const google = createGoogleGenerativeAI({ apiKey })
 
   // Build the code execution tool
+  const inputTaints = context.history.flatMap(turn => turn.role === 'assistant' ? turn.taints : [])
   const codeTool = codeMode({
-    api: capabilities.api,
+    globals,
     policy,
     dts: context.dts,
     outputSink,
     maxCost,
-    inputTaints: context.history.flatMap(turn => turn.role === 'assistant' ? turn.taints : []),
+    inputTaints,
   })
 
   // Format history for LLM
@@ -146,6 +202,7 @@ export async function llm<Sinks extends readonly string[]>(
     tools: {
       execute: tool(codeTool),
     },
+    toolChoice: 'required',
     stopWhen: stepCountIs(1),
     maxRetries: 0,
   })
@@ -172,7 +229,7 @@ export async function llm<Sinks extends readonly string[]>(
 
   // AI SDK tool results have the result in `output`
   const toolResult = step.toolResults[0] as { output: CodeModeResult }
-  const { response, data, taints, error } = toolResult.output
+  const { taints, error } = toolResult.output
 
   // If there was an error, throw it with full details
   if (error) {
@@ -182,25 +239,27 @@ export async function llm<Sinks extends readonly string[]>(
     throw err
   }
 
-  // Wrap the result as a Value with the captured taints, including the executed code
-  const value = Value.of({ response, data, code: executedCode }, taints)
+  // Response and data come from builtin caps called during execution
+  const value = Value.of({ response: responseMessage, data: toolResultData, code: executedCode }, taints)
 
-  return value
+  return value as LLMResult
 }
 
 // Gmail/Calendar specific configuration
 const GMAIL_CALENDAR_SYSTEM_PROMPT = `You are an AI assistant that helps users manage their email and calendar.
 
-You have access to a single tool called "execute" that runs JavaScript code to interact with the Gmail and Calendar APIs.
+You have access to a single tool called "execute" that runs JavaScript code.
+
+Two globals are available:
+- \`api\`: Gmail and Calendar APIs (api.gmail, api.calendar)
+- \`builtin\`: Agent control functions (builtin.respond, builtin.setToolCallResult)
 
 IMPORTANT:
-- You MUST use the execute tool to perform any actions - you cannot access email or calendar data without it.
-- Your code MUST return an object with exactly this shape: { response: string, data: unknown }
-  - "response": The message to show the user
-  - "data": Any data you want to remember for future turns (not shown to user)
-- If you don't need to call any APIs, still use the execute tool with simple code that returns the response.
-- DO NOT use array methods like .map(), .filter(), .reduce(), .forEach(), etc. Use for loops instead.
-- DO NOT use object methods like Object.keys(), Object.values(), Object.entries(), etc. Use for...in loops instead.
+- You MUST use the execute tool to perform any actions.
+- Use builtin.respond(message) to send a response to the user. This is the ONLY output the user will see.
+- Use builtin.setToolCallResult(data) to store structured data for future turns. This is NOT displayed to the user - it is only available to you in subsequent turns.
+- DO NOT use array methods like .map(), .filter(), .reduce(), .forEach(), etc.
+- DO NOT use object methods like Object.keys(), Object.values(), Object.entries(), etc.
 
 When you receive previous assistant turns, they will contain the "response" that was shown to the user and "data" that you stored. Use the "data" to maintain context across turns.
 `
@@ -250,18 +309,176 @@ interface Api {
   gmail: Gmail
   calendar: Calendar
 }
+
+interface Builtin {
+  /** Send a response message to the user */
+  respond(message: string): void
+  /** Set structured data visible to agent in subsequent turns */
+  setToolCallResult(result: unknown): void
+}
+
+/** Global: api */
+declare const api: Api
+/** Global: builtin */
+declare const builtin: Builtin
 `
 
-// Combined ExoAgent for both email and calendar
-const agentExo = new ExoAgent(
-  ['email', 'calendar'] as const,
-  ['email', 'calendar'] as const,
-)
+/** Chat result type */
+export interface ChatResult {
+  response: string
+  data: unknown
+  taints: Taint[]
+  code: string
+  forked?: { subthreadId: string, taints: Taint[] }
+}
+
+/** Create a new thread - exported for use by MCP */
+export async function handleThreadsCreate(): Promise<{ id: string }> {
+  const id = crypto.randomUUID()
+  await createThread(id)
+  return { id }
+}
+
+/** Chat on a thread - exported for use by MCP */
+export async function handleChat(threadId: string, message: string, apiKey: string): Promise<ChatResult> {
+  // Get or create thread
+  let thread = await getThread(threadId)
+  const needsTitle = !thread || !thread.title
+  if (!thread) {
+    thread = await createThread(threadId)
+  }
+
+  // Get existing messages and convert to turns
+  const existingMessages = await getMessages(threadId)
+  const history = messagesToTurns(existingMessages)
+
+  // Save user message
+  await addMessage(threadId, {
+    id: crypto.randomUUID(),
+    role: 'user',
+    content: message,
+  })
+
+  // Use mock clients
+  const gmail = mockGmail
+  const calendar = mockCalendar
+
+  // Create policy with deny rules for cross-principal data flow
+  const policy = agentExo.policy([
+    (source, sink) => {
+      const sourcePrincipals = source[1].principals ?? []
+      const sinkPrincipals = sink[1].principals ?? []
+      if (sourcePrincipals.length === 0) return 'allow'
+      if (sinkPrincipals.length === 0) return 'allow'
+      const allowed = sinkPrincipals.every(p => sourcePrincipals.includes(p))
+      return allowed ? 'allow' : 'deny'
+    },
+  ])
+
+  // Use the generic llm() function
+  const result = await llm({
+    context: {
+      system: GMAIL_CALENDAR_SYSTEM_PROMPT,
+      history,
+      message,
+      dts: GMAIL_CALENDAR_DTS,
+    },
+    capabilities: {
+      api: { gmail, calendar },
+    },
+    policy,
+    outputSink: 'email',
+    apiKey,
+  })
+
+  // Unwrap the Value for the response
+  const taints = result.getTaints()
+  const { response, data, code } = result.unwrap(() => {}) as unknown as { response: string, data: unknown, code: string }
+
+  // Check if we need to fork to a subthread
+  if (thread.parent_id === null && taints.length > 0) {
+    const subthreadId = crypto.randomUUID()
+    await createSubthread(subthreadId, threadId, taints)
+
+    // Save the full response in the subthread
+    await addMessage(subthreadId, {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: response,
+      data,
+      taints,
+      code,
+    })
+
+    // Create redaction marker for main thread
+    const redaction: Redaction = { subthread_id: subthreadId, taints }
+    const redactedContent = `[subthread:${subthreadId} taints:${formatTaintsForContext(taints)}]`
+
+    // Save redacted message in main thread
+    await addMessage(threadId, {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: redactedContent,
+      data: { redaction },
+      taints: [],
+      code,
+    })
+
+    // Generate title for threads without one
+    if (needsTitle) {
+      generateThreadTitle(threadId, message, apiKey).catch(() => {})
+    }
+
+    return { response: redactedContent, data: { redaction }, taints: [], code, forked: { subthreadId, taints } }
+  }
+
+  // If in a subthread and we have new taints, accumulate them
+  if (thread.parent_id !== null && taints.length > 0) {
+    await addTaintsToThread(threadId, taints)
+  }
+
+  // Save message to current thread
+  await addMessage(threadId, {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content: response,
+    data,
+    taints,
+    code,
+  })
+
+  // Generate title for threads without one
+  if (needsTitle) {
+    generateThreadTitle(threadId, message, apiKey).catch(() => {})
+  }
+
+  return { response, data, taints, code }
+}
 
 /**
  * Register all handlers with the transport layer
  */
 export function registerHandlers(): void {
+  // Mock state management (for testing)
+  handle('mock:seed', async (data: { emails?: any[], events?: any[] }) => {
+    if (data.emails) mockGmail.seed(data.emails)
+    if (data.events) mockCalendar.seed(data.events)
+    return { ok: true }
+  })
+
+  handle('mock:state', async () => {
+    return {
+      gmail: mockGmail.getState(),
+      calendar: mockCalendar.getState(),
+    }
+  })
+
+  handle('mock:clear', async () => {
+    mockGmail.clear()
+    mockCalendar.clear()
+    return { ok: true }
+  })
+
   // Secrets
   handle('secrets:status', async () => getSecretsStatus())
 
@@ -270,7 +487,6 @@ export function registerHandlers(): void {
   })
 
   handle('secrets:setGoogleOAuthClient', async (clientJson: string) => {
-    // Validate the JSON before saving
     parseClientConfig(clientJson)
     return setSecret('googleOAuthClient', clientJson)
   })
@@ -291,14 +507,9 @@ export function registerHandlers(): void {
   })
 
   // Thread management
-  handle('threads:list', async () => {
-    return listThreads()
-  })
+  handle('threads:list', async () => listThreads())
 
-  handle('threads:create', async () => {
-    const id = crypto.randomUUID()
-    return createThread(id)
-  })
+  handle('threads:create', async () => handleThreadsCreate())
 
   handle('threads:get', async (threadId: string) => {
     const thread = await getThread(threadId)
@@ -309,23 +520,14 @@ export function registerHandlers(): void {
     return { thread, messages }
   })
 
-  handle('threads:pin', async (threadId: string) => {
-    await pinThread(threadId)
-  })
+  handle('threads:pin', async (threadId: string) => pinThread(threadId))
 
-  handle('threads:unpin', async (threadId: string) => {
-    await unpinThread(threadId)
-  })
+  handle('threads:unpin', async (threadId: string) => unpinThread(threadId))
 
-  handle('threads:delete', async (threadId: string) => {
-    await deleteThread(threadId)
-  })
+  handle('threads:delete', async (threadId: string) => deleteThread(threadId))
 
-  handle('threads:subthreads', async (parentId: string) => {
-    return getSubthreads(parentId)
-  })
+  handle('threads:subthreads', async (parentId: string) => getSubthreads(parentId))
 
-  // Notify main thread from subthread - surfaces content with user approval
   handle('threads:notifyMain', async (subthreadId: string, messageContent: string) => {
     const thread = await getThread(subthreadId)
     if (!thread) {
@@ -335,175 +537,24 @@ export function registerHandlers(): void {
       throw new Error(`Thread ${subthreadId} is not a subthread`)
     }
 
-    // Add message to main thread
     const notificationContent = `From subthread ${subthreadId}:\n${messageContent}`
     await addMessage(thread.parent_id, {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: notificationContent,
       data: { fromSubthread: subthreadId },
-      taints: [], // User approved, so no taints on main thread
+      taints: [],
     })
 
     return { success: true, parentId: thread.parent_id }
   })
 
-  // Chat - now takes threadId instead of history
+  // Chat
   handle('chat', async (threadId: string, message: string) => {
     const apiKey = await getSecret('geminiApiKey')
     if (!apiKey) {
       throw new Error('API key not configured')
     }
-
-    // Get Google clients if available
-    const clientJson = await getSecret('googleOAuthClient')
-    const tokensJson = await getSecret('googleTokens')
-
-    if (!clientJson || !tokensJson) {
-      throw new Error('Google APIs not configured. Please set up OAuth first.')
-    }
-
-    // Get or create thread
-    let thread = await getThread(threadId)
-    const needsTitle = !thread || !thread.title
-    if (!thread) {
-      thread = await createThread(threadId)
-    }
-
-    // Get existing messages and convert to turns
-    const existingMessages = await getMessages(threadId)
-    const history = messagesToTurns(existingMessages)
-
-    // Save user message
-    await addMessage(threadId, {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: message,
-    })
-
-    const tokens = JSON.parse(tokensJson)
-    const authClient = createAuthenticatedClient(clientJson, tokens)
-    const gmail = new GmailClient(authClient)
-    const calendar = new CalendarClient(authClient)
-
-    // Create policy with deny rules for cross-principal data flow
-    const policy = agentExo.policy([
-      // Callback rule: email/calendar data can only flow to recipients who had access
-      (source, sink) => {
-        const sourcePrincipals = source[1].principals ?? []
-        const sinkPrincipals = sink[1].principals ?? []
-        // If source has no principals (public data), allow
-        if (sourcePrincipals.length === 0)
-          return 'allow'
-        // If sink has no principals (no recipients), allow
-        if (sinkPrincipals.length === 0)
-          return 'allow'
-        // Check that all sink principals are in source principals
-        const allowed = sinkPrincipals.every(p => sourcePrincipals.includes(p))
-        return allowed ? 'allow' : 'deny'
-      },
-    ])
-
-    // Use the generic llm() function
-    const result = await llm({
-      context: {
-        system: GMAIL_CALENDAR_SYSTEM_PROMPT,
-        history,
-        message,
-        dts: GMAIL_CALENDAR_DTS,
-      },
-      capabilities: {
-        api: { gmail, calendar },
-      },
-      policy,
-      outputSink: 'email',
-      apiKey,
-    })
-
-    // Unwrap the Value for the response (top-level, no further policy check needed)
-    const taints = result.getTaints()
-    const { response, data, code } = result.unwrap(() => {}) as { response: string, data: unknown, code: string }
-
-    console.log('[chat] Result taints:', JSON.stringify(taints))
-    console.log('[chat] Thread parent_id:', thread.parent_id)
-    console.log('[chat] Should fork?', thread.parent_id === null && taints.length > 0)
-
-    // Check if we need to fork to a subthread
-    // Fork if: main thread (no parent) AND result has taints
-    if (thread.parent_id === null && taints.length > 0) {
-      console.log('[chat] Forking to subthread...')
-      // Create subthread with the taints
-      const subthreadId = crypto.randomUUID()
-      console.log('[chat] Creating subthread:', subthreadId, 'with taints:', JSON.stringify(taints))
-      await createSubthread(subthreadId, threadId, taints)
-      console.log('[chat] Subthread created successfully')
-
-      // Save the full response in the subthread
-      await addMessage(subthreadId, {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: response,
-        data,
-        taints,
-        code,
-      })
-
-      // Create redaction marker for main thread
-      const redaction: Redaction = { subthread_id: subthreadId, taints }
-      const redactedContent = `[subthread:${subthreadId} taints:${formatTaintsForContext(taints)}]`
-
-      // Save redacted message in main thread
-      await addMessage(threadId, {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: redactedContent,
-        data: { redaction },
-        taints: [], // Main thread stays clean
-        code,
-      })
-
-      // Generate title for threads without one
-      if (needsTitle) {
-        try {
-          await generateThreadTitle(threadId, message, apiKey)
-        }
-        catch (err) {
-          console.error('[chat] Failed to generate thread title:', err)
-        }
-      }
-
-      console.log('[chat] Returning forked response with redaction')
-      return { response: redactedContent, data: { redaction }, taints: [], code, forked: { subthreadId, taints } }
-    }
-
-    console.log('[chat] No fork needed, saving to current thread')
-
-    // If in a subthread and we have new taints, accumulate them
-    if (thread.parent_id !== null && taints.length > 0) {
-      console.log('[chat] Accumulating taints in subthread:', JSON.stringify(taints))
-      await addTaintsToThread(threadId, taints)
-    }
-
-    // Save message to current thread
-    await addMessage(threadId, {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: response,
-      data,
-      taints,
-      code,
-    })
-
-    // Generate title for threads without one
-    if (needsTitle) {
-      try {
-        await generateThreadTitle(threadId, message, apiKey)
-      }
-      catch (err) {
-        console.error('[chat] Failed to generate thread title:', err)
-      }
-    }
-
-    return { response, data, taints, code }
+    return handleChat(threadId, message, apiKey)
   })
 }

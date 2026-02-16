@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import z from 'zod'
 import { codeMode } from '../code-mode'
 import { ExoAgent } from '../policy'
 import { Database } from './builder'
@@ -45,6 +46,21 @@ class Api {
   }
 }
 
+/** Create a builtin toolset with respond and setToolCallResult */
+function createBuiltinToolset(exoAgent: ExoAgent<any, any>, callbacks: { onRespond?: (msg: string) => void, onSetResult?: (result: unknown) => void } = {}) {
+  return new class {
+    @exoAgent.tool(z.string())
+    respond(msg: string) {
+      callbacks.onRespond?.(msg)
+    }
+
+    @exoAgent.tool(z.unknown())
+    setToolCallResult(result: unknown) {
+      callbacks.onSetResult?.(result)
+    }
+  }()
+}
+
 db.execute(sql`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)`)
 db.execute(sql`INSERT INTO users (id, name, email) VALUES (1, 'John Doe', 'john.doe@example.com')`)
 db.execute(sql`INSERT INTO users (id, name, email) VALUES (2, 'Jane Doe', 'jane.doe@example.com')`)
@@ -55,10 +71,16 @@ db.execute(sql`INSERT INTO posts (id, user_id, title, content) VALUES (2, 2, 'He
 
 describe('sql integration with eval sandbox', () => {
   it('executes a basic select via CodeMode', async () => {
+    let data: unknown = null
+
     const codeTool = codeMode({
-      api: new Api(),
+      globals: {
+        api: new Api(),
+        builtin: createBuiltinToolset(exo, { onSetResult: (result) => { data = result } }),
+      },
       policy,
       outputSink: 'output',
+      inputTaints: [],
       dts: `class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
@@ -67,22 +89,28 @@ describe('sql integration with eval sandbox', () => {
     })
 
     const result = await codeTool.execute({
-      code: `async ({ users }) => {
-        const data = await users()
-          .select(({ user }) => ({ id: user.id, name: user.name }))
-          .execute()
-        return { response: "Got users", data: data }
-      }`,
+      code: `
+        const query = api.users().select(({ user }) => ({ id: user.id, name: user.name }))
+        const data = await query.execute()
+        builtin.setToolCallResult(data)
+      `,
     }, { toolCallId: 'test-1', messages: [] })
 
-    expect(result.data).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
+    expect(result.error).toBeUndefined()
+    expect(data).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
   })
 
   it('executes a join via CodeMode', async () => {
+    let data: unknown = null
+
     const codeTool = codeMode({
-      api: new Api(),
+      globals: {
+        api: new Api(),
+        builtin: createBuiltinToolset(exo, { onSetResult: (result) => { data = result } }),
+      },
       policy,
       outputSink: 'output',
+      inputTaints: [],
       dts: `class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
@@ -103,15 +131,16 @@ class Post extends db.Table('posts').as('post') {
     })
 
     const result = await codeTool.execute({
-      code: `async ({ users }) => {
-        const data = await users()
+      code: `
+        const query = api.users()
           .join(({ user }) => user.posts())
           .select(({ user, post }) => ({ userName: user.name, postTitle: post.title }))
-          .execute()
-        return { response: "Got posts", data: data }
-      }`,
+        const data = await query.execute()
+        builtin.setToolCallResult(data)
+      `,
     }, { toolCallId: 'test-2', messages: [] })
 
-    expect(result.data).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
+    expect(result.error).toBeUndefined()
+    expect(data).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
   })
 })
