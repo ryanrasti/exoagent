@@ -1,21 +1,22 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Taint, TaintInput, TaintsInput, ValueOptions } from './eval/utils'
 import z from 'zod'
-import { normalizeTaint, normalizeTaints, Value } from './eval'
+// Import from eval/utils directly to avoid circular dependency with builtins
+import { normalizeTaint, normalizeTaints, Value } from './eval/utils'
 import { getPolicyMetadata, setPolicyMetadata } from './meta'
 
 // Static source/sink: just taint type names
 // Dynamic source: function that takes return value and produces taints
 // Dynamic sink: function that takes args and produces taints
-export type SourceAnnotation<Sources extends string[]> =
-  | Sources[number]
-  | readonly Sources[number][]
-  | ((retVal: any) => TaintsInput)
+export type SourceAnnotation<Sources extends string[]>
+  = | Sources[number]
+    | readonly Sources[number][]
+    | ((retVal: any) => TaintsInput)
 
-export type SinkAnnotation<Sinks extends string[]> =
-  | Sinks[number]
-  | readonly Sinks[number][]
-  | ((...args: any[]) => TaintsInput)
+export type SinkAnnotation<Sinks extends string[]>
+  = | Sinks[number]
+    | readonly Sinks[number][]
+    | ((...args: any[]) => TaintsInput)
 
 export type ToolProps<Sinks extends string[], Sources extends string[]> = {
   source?: SourceAnnotation<Sources>
@@ -143,7 +144,8 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
             }
           }
         }
-      } else {
+      }
+      else {
         // Simple deny rule: match by type names
         const hasMatchingSource = denyRule.sources.some(source => incomingTaints.some(([type]) => type === source))
         const hasMatchingSink = denyRule.sinks.some(sink => sinkTaints.some(([type]) => type === sink))
@@ -173,7 +175,8 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
               }
             }
           }
-        } else {
+        }
+        else {
           const hasMatchingSource = denyRule.sources.some(source => taints.some(([type]) => type === source))
           const hasMatchingSink = denyRule.sinks.some(s => sinkTaints.some(([type]) => type === s))
           if (hasMatchingSource && hasMatchingSink) {
@@ -196,9 +199,11 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
       throw new Error(`Method must have a name and parent`)
     }
 
-    const meta = getPolicyMetadata(options.parent.raw as object)
+    // Check for @tool metadata - first on the Value subclass (e.g., ArrayValue),
+    // then on the wrapped raw object (e.g., GmailClient)
+    const meta = getPolicyMetadata(options.parent) ?? getPolicyMetadata(options.parent.raw as object)
     if (!meta) {
-      throw new Error(`Method ${options.propertyName} does not have any @tool annotations: ${options.parent.raw}`)
+      throw new Error(`Method ${options.propertyName} does not have any @tool annotations: ${options.parent}`)
     }
     const toolProps = meta[options.propertyName] as ToolProps<string[], string[]> | undefined
     if (!toolProps) {

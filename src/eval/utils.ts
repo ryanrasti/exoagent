@@ -158,6 +158,13 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     if (this.isFunction() && this.options?.fnNode) {
       return (...args: unknown[]) => {
         const res = this.raw(...(args.map(arg => Value.of(arg))))
+        // Handle async functions - if result is a Promise, unwrap after resolution
+        if (res instanceof Promise) {
+          return res.then((resolved: unknown) => {
+            const val = resolved instanceof Value ? resolved : Value.of(resolved, [])
+            return val.unwrap(checkPolicy, `${path}()`)
+          })
+        }
         // Policy check happens when function result is unwrapped
         return res.unwrap(checkPolicy, `${path}()`)
       }
@@ -175,6 +182,9 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     return this.raw as SafeEvalValueInner
   }
 
+  // Factory for creating array values - can be overridden by builtins.ts
+  static arrayFactory: ((raw: Value[], taints: TaintsInput, options: ValueOptions) => Value) | null = null
+
   static of(raw: unknown, taints?: TaintsInput, options?: ValueOptions): Value
   static of<T extends SafeEvalValueInner>(raw: T, taints?: TaintsInput, options?: ValueOptions): Value<T>
   static of(raw: unknown, taints: TaintsInput = [], options?: ValueOptions): Value {
@@ -185,6 +195,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
       const wrapped = raw.map(item => item instanceof Value ? item.withTaints(subTaints) : Value.of(item as SafeEvalValueInner, subTaints, { shallow }))
+      // Use arrayFactory if available (for ArrayValue support)
+      if (Value.arrayFactory) {
+        return Value.arrayFactory(wrapped, taints, storedOptions)
+      }
       return new Value(wrapped, taints, storedOptions)
     }
     if (typeof raw === 'object' && raw !== null) {
@@ -251,6 +265,22 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
   getSlot(key: Value<string | number>): Value<SafeEvalValueInner> {
     if (!key.isSafeMember()) {
       throw new Error(`Key ${key.raw} is not a safe string or number`)
+    }
+
+    // First check if the Value subclass itself has methods with metadata (e.g., ArrayValue.map)
+    if (typeof key.raw === 'string') {
+      const selfMetadata = getPolicyMetadata(this)
+      if (selfMetadata && selfMetadata[key.raw]) {
+        // Return a bound method as a Value
+        const method = (this as any)[key.raw]
+        if (typeof method === 'function') {
+          const boundMethod = method.bind(this)
+          return Value.of(boundMethod, this.getTaints(), {
+            propertyName: key.raw,
+            parent: this,
+          })
+        }
+      }
     }
 
     if (this.isPlainObject()) {

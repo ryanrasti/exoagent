@@ -8,8 +8,11 @@ import type { Policy } from '../../policy'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText, stepCountIs, tool } from 'ai'
 import { codeMode } from '../../code-mode'
-import { Value } from '../../eval'
+import { registerArrayValueFactory, Value } from '../../eval'
 import { ExoAgent } from '../../policy'
+
+// Ensure ArrayValue factory is registered before any policy code runs
+registerArrayValueFactory()
 import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '../google/auth'
 import { CalendarClient, MockCalendarClient } from '../google/calendar'
 import { GmailClient, MockGmailClient } from '../google/gmail'
@@ -46,6 +49,11 @@ class BuiltinToolset {
   @agentExo.tool(z.unknown())
   setToolCallResult(result: unknown) {
     this.onSetResult(result)
+  }
+
+  @agentExo.tool(z.array(z.unknown()))
+  all(promises: Promise<unknown>[]): Promise<unknown[]> {
+    return Promise.all(promises)
   }
 }
 
@@ -262,8 +270,16 @@ IMPORTANT:
 - You MUST use the execute tool to perform any actions.
 - Use builtin.respond(message) to send a response to the user. This is the ONLY output the user will see.
 - Use builtin.setToolCallResult(data) to store structured data for future turns. This is NOT displayed to the user - it is only available to you in subsequent turns.
-- DO NOT use array methods like .map(), .filter(), .reduce(), .forEach(), etc.
-- DO NOT use object methods like Object.keys(), Object.values(), Object.entries(), etc.
+
+CODE RESTRICTIONS - The sandbox only supports a limited subset of JavaScript:
+- ONLY use \`const\` declarations (NO \`let\`, NO \`var\`)
+- NO loops (\`for\`, \`while\`, \`do-while\`) - use .map() instead
+- NO function declarations (arrow functions ARE allowed as callbacks)
+- NO object methods (Object.keys, Object.values, etc.)
+- You CAN use: const, await, if/else, ternary operators, array indexing, property access, logical not (!)
+- You CAN use array methods: .map(), .filter(), .find(), .some(), .every(), .at(), .slice(), .length
+- Arrow functions work as callbacks: arr.map(x => x.id) or arr.filter(x => x.value > 10)
+- For async operations on arrays, use: const results = await builtin.all(arr.map(async x => await api.something(x)))
 
 When you receive previous assistant turns, they will contain the "response" that was shown to the user and "data" that you stored. Use the "data" to maintain context across turns.
 `
@@ -321,6 +337,7 @@ export async function handleChat(threadId: string, message: string, apiKey: stri
     },
     policy: mockPolicy,
     outputSink: 'email',
+    maxCost: 50,
     apiKey,
   })
 

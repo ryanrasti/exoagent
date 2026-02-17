@@ -198,41 +198,143 @@ export class GmailClient implements IGmail {
 
 /** Default seed data for mock Gmail */
 export const MOCK_GMAIL_SEED: EmailMessage[] = [
+  // Boss email - urgent action needed (workflow: email triage)
   {
     id: 'email-1',
     threadId: 'thread-1',
-    labels: ['INBOX'],
-    from: 'alice@example.com',
+    labels: ['INBOX', 'IMPORTANT'],
+    from: 'boss@company.com',
     to: ['me@example.com'],
     cc: [],
-    subject: 'Hello from Alice',
-    date: new Date('2024-01-15T10:00:00Z'),
-    text: 'Hi there! How are you doing?',
+    subject: 'Q4 Report Review - Need by EOD',
+    date: new Date('2024-01-15T08:00:00Z'),
+    text: 'Hi,\n\nPlease review the Q4 report and send me your comments by end of day. The board meeting is tomorrow.\n\nThanks,\nSarah',
     html: false,
     principals: {
-      from: 'alice@example.com',
+      from: 'boss@company.com',
       to: ['me@example.com'],
       cc: [],
-      all: ['alice@example.com', 'me@example.com'],
+      all: ['boss@company.com', 'me@example.com'],
       auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
     },
   },
+  // Meeting request with specific time (workflow: email → calendar)
   {
     id: 'email-2',
     threadId: 'thread-2',
     labels: ['INBOX'],
-    from: 'bob@example.com',
+    from: 'alice@example.com',
     to: ['me@example.com'],
-    cc: [],
-    subject: 'Meeting tomorrow',
-    date: new Date('2024-01-15T11:00:00Z'),
-    text: 'Can we meet tomorrow at 2pm?',
+    cc: ['bob@example.com'],
+    subject: 'Project sync - Thursday 2pm?',
+    date: new Date('2024-01-15T09:30:00Z'),
+    text: 'Hey!\n\nCan we do a quick sync on the project? How about Thursday at 2pm Pacific? We can use my Zoom: https://zoom.us/j/123456789\n\nAlice',
     html: false,
     principals: {
-      from: 'bob@example.com',
+      from: 'alice@example.com',
+      to: ['me@example.com'],
+      cc: ['bob@example.com'],
+      all: ['alice@example.com', 'me@example.com', 'bob@example.com'],
+      auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
+    },
+  },
+  // Newsletter (workflow: email triage - low priority)
+  {
+    id: 'email-3',
+    threadId: 'thread-3',
+    labels: ['INBOX', 'CATEGORY_PROMOTIONS'],
+    from: 'newsletter@techdigest.com',
+    to: ['me@example.com'],
+    cc: [],
+    subject: 'This Week in AI: Top 10 Breakthroughs',
+    date: new Date('2024-01-15T06:00:00Z'),
+    text: 'Your weekly AI digest:\n\n1. New language model achieves...\n2. Robotics breakthrough...\n\nUnsubscribe: https://techdigest.com/unsub',
+    html: false,
+    principals: {
+      from: 'newsletter@techdigest.com',
       to: ['me@example.com'],
       cc: [],
-      all: ['bob@example.com', 'me@example.com'],
+      all: ['newsletter@techdigest.com', 'me@example.com'],
+      auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
+    },
+  },
+  // Team update worth forwarding to Slack (workflow: email → slack relay)
+  {
+    id: 'email-4',
+    threadId: 'thread-4',
+    labels: ['INBOX'],
+    from: 'devops@company.com',
+    to: ['engineering-team@company.com'],
+    cc: ['me@example.com'],
+    subject: 'Production deployment scheduled - Friday 6pm',
+    date: new Date('2024-01-15T14:00:00Z'),
+    text: 'Team,\n\nWe will be deploying v2.5.0 to production on Friday at 6pm PST.\n\nKey changes:\n- New auth system\n- Performance improvements\n- Bug fixes for checkout flow\n\nPlease ensure your changes are merged by Thursday EOD.\n\n- DevOps Team',
+    html: false,
+    principals: {
+      from: 'devops@company.com',
+      to: ['engineering-team@company.com'],
+      cc: ['me@example.com'],
+      all: ['devops@company.com', 'engineering-team@company.com', 'me@example.com'],
+      auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
+    },
+  },
+  // Client email requiring response (workflow: email triage)
+  {
+    id: 'email-5',
+    threadId: 'thread-5',
+    labels: ['INBOX'],
+    from: 'john.smith@clientcorp.com',
+    to: ['me@example.com'],
+    cc: ['sales@company.com'],
+    subject: 'RE: Contract renewal discussion',
+    date: new Date('2024-01-15T11:00:00Z'),
+    text: 'Hi,\n\nThanks for sending over the proposal. We have a few questions:\n\n1. Can we get a 15% discount for a 2-year commitment?\n2. Is 24/7 support included?\n3. What are the SLA guarantees?\n\nLooking forward to your response.\n\nBest,\nJohn Smith\nClientCorp',
+    html: false,
+    principals: {
+      from: 'john.smith@clientcorp.com',
+      to: ['me@example.com'],
+      cc: ['sales@company.com'],
+      all: ['john.smith@clientcorp.com', 'me@example.com', 'sales@company.com'],
+      auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
+    },
+  },
+  // Personal email (workflow: email triage - personal)
+  {
+    id: 'email-6',
+    threadId: 'thread-6',
+    labels: ['INBOX'],
+    from: 'mom@family.com',
+    to: ['me@example.com'],
+    cc: [],
+    subject: 'Dinner Sunday?',
+    date: new Date('2024-01-15T12:00:00Z'),
+    text: 'Hi sweetie!\n\nAre you free for dinner on Sunday? Dad wants to try that new Italian place downtown. Let me know!\n\nLove,\nMom',
+    html: false,
+    principals: {
+      from: 'mom@family.com',
+      to: ['me@example.com'],
+      cc: [],
+      all: ['mom@family.com', 'me@example.com'],
+      auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
+    },
+  },
+  // Expense report (workflow: cross-app automation)
+  {
+    id: 'email-7',
+    threadId: 'thread-7',
+    labels: ['INBOX'],
+    from: 'expenses@company.com',
+    to: ['me@example.com'],
+    cc: [],
+    subject: 'Expense report approved - $450.00',
+    date: new Date('2024-01-15T13:00:00Z'),
+    text: 'Your expense report #EXP-2024-0115 for $450.00 has been approved.\n\nItems:\n- Flight to SF: $320.00\n- Uber to office: $45.00\n- Team lunch: $85.00\n\nReimbursement will be processed in the next payroll cycle.',
+    html: false,
+    principals: {
+      from: 'expenses@company.com',
+      to: ['me@example.com'],
+      cc: [],
+      all: ['expenses@company.com', 'me@example.com'],
       auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass', verified: true },
     },
   },
@@ -307,12 +409,16 @@ export class MockGmailClient implements IGmail {
   }))
   async list({ maxResults, query }: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>> {
     const emails = [...this.emails.values()]
-    // Simple query matching on subject/text
-    const filtered = query
-      ? emails.filter(e =>
-          e.subject?.toLowerCase().includes(query.toLowerCase())
-          || e.text?.toLowerCase().includes(query.toLowerCase()))
-      : emails
+    // Handle Gmail-style queries - for mock, just return all inbox emails
+    // Real queries like "is:unread", "in:inbox" are not filtered in mock
+    const isGmailQuery = query.includes(':')
+    const filtered = isGmailQuery
+      ? emails.filter(e => e.labels.includes('INBOX'))
+      : query
+        ? emails.filter(e =>
+            e.subject?.toLowerCase().includes(query.toLowerCase())
+            || e.text?.toLowerCase().includes(query.toLowerCase()))
+        : emails
     return filtered.slice(0, maxResults).map(e => ({ id: e.id, threadId: e.threadId }))
   }
 

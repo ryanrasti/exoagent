@@ -2,7 +2,11 @@ import type { ToolExecutionOptions } from 'ai'
 import type { Taint } from './eval/utils'
 import type { Policy } from './policy'
 import { z } from 'zod'
-import { GlobalScope, normalizeTaint, safeEval, Value } from './eval'
+// Import registerArrayValueFactory to enable ArrayValue support
+import { GlobalScope, normalizeTaint, registerArrayValueFactory, safeEval, Value } from './eval'
+
+// Ensure ArrayValue factory is registered
+registerArrayValueFactory()
 
 export type CodeModeOptions<Sinks extends readonly string[]> = {
   /** Global scope object - all properties become globals in the REPL */

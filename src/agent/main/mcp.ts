@@ -13,6 +13,10 @@
  *   GEMINI_API_KEY=... npx tsx src/agent/main/mcp.ts
  */
 
+// Register ArrayValue factory FIRST before any other imports
+import { registerArrayValueFactory } from '../../eval'
+registerArrayValueFactory()
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'

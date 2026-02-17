@@ -197,15 +197,93 @@ export class CalendarClient implements ICalendar {
 
 /** Default seed data for mock Calendar */
 export const MOCK_CALENDAR_SEED: CalendarEvent[] = [
+  // Daily standup
   {
     id: 'event-1',
     summary: 'Team standup',
     description: 'Daily standup meeting',
     location: 'Conference Room A',
-    start: { dateTime: '2024-01-16T09:00:00Z' },
-    end: { dateTime: '2024-01-16T09:30:00Z' },
+    start: { dateTime: '2024-01-16T09:00:00-08:00' },
+    end: { dateTime: '2024-01-16T09:30:00-08:00' },
     htmlLink: 'https://calendar.google.com/event?eid=event-1',
+    attendees: ['me@example.com', 'alice@example.com', 'bob@example.com'],
+  },
+  // Board meeting prep (ties to boss email)
+  {
+    id: 'event-2',
+    summary: 'Board meeting prep',
+    description: 'Review Q4 report with leadership before board meeting',
+    location: 'https://zoom.us/j/987654321',
+    start: { dateTime: '2024-01-16T11:00:00-08:00' },
+    end: { dateTime: '2024-01-16T12:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-2',
+    attendees: ['me@example.com', 'boss@company.com', 'cfo@company.com'],
+  },
+  // Lunch break
+  {
+    id: 'event-3',
+    summary: 'Lunch with Sarah',
+    description: 'Catch up lunch',
+    location: 'Cafe Strada',
+    start: { dateTime: '2024-01-16T12:30:00-08:00' },
+    end: { dateTime: '2024-01-16T13:30:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-3',
+    attendees: ['me@example.com', 'sarah@friends.com'],
+  },
+  // 1:1 meeting
+  {
+    id: 'event-4',
+    summary: '1:1 with Alice',
+    description: 'Weekly sync with Alice - discuss project timeline',
+    location: 'https://meet.google.com/abc-defg-hij',
+    start: { dateTime: '2024-01-16T14:00:00-08:00' },
+    end: { dateTime: '2024-01-16T14:30:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-4',
     attendees: ['me@example.com', 'alice@example.com'],
+  },
+  // Project meeting Thursday (can be created from alice's email)
+  {
+    id: 'event-5',
+    summary: 'Project sync',
+    description: 'Sync on project status with Alice and Bob',
+    location: 'https://zoom.us/j/123456789',
+    start: { dateTime: '2024-01-18T14:00:00-08:00' },
+    end: { dateTime: '2024-01-18T15:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-5',
+    attendees: ['me@example.com', 'alice@example.com', 'bob@example.com'],
+  },
+  // Family dinner Sunday (ties to mom's email)
+  {
+    id: 'event-6',
+    summary: 'Family dinner',
+    description: 'Dinner at Italian place with parents',
+    location: 'Trattoria Roma, 123 Main St',
+    start: { dateTime: '2024-01-21T18:00:00-08:00' },
+    end: { dateTime: '2024-01-21T20:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-6',
+    attendees: ['me@example.com', 'mom@family.com', 'dad@family.com'],
+  },
+  // Deployment window (ties to devops email)
+  {
+    id: 'event-7',
+    summary: 'Production deployment v2.5.0',
+    description: 'Deploying new auth system and bug fixes',
+    location: 'On-call',
+    start: { dateTime: '2024-01-19T18:00:00-08:00' },
+    end: { dateTime: '2024-01-19T19:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-7',
+    attendees: ['me@example.com', 'devops@company.com', 'oncall@company.com'],
+  },
+  // Client call (ties to client email)
+  {
+    id: 'event-8',
+    summary: 'ClientCorp contract discussion',
+    description: 'Discuss renewal terms with John Smith',
+    location: 'https://zoom.us/j/111222333',
+    start: { dateTime: '2024-01-17T10:00:00-08:00' },
+    end: { dateTime: '2024-01-17T11:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-8',
+    attendees: ['me@example.com', 'john.smith@clientcorp.com', 'sales@company.com'],
   },
 ]
 

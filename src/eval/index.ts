@@ -12,6 +12,10 @@ export type { SerializedScope } from './scope'
 export { formatCodeMessage, Invariant, Value, normalizeTaint, normalizeTaints } from './utils'
 export type { Taint, TaintParams, TaintInput, TaintsInput, PolicyChecker } from './utils'
 
+// Export builtins separately - must be imported AFTER policy is loaded
+// to avoid circular dependency (builtins -> policy -> eval -> builtins)
+export { ArrayValue, registerArrayValueFactory } from './builtins'
+
 export const safeEval = (code: string, globalThis?: Value | Scope, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const defaultStubCall: DoStubCall = (_options, method, thisVal, args) => {
     // Default: just call the stub without policy checks
@@ -41,7 +45,12 @@ export const safeEval = (code: string, globalThis?: Value | Scope, doStubCall?: 
       const resolved = raw instanceof Value
         ? (await raw.asAwaitable())
         : await raw
-      step = iter.next(Value.of(resolved, []) as Value<SafeEvalValueInner>)
+      // If the resolved value is already a Value (e.g., from doStubCall), use it directly
+      // Otherwise wrap it in a Value
+      const valueToSend = resolved instanceof Value
+        ? resolved
+        : Value.of(resolved, [])
+      step = iter.next(valueToSend as Value<SafeEvalValueInner>)
     }
     const val = step.value
     return (val instanceof Value ? val : Value.of(undefined, [])).asAwaitable()

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import z from 'zod'
-import { safeEval, Value } from './eval'
+import { ArrayValue, safeEval, Value } from './eval'
 import type { Taint } from './eval'
 import { ExoAgent, fn, tool } from './policy'
 
@@ -702,6 +702,51 @@ describe('fn validator', () => {
     expect(validation).not.toHaveProperty('issues')
     const wrappedFn = (validation as any).value
     expect(wrappedFn()).toBe(42)
+  })
+})
+
+describe('policy - ArrayValue methods through doStubCall', () => {
+  const arrayExo = new ExoAgent(['data'] as const, [] as const)
+
+  it('finds @tool metadata on ArrayValue instance (not on .raw)', () => {
+    // This tests the fix where doStubCall checks getPolicyMetadata(options.parent)
+    // before getPolicyMetadata(options.parent.raw)
+    const turn = arrayExo.policy([]).turn(10)
+
+    // Create an ArrayValue via Value.of()
+    const arr = Value.of([1, 2, 3], [['data', {}]])
+    expect(arr).toBeInstanceOf(ArrayValue)
+
+    // Get the map method from the array
+    const mapMethod = (arr as ArrayValue).map
+
+    // Call map through doStubCall - this should work because @tool metadata
+    // is on the ArrayValue instance, and doStubCall now checks options.parent first
+    const result = turn.doStubCall(
+      { propertyName: 'map', parent: arr },
+      Value.of(mapMethod.bind(arr), []) as Value<(fn: (x: number) => number) => Value<number[]>>,
+      arr,
+      [Value.of((x: number) => x * 2, [])],
+    )
+
+    // Verify the result
+    expect(result.raw.map((v: Value) => v.raw)).toEqual([2, 4, 6])
+    // Verify taints propagated
+    expect(result.getTaints().some(([type]) => type === 'data')).toBe(true)
+  })
+
+  it('works through evaluator with safeEval', () => {
+    const turn = arrayExo.policy([]).turn(10)
+
+    const scope = Value.of({ arr: [1, 2, 3] }, [['data', {}]])
+    const result = safeEval(
+      'arr.map(x => x * 2)',
+      scope,
+      turn.doStubCall.bind(turn),
+    )
+
+    expect(result.raw.map((v: Value) => v.raw)).toEqual([2, 4, 6])
+    expect(result.getTaints().some(([type]) => type === 'data')).toBe(true)
   })
 })
 

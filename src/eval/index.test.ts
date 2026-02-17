@@ -486,11 +486,18 @@ describe('evaluator edge cases - unary expressions', () => {
     expect(() => safeEval('-"hello"', Value.of({}))).toThrow(/requires a number/)
   })
 
-  it('throws on other unary operators', () => {
-    expect(() => safeEval('!true', Value.of({}))).toThrow(/Only unary minus/)
-    expect(() => safeEval('~5', Value.of({}))).toThrow(/Only unary minus/)
-    expect(() => safeEval('+5', Value.of({}))).toThrow(/Only unary minus/)
-    expect(() => safeEval('typeof x', Value.of({ x: 1 }))).toThrow(/Only unary minus/)
+  it('supports logical not operator', () => {
+    expect(safeEval('!true', Value.of({})).raw).toBe(false)
+    expect(safeEval('!false', Value.of({})).raw).toBe(true)
+    expect(safeEval('!0', Value.of({})).raw).toBe(true)
+    expect(safeEval('!1', Value.of({})).raw).toBe(false)
+    expect(safeEval('!null', Value.of({})).raw).toBe(true)
+  })
+
+  it('throws on unsupported unary operators', () => {
+    expect(() => safeEval('~5', Value.of({}))).toThrow(/Only unary minus and logical not/)
+    expect(() => safeEval('+5', Value.of({}))).toThrow(/Only unary minus and logical not/)
+    expect(() => safeEval('typeof x', Value.of({ x: 1 }))).toThrow(/Only unary minus and logical not/)
   })
 })
 
@@ -862,11 +869,19 @@ describe('security - function call safety', () => {
     expect(() => safeEval('str.toUpperCase', scope)).toThrow()
   })
 
-  it('cannot call array prototype methods directly', () => {
-    // Array methods would require calling internal functions
+  it('allows @tool decorated array methods but not reduce', () => {
+    // ArrayValue has @tool decorated methods that are allowed
     const scope = Value.of({ arr: [1, 2, 3] })
-    expect(() => safeEval('arr.map', scope)).toThrow()
-    expect(() => safeEval('arr.filter', scope)).toThrow()
+
+    // map works and returns correct values
+    const mapped = safeEval('arr.map(x => x * 2)', scope)
+    expect(mapped.raw.map((v: Value) => v.raw)).toEqual([2, 4, 6])
+
+    // filter works and returns correct values
+    const filtered = safeEval('arr.filter(x => x > 1)', scope)
+    expect(filtered.raw.map((v: Value) => v.raw)).toEqual([2, 3])
+
+    // reduce is NOT decorated with @tool, so should throw
     expect(() => safeEval('arr.reduce', scope)).toThrow()
   })
 

@@ -279,9 +279,12 @@ export class Evaluator {
       }
     }
     else if (node.type === 'UnaryExpression') {
-      this.inv.parse(node.operator === '-', 'Only unary minus is supported', node)
+      this.inv.parse(node.operator === '-' || node.operator === '!', 'Only unary minus and logical not are supported', node)
       this.inv.parse(node.prefix, 'Postfix unary expressions are not supported', node)
       const value = yield* this.evaluate(node.argument, scope)
+      if (node.operator === '!') {
+        return Value.of(!value.raw, value.getTaints())
+      }
       this.inv.eval(value.isNumber(), 'Unary minus requires a number', node, value)
       return Value.of(-value.raw, value.getTaints())
     }
