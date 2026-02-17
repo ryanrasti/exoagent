@@ -217,11 +217,6 @@ export class Evaluator {
             property,
           )
           this.inv.parse(
-            !property.shorthand,
-            'Shorthand properties are not allowed',
-            property,
-          )
-          this.inv.parse(
             !property.method,
             'Property methods not allowed (use function expressions instead)',
             property,
@@ -229,6 +224,8 @@ export class Evaluator {
 
           const keyVal = yield* this.evalPropertyKey(property.key, property.computed, scope)
           this.inv.eval(keyVal.isSafeMember(), 'Member must be a safe string or number', property.key, keyVal)
+          // Shorthand properties: { foo } is equivalent to { foo: foo }
+          // In this case, property.value === property.key (same identifier node)
           result[keyVal.raw] = yield* this.evaluate(property.value, scope)
         }
       }
@@ -367,6 +364,14 @@ export class Evaluator {
       }
       else if (node.operator === '||') {
         if (left.raw) {
+          return left
+        }
+        const right = yield* this.evaluate(node.right, scope)
+        return right.withTaints(left.getTaints())
+      }
+      else if (node.operator === '??') {
+        // Nullish coalescing: return left if not null/undefined, otherwise right
+        if (left.raw !== null && left.raw !== undefined) {
           return left
         }
         const right = yield* this.evaluate(node.right, scope)

@@ -99,6 +99,13 @@ describe('capnweb-eval basic evaluation', () => {
     expect(await safeEval('({})', Value.of({}))).toEqual(Value.of({}, []))
   })
 
+  it('supports shorthand property syntax', async () => {
+    const scope = Value.of({ foo: 42, bar: 'hello' })
+    expect(await safeEval('({ foo, bar })', scope)).toEqual(Value.of({ foo: Value.of(42, []), bar: Value.of('hello', []) }, []))
+    // Mixed shorthand and regular properties
+    expect(await safeEval('({ foo, baz: 99 })', scope)).toEqual(Value.of({ foo: Value.of(42, []), baz: Value.of(99, []) }, []))
+  })
+
   it('supports computed property access', async () => {
     const scope = Value.of({ obj: { a: 1, b: 2 }, key: 'a' })
     const objResult = await safeEval('obj', scope)

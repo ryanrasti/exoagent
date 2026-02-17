@@ -523,10 +523,22 @@ export class MockSlackClient implements ISlack {
     return channel
   }
 
-  @slackExo.tool(listMessagesSchema)
+  @slackExo.tool(listMessagesSchema, {
+    source: (msgs: SlackMessage[]): ['slack', { principals: string[] }] => {
+      // Merge all principals from all messages
+      const allPrincipals = new Set<string>()
+      msgs.forEach(m => m.principals.all.forEach(p => allPrincipals.add(p)))
+      return ['slack', { principals: [...allPrincipals] }]
+    },
+  })
   async listMessages({ channelId, limit = 50 }: { channelId: string, limit?: number }): Promise<SlackMessage[]> {
+    // Support lookup by name (with or without #) or by ID
+    const normalizedName = channelId.startsWith('#') ? channelId.slice(1) : channelId
+    const channel = this.channels.get(channelId) ?? [...this.channels.values()].find(c => c.name === normalizedName)
+    const resolvedId = channel?.id ?? channelId
+
     const messages = [...this.messages.values()]
-      .filter(m => m.channelId === channelId)
+      .filter(m => m.channelId === resolvedId || m.channelName === normalizedName)
       .slice(0, limit)
     return messages
   }
@@ -553,7 +565,9 @@ export class MockSlackClient implements ISlack {
     },
   })
   async sendMessage({ channelId, text, threadTs }: { channelId: string, text: string, threadTs?: string }): Promise<{ success: boolean, id: string }> {
-    const channel = this.channels.get(channelId)
+    // Support lookup by name (with or without #) or by ID
+    const normalizedName = channelId.startsWith('#') ? channelId.slice(1) : channelId
+    const channel = this.channels.get(channelId) ?? [...this.channels.values()].find(c => c.name === normalizedName)
     if (!channel) {
       throw new Error(`Channel not found: ${channelId}`)
     }
@@ -563,7 +577,7 @@ export class MockSlackClient implements ISlack {
 
     const message: SlackMessage = {
       id,
-      channelId,
+      channelId: channel.id,
       channelName: channel.name,
       userId: 'me',
       userName: 'me',

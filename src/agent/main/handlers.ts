@@ -55,6 +55,43 @@ class BuiltinToolset {
   all(promises: Promise<unknown>[]): Promise<unknown[]> {
     return Promise.all(promises)
   }
+
+  /** Get current date/time as ISO string (since new Date() is not supported in sandbox) */
+  @agentExo.tool(z.void())
+  now(): string {
+    return new Date().toISOString()
+  }
+
+  /** Get today's date as YYYY-MM-DD (useful for date queries) */
+  @agentExo.tool(z.void())
+  today(): string {
+    return new Date().toISOString().split('T')[0]
+  }
+
+  /** Get day of week (0=Sunday, 1=Monday, ..., 6=Saturday) for a date string */
+  @agentExo.tool(z.string().optional())
+  dayOfWeek(dateStr?: string): number {
+    const date = dateStr ? new Date(dateStr) : new Date()
+    return date.getDay()
+  }
+
+  /** Add days to a date string, returns YYYY-MM-DD */
+  @agentExo.tool(z.object({ date: z.string(), days: z.number() }))
+  addDays(args: { date: string, days: number }): string {
+    const date = new Date(args.date)
+    date.setDate(date.getDate() + args.days)
+    return date.toISOString().split('T')[0]
+  }
+
+  /** Get the next occurrence of a weekday (0=Sun, 1=Mon, ..., 6=Sat) from a date */
+  @agentExo.tool(z.object({ from: z.string().optional(), weekday: z.number() }))
+  nextWeekday(args: { from?: string, weekday: number }): string {
+    const date = args.from ? new Date(args.from) : new Date()
+    const currentDay = date.getDay()
+    const daysUntil = (args.weekday - currentDay + 7) % 7 || 7
+    date.setDate(date.getDate() + daysUntil)
+    return date.toISOString().split('T')[0]
+  }
 }
 
 import { addMessage, addTaintsToThread, createThread, createSubthread, deleteThread, getMessages, getSubthreads, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
@@ -205,7 +242,7 @@ export async function llm<Sinks extends readonly string[]>(
 
   // Single LLM call - no automatic retries or multi-step loops
   const llmResponse = await generateText({
-    model: google('gemini-2.0-flash'),
+    model: google('gemini-3-flash-preview'),
     system: context.system,
     messages: [
       ...formattedHistory,
@@ -276,10 +313,13 @@ CODE RESTRICTIONS - The sandbox only supports a limited subset of JavaScript:
 - NO loops (\`for\`, \`while\`, \`do-while\`) - use .map() instead
 - NO function declarations (arrow functions ARE allowed as callbacks)
 - NO object methods (Object.keys, Object.values, etc.)
+- NO \`new\` expressions - use builtin.now() or builtin.today() instead of new Date()
 - You CAN use: const, await, if/else, ternary operators, array indexing, property access, logical not (!)
 - You CAN use array methods: .map(), .filter(), .find(), .some(), .every(), .at(), .slice(), .length
 - Arrow functions work as callbacks: arr.map(x => x.id) or arr.filter(x => x.value > 10)
 - For async operations on arrays, use: const results = await builtin.all(arr.map(async x => await api.something(x)))
+- For dates: builtin.now() returns ISO timestamp, builtin.today() returns "YYYY-MM-DD"
+- Date helpers: builtin.dayOfWeek(date?) returns 0-6, builtin.addDays({date, days}) adds days, builtin.nextWeekday({weekday, from?}) gets next occurrence (0=Sun...6=Sat, e.g. 4=Thursday)
 
 When you receive previous assistant turns, they will contain the "response" that was shown to the user and "data" that you stored. Use the "data" to maintain context across turns.
 `
