@@ -135,6 +135,27 @@ export const MOCK_FS_SEED: Map<string, { content: string, isDirectory: boolean }
   ['/home/user/projects/webapp', { content: '', isDirectory: true }],
   ['/home/user/projects/webapp/README.md', { content: '# WebApp\n\nOur main product webapp.\n\n## Setup\nnpm install\nnpm run dev', isDirectory: false }],
   ['/home/user/projects/webapp/.env', { content: 'DATABASE_URL=postgres://user:pass@localhost:5432/app\nAPI_KEY=sk-secret-key-12345\nSECRET_TOKEN=super-secret', isDirectory: false }],
+
+  // ClientCorp notes for meeting prep (#7)
+  ['/home/user/documents/clients', { content: '', isDirectory: true }],
+  ['/home/user/documents/clients/clientcorp.md', { content: '# ClientCorp\n\n## Overview\n- Industry: Enterprise SaaS\n- Size: 500 employees\n- Contract value: $120k/year\n- Renewal date: Feb 28, 2024\n\n## Key Contacts\n- John Smith (VP Engineering) - main contact\n- Jane Doe (Legal)\n\n## History\n- Customer since 2022\n- Expanded from Starter to Enterprise tier in 2023\n- Had support escalation in Q3 (resolved)\n\n## Notes\n- They want better SLA guarantees\n- Interested in API access\n- Budget conscious this year', isDirectory: false }],
+
+  // Budget file for expense matching (#17)
+  ['/home/user/documents/finance', { content: '', isDirectory: true }],
+  ['/home/user/documents/finance/budget-2024.csv', { content: 'Category,Budget,Spent,Remaining\nTravel,5000,320,4680\nMeals,1000,85,915\nTransportation,500,45,455\nSoftware,2000,0,2000\nTotal,8500,450,8050', isDirectory: false }],
+
+  // Document versions for comparison (#24)
+  ['/home/user/documents/drafts/proposal-v1.md', { content: '# Proposal for ClientCorp\n\n## Pricing\n- Standard tier: $10k/month\n- Enterprise tier: $20k/month\n\n## SLA\n- 99.5% uptime guarantee\n- Business hours support', isDirectory: false }],
+  ['/home/user/documents/drafts/proposal-v2.md', { content: '# Proposal for ClientCorp\n\n## Pricing\n- Standard tier: $10k/month\n- Enterprise tier: $25k/month\n- 15% discount for 2-year commitment\n\n## SLA\n- 99.9% uptime guarantee\n- 24/7 support included\n\n## New: API Access\n- Full API access included in Enterprise tier', isDirectory: false }],
+
+  // Project Atlas files (#28 - handoff)
+  ['/home/user/projects/atlas', { content: '', isDirectory: true }],
+  ['/home/user/projects/atlas/README.md', { content: '# Project Atlas\n\nInternal tool for data pipeline management.\n\n## Status\n- Phase 2 in progress\n- API rate limiting issue blocking release\n\n## Team\n- Alice (lead) - transitioning out\n- Bob (backend)\n- Charlie (design)\n\n## Links\n- GitHub: /company/project-atlas\n- Confluence: /wiki/atlas', isDirectory: false }],
+  ['/home/user/projects/atlas/notes.md', { content: '# Atlas Development Notes\n\n## Current Sprint (ends Jan 19)\n- [ ] Fix rate limiting issue (Bob)\n- [ ] Update docs for handoff\n- [x] Complete API v2 migration\n\n## Blockers\n- Rate limiting: Need to implement backoff strategy\n- External API has undocumented limits\n\n## Architecture Decisions\n- Using Redis for caching\n- PostgreSQL for persistence\n- Kafka for event streaming', isDirectory: false }],
+
+  // Weekly status for compilation (#27)
+  ['/home/user/documents/status', { content: '', isDirectory: true }],
+  ['/home/user/documents/status/week-2024-01-15.md', { content: '# Weekly Status - Jan 15, 2024\n\n## Completed\n- Reviewed Q4 report\n- Synced with ClientCorp on renewal\n- Fixed checkout bug\n\n## In Progress\n- Project Atlas handoff\n- Auth system deployment (Friday)\n\n## Blockers\n- Need legal review on ClientCorp contract\n\n## Next Week\n- Complete Atlas transition\n- Post-mortem for incident', isDirectory: false }],
 ])
 
 /** Type definitions for LLM */

@@ -285,6 +285,72 @@ export const MOCK_CALENDAR_SEED: CalendarEvent[] = [
     htmlLink: 'https://calendar.google.com/event?eid=event-8',
     attendees: ['me@example.com', 'john.smith@clientcorp.com', 'sales@company.com'],
   },
+  // CONFLICTING EVENTS at 2pm on Jan 16 (#15 - resolve calendar conflict)
+  {
+    id: 'event-9',
+    summary: 'Design review (internal)',
+    description: 'Review new designs with the team',
+    location: 'https://meet.google.com/xyz-uvw-rst',
+    start: { dateTime: '2024-01-16T14:00:00-08:00' },
+    end: { dateTime: '2024-01-16T15:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-9',
+    attendees: ['me@example.com', 'charlie@example.com', 'design@company.com'],
+  },
+  // Note: event-4 (1:1 with Alice) is also at 14:00 - creates a conflict!
+  // Interview panel (#29 - interview scheduling)
+  {
+    id: 'event-10',
+    summary: 'Interview: Jane Doe (Round 2)',
+    description: 'Technical interview with candidate',
+    location: 'https://zoom.us/j/interview123',
+    start: { dateTime: '2024-01-18T11:00:00-08:00' },
+    end: { dateTime: '2024-01-18T12:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-10',
+    attendees: ['me@example.com', 'alice@example.com', 'bob@example.com', 'hr@company.com'],
+  },
+  // Project Atlas meeting (#28 - handoff)
+  {
+    id: 'event-11',
+    summary: 'Project Atlas handoff',
+    description: 'Walk through codebase and current state with Alice',
+    location: 'https://meet.google.com/atlas-handoff',
+    start: { dateTime: '2024-01-17T14:00:00-08:00' },
+    end: { dateTime: '2024-01-17T15:30:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-11',
+    attendees: ['me@example.com', 'alice@example.com', 'bob@example.com'],
+  },
+  // Incident post-mortem (#30)
+  {
+    id: 'event-12',
+    summary: 'Incident post-mortem: DB degradation',
+    description: 'Review Jan 15 incident and action items',
+    location: 'https://meet.google.com/postmortem',
+    start: { dateTime: '2024-01-16T10:00:00-08:00' },
+    end: { dateTime: '2024-01-16T11:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-12',
+    attendees: ['me@example.com', 'alice@example.com', 'oncall@company.com', 'devops@company.com'],
+  },
+  // Bulk cleanup target: internal meetings on Friday (#25)
+  {
+    id: 'event-13',
+    summary: 'Weekly planning (internal)',
+    description: 'Team planning session',
+    location: 'Conference Room B',
+    start: { dateTime: '2024-01-19T09:00:00-08:00' },
+    end: { dateTime: '2024-01-19T10:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-13',
+    attendees: ['me@example.com', 'alice@example.com', 'bob@example.com'],
+  },
+  {
+    id: 'event-14',
+    summary: 'Sprint retro (internal)',
+    description: 'Bi-weekly retrospective',
+    location: 'Conference Room A',
+    start: { dateTime: '2024-01-19T14:00:00-08:00' },
+    end: { dateTime: '2024-01-19T15:00:00-08:00' },
+    htmlLink: 'https://calendar.google.com/event?eid=event-14',
+    attendees: ['me@example.com', 'alice@example.com', 'bob@example.com', 'charlie@example.com'],
+  },
 ]
 
 /** Type definitions for LLM */
