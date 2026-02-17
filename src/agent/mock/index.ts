@@ -71,6 +71,11 @@ class BuiltinToolset {
   setToolCallResult(result: unknown) {
     this.onSetResult(result)
   }
+
+  @mockExo.tool(z.array(z.unknown()))
+  all(promises: Promise<unknown>[]): Promise<unknown[]> {
+    return Promise.all(promises)
+  }
 }
 
 /** Combined type definitions for LLM */
