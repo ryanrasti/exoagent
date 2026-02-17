@@ -184,6 +184,8 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
 
   // Factory for creating array values - can be overridden by builtins.ts
   static arrayFactory: ((raw: Value[], taints: TaintsInput, options: ValueOptions) => Value) | null = null
+  // Factory for creating string values - can be overridden by builtins.ts
+  static stringFactory: ((raw: string, taints: TaintsInput, options: ValueOptions) => Value) | null = null
 
   static of(raw: unknown, taints?: TaintsInput, options?: ValueOptions): Value
   static of<T extends SafeEvalValueInner>(raw: T, taints?: TaintsInput, options?: ValueOptions): Value<T>
@@ -200,6 +202,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
         return Value.arrayFactory(wrapped, taints, storedOptions)
       }
       return new Value(wrapped, taints, storedOptions)
+    }
+    // Use stringFactory if available (for StringValue support)
+    if (typeof raw === 'string' && Value.stringFactory) {
+      return Value.stringFactory(raw, taints, storedOptions)
     }
     if (typeof raw === 'object' && raw !== null) {
       const proto = Object.getPrototypeOf(raw)

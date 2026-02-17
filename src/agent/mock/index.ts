@@ -34,8 +34,9 @@ export const DEFAULT_DENY_RULES = [
   // Block all internal data from going to external endpoints
   { sources: ['email', 'calendar', 'slack', 'file', 'web'], sinks: ['external'] },
 
-  // Principal mismatch rule: deny if sink principals don't overlap with source principals
-  // This catches cases like: alice's email → bob's calendar (when bob wasn't on the email)
+  // Principal mismatch rule: deny if sink principals aren't a subset of source principals
+  // Data can only flow to people who already had access to it
+  // This catches cases like: alice's email → attacker@evil.com (attacker wasn't on the email)
   (source: [string, { principals?: string[] }], sink: [string, { principals?: string[] }]) => {
     const sourcePrincipals = source[1]?.principals ?? []
     const sinkPrincipals = sink[1]?.principals ?? []
@@ -45,9 +46,9 @@ export const DEFAULT_DENY_RULES = [
       return 'allow' as const
     }
 
-    // Check if there's any overlap
-    const hasOverlap = sinkPrincipals.some(p => sourcePrincipals.includes(p))
-    return hasOverlap ? 'allow' as const : 'deny' as const
+    // Check that ALL sink principals are in source principals (subset check)
+    const isSubset = sinkPrincipals.every(p => sourcePrincipals.includes(p))
+    return isSubset ? 'allow' as const : 'deny' as const
   },
 ]
 

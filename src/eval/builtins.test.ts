@@ -32,6 +32,27 @@ describe('ArrayValue', () => {
       expect(result.getTaints()).toEqual([['source', {}]])
     })
 
+    it('propagates taints from individual array items to mapped results', () => {
+      // Create an array where each item has its own taints
+      const item1 = Value.of({ name: 'alice' }, [['email', { principals: ['alice@example.com'] }]])
+      const item2 = Value.of({ name: 'bob' }, [['email', { principals: ['bob@example.com'] }]])
+      const arr = new ArrayValue([item1, item2], [])
+
+      // Map should preserve each item's taints on the corresponding result
+      const result = arr.map(x => x)
+
+      // Each result item should have its source's taints
+      const resultItems = result.raw as Value[]
+      expect(resultItems[0].getTaints()).toEqual([['email', { principals: ['alice@example.com'] }]])
+      expect(resultItems[1].getTaints()).toEqual([['email', { principals: ['bob@example.com'] }]])
+
+      // The array itself should have merged taints from all elements
+      const arrayTaints = result.getTaints()
+      expect(arrayTaints.length).toBe(2)
+      expect(arrayTaints.some(t => t[0] === 'email' && (t[1] as any).principals?.includes('alice@example.com'))).toBe(true)
+      expect(arrayTaints.some(t => t[0] === 'email' && (t[1] as any).principals?.includes('bob@example.com'))).toBe(true)
+    })
+
     it('returns ArrayValue for chaining', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
       const result = arr.map(x => x * 2)

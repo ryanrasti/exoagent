@@ -869,11 +869,17 @@ describe('security - member access safety', () => {
 })
 
 describe('security - function call safety', () => {
-  it('cannot call methods on primitives (no prototype access)', () => {
-    // String methods would require prototype access
+  it('allows @tool decorated string methods', () => {
+    // StringValue has @tool decorated methods that are allowed
     const scope = Value.of({ str: 'hello' })
-    // str.toUpperCase() would require accessing String.prototype
-    expect(() => safeEval('str.toUpperCase', scope)).toThrow()
+    const result = safeEval('str.toUpperCase()', scope) as Value
+    expect(result.raw).toBe('HELLO')
+  })
+
+  it('cannot call non-decorated methods on primitives', () => {
+    // Number methods are not decorated and should fail
+    const scope = Value.of({ num: 42 })
+    expect(() => safeEval('num.toFixed(2)', scope)).toThrow()
   })
 
   it('allows @tool decorated array methods but not reduce', () => {

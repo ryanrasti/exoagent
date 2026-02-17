@@ -314,10 +314,12 @@ CODE RESTRICTIONS - The sandbox only supports a limited subset of JavaScript:
 - NO function declarations (arrow functions ARE allowed as callbacks)
 - NO object methods (Object.keys, Object.values, etc.)
 - NO \`new\` expressions - use builtin.now() or builtin.today() instead of new Date()
+- NO \`return\` statements - use if/else instead of early returns
 - You CAN use: const, await, if/else, ternary operators, array indexing, property access, logical not (!)
 - You CAN use array methods: .map(), .filter(), .find(), .some(), .every(), .at(), .slice(), .length
 - Arrow functions work as callbacks: arr.map(x => x.id) or arr.filter(x => x.value > 10)
 - For async operations on arrays, use: const results = await builtin.all(arr.map(async x => await api.something(x)))
+- NEVER use Promise.all - use builtin.all instead (Promise is not available)
 - For dates: builtin.now() returns ISO timestamp, builtin.today() returns "YYYY-MM-DD"
 - Date helpers: builtin.dayOfWeek(date?) returns 0-6, builtin.addDays({date, days}) adds days, builtin.nextWeekday({weekday, from?}) gets next occurrence (0=Sun...6=Sat, e.g. 4=Thursday)
 

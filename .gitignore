@@ -13,3 +13,4 @@ temp
 .direnv
 .claude
 .mcp.json
+.env
