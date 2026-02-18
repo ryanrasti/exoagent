@@ -55,12 +55,16 @@ export const DEFAULT_DENY_RULES = [
 /** Combined policy with default deny rules */
 export const mockPolicy = mockExo.policy(DEFAULT_DENY_RULES)
 
-/** Builtin toolset for agent control flow */
-class BuiltinToolset {
+import { BuiltinFunctions } from '../../eval/builtins'
+
+/** Builtin toolset for agent control flow - extends BuiltinFunctions to get `all` */
+class BuiltinToolset extends BuiltinFunctions {
   constructor(
     private onRespond: (msg: string) => void = () => {},
     private onSetResult: (result: unknown) => void = () => {},
-  ) {}
+  ) {
+    super()
+  }
 
   @mockExo.tool(z.string())
   respond(msg: string) {
@@ -70,11 +74,6 @@ class BuiltinToolset {
   @mockExo.tool(z.unknown())
   setToolCallResult(result: unknown) {
     this.onSetResult(result)
-  }
-
-  @mockExo.tool(z.array(z.unknown()))
-  all(promises: Promise<unknown>[]): Promise<unknown[]> {
-    return Promise.all(promises)
   }
 }
 

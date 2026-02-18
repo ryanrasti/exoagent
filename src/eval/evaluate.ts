@@ -184,15 +184,17 @@ export class Evaluator {
       //         allowed if either:
       //          - the function is a @tool
       //          - the function is defined in the evaluation context
-      if (!callee.options.fnNode) {
+      if (!callee.options.fnNode && !callee.options.builtinFunction) {
         // If we're calling a method outside of the evaluation context, use doStubCall
         // which handles policy checks and taint propagation:
         this.inv.eval(callee.options.propertyName != null, 'Method must have a name', node.callee, callee)
         return this.doStubCall(callee.options, callee, object, args)
       }
       else {
-        // Internal function - call it directly (closure captures scope)
-        const result = Reflect.apply(callee.raw, object, args)
+        // Internal function or builtin Value method - call directly with Value args
+        // For builtins, the method is already bound to `this` (the ArrayValue/StringValue)
+        // so we pass `undefined` as thisArg and let the binding handle it
+        const result = Reflect.apply(callee.raw, callee.options.builtinFunction ? undefined : object, args)
         return Value.of(result, callee.getTaints())
       }
     }

@@ -79,6 +79,8 @@ export function isSafeMemberRaw(member: unknown): member is string | number {
 export type ValueOptions = {
   /** AST node for internal functions (presence implies isInternalFunction) */
   fnNode?: acorn.ArrowFunctionExpression
+  /** True for builtin Value methods (ArrayValue.map, etc.) - called like internal fns */
+  builtinFunction?: boolean
   parent?: Value<SafeEvalValueInner>
   propertyName?: string
   shallow?: boolean
@@ -197,11 +199,14 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     // Recursively wrap arrays and objects
     if (Array.isArray(raw)) {
       const wrapped = raw.map(item => item instanceof Value ? item.withTaints(subTaints) : Value.of(item as SafeEvalValueInner, subTaints, { shallow }))
+      // Merge children's taints into parent (important when children are already Values)
+      const childTaints = Value.mergeTaints(...wrapped)
+      const allTaints = [...normalizeTaints(taints), ...childTaints]
       // Use arrayFactory if available (for ArrayValue support)
       if (Value.arrayFactory) {
-        return Value.arrayFactory(wrapped, taints, storedOptions)
+        return Value.arrayFactory(wrapped, allTaints, storedOptions)
       }
-      return new Value(wrapped, taints, storedOptions)
+      return new Value(wrapped, allTaints, storedOptions)
     }
     // Use stringFactory if available (for StringValue support)
     if (typeof raw === 'string' && Value.stringFactory) {
@@ -214,7 +219,10 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
         for (const [key, val] of Object.entries(raw)) {
           wrapped[key] = val instanceof Value ? val.withTaints(subTaints) : Value.of(val as SafeEvalValueInner, subTaints, { shallow })
         }
-        return new Value(wrapped, taints, storedOptions)
+        // Merge children's taints into parent
+        const childTaints = Value.mergeTaints(...Object.values(wrapped))
+        const allTaints = [...normalizeTaints(taints), ...childTaints]
+        return new Value(wrapped, allTaints, storedOptions)
       }
     }
     if (raw instanceof Value) {
@@ -284,6 +292,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
           return Value.of(boundMethod, this.getTaints(), {
             propertyName: key.raw,
             parent: this,
+            builtinFunction: true, // Treat like internal fn - no unwrap in doStubCall
           })
         }
       }
@@ -312,14 +321,18 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
         throw new Error(`No policy metadata found for object: ${this.raw}. Cannot access its members.`)
       }
 
-      const val = metadata[key.raw]
-      if (!val) {
+      const methodMeta = metadata[key.raw] as { builtin?: boolean } | undefined
+      if (!methodMeta) {
         throw new Error(`No policy metadata found for object: ${this.raw}.${key.raw}.`)
       }
+
+      // Check if this is a @builtin method (marked with { builtin: true })
+      const isBuiltin = methodMeta.builtin === true
 
       return Value.of(this.raw[key.raw], this.getTaints(), {
         propertyName: key.raw,
         parent: this,
+        builtinFunction: isBuiltin, // Treat like internal fn - no unwrap in doStubCall
       })
     }
 

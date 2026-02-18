@@ -705,34 +705,18 @@ describe('fn validator', () => {
   })
 })
 
-describe('policy - ArrayValue methods through doStubCall', () => {
+describe('policy - ArrayValue builtin methods', () => {
   const arrayExo = new ExoAgent(['data'] as const, [] as const)
 
-  it('finds @tool metadata on ArrayValue instance (not on .raw)', () => {
-    // This tests the fix where doStubCall checks getPolicyMetadata(options.parent)
-    // before getPolicyMetadata(options.parent.raw)
-    const turn = arrayExo.policy([]).turn(10)
-
-    // Create an ArrayValue via Value.of()
+  it('ArrayValue has @builtin metadata (not @tool)', () => {
+    // ArrayValue methods are builtins that bypass doStubCall
+    // and are called directly with Value-wrapped args
     const arr = Value.of([1, 2, 3], [['data', {}]])
     expect(arr).toBeInstanceOf(ArrayValue)
 
-    // Get the map method from the array
-    const mapMethod = (arr as ArrayValue).map
-
-    // Call map through doStubCall - this should work because @tool metadata
-    // is on the ArrayValue instance, and doStubCall now checks options.parent first
-    const result = turn.doStubCall(
-      { propertyName: 'map', parent: arr },
-      Value.of(mapMethod.bind(arr), []) as Value<(fn: (x: number) => number) => Value<number[]>>,
-      arr,
-      [Value.of((x: number) => x * 2, [])],
-    )
-
-    // Verify the result
-    expect(result.raw.map((v: Value) => v.raw)).toEqual([2, 4, 6])
-    // Verify taints propagated
-    expect(result.getTaints().some(([type]) => type === 'data')).toBe(true)
+    // Get the map method via getSlot - it should have builtinFunction: true
+    const mapMethod = arr.getSlot(Value.of('map', []))
+    expect(mapMethod.options.builtinFunction).toBe(true)
   })
 
   it('works through evaluator with safeEval', () => {

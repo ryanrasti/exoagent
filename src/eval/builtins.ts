@@ -1,18 +1,34 @@
 /**
- * Builtin Value subclasses with @tool-annotated methods.
+ * Builtin Value subclasses with builtin-annotated methods.
  *
  * These provide array/object operations that propagate taints correctly.
- * Methods are marked with @tool so that getSlot can return them as capabilities.
+ * Methods are marked with @builtin so that getSlot can return them as capabilities.
+ * Unlike @tool, @builtin doesn't validate args (builtins receive Value-wrapped args).
  */
 
-import type { SafeEvalValueInner, Taint, TaintsInput, ValueOptions } from './utils'
-import { z } from 'zod'
-import { tool } from '../policy'
+import type { SafeEvalValueInner, TaintsInput, ValueOptions } from './utils'
+import { getPolicyMetadata, setPolicyMetadata } from '../meta'
 import { Value } from './utils'
 
-// Schema for callback functions (validated loosely - actual fn validation happens at runtime)
-const callbackSchema = z.function()
-const numberSchema = z.number()
+/**
+ * Decorator for builtin methods on Value subclasses.
+ * Registers metadata so getSlot knows these are valid methods.
+ * No validation - builtins receive Value-wrapped args directly.
+ */
+function builtin<This, Args extends any[], Return>(
+  target: (this: This, ...args: Args) => Return,
+  context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>,
+): void {
+  const methodName = context.name
+  if (typeof methodName !== 'string') {
+    throw new TypeError('Builtin decorator requires string method name')
+  }
+  context.addInitializer(function (this: This) {
+    const metadata = getPolicyMetadata(this as object) ?? {}
+    // Mark as builtin: true so getSlot can distinguish from @tool methods
+    setPolicyMetadata(this as object, { ...metadata, [methodName]: { builtin: true } })
+  })
+}
 
 /**
  * ArrayValue extends Value for array types, adding map/filter/etc.
@@ -27,27 +43,42 @@ export class ArrayValue<T extends SafeEvalValueInner = SafeEvalValueInner> exten
     super(raw, taints, options)
   }
 
-  @tool(callbackSchema)
-  map<U extends SafeEvalValueInner>(fn: (item: T, index: number) => U): Value<U[]> {
-    // Wrap each result with its source item's taints
-    const mapped = this.raw.map((v, i) => Value.of(fn(v.raw, i), v.getTaints()))
+  // NOTE: These methods are called as builtinFunctions from eval, meaning the callback `fn`
+  // is an internal eval function wrapped in a Value. It receives Value args and returns Value results.
+
+  @builtin
+  map<U extends SafeEvalValueInner>(fn: Value<(item: Value<T>, index: Value<number>) => Value<U>>): Value<Value<U>[]> {
+    const mapped = this.raw.map((v, i) => {
+      const result = fn.raw(v, Value.of(i, []))
+      // If callback is async, result is a Promise - chain taints onto resolution
+      if (result instanceof Promise) {
+        return Value.of(result.then((r: Value<U>) => r.withTaints(v.getTaints())), v.getTaints())
+      }
+      // Merge the source item's taints into the result
+      return result.withTaints(v.getTaints())
+    })
     // Array taints = original array taints + merged item taints
     const itemTaints = Value.mergeTaints(...this.raw)
     return new ArrayValue(mapped, [...this.getTaints(), ...itemTaints])
   }
 
-  @tool(callbackSchema)
-  filter(fn: (item: T, index: number) => boolean): Value<T[]> {
-    // Keep taints on filtered items
-    const filtered = this.raw.filter((v, i) => fn(v.raw, i))
+  @builtin
+  filter(fn: Value<(item: Value<T>, index: Value<number>) => Value<boolean>>): Value<T[]> {
+    const filtered = this.raw.filter((v, i) => {
+      const result = fn.raw(v, Value.of(i, []))
+      return result.raw // Use raw boolean for filter condition
+    })
     // Array taints = original array taints + merged taints from filtered items
     const itemTaints = Value.mergeTaints(...filtered)
     return new ArrayValue(filtered, [...this.getTaints(), ...itemTaints])
   }
 
-  @tool(callbackSchema)
-  find(fn: (item: T, index: number) => boolean): Value<T | undefined> {
-    const found = this.raw.find((v, i) => fn(v.raw, i))
+  @builtin
+  find(fn: Value<(item: Value<T>, index: Value<number>) => Value<boolean>>): Value<T | undefined> {
+    const found = this.raw.find((v, i) => {
+      const result = fn.raw(v, Value.of(i, []))
+      return result.raw
+    })
     // Return the found Value (with its taints) or undefined with array taints
     if (found) {
       return found.withTaints(this.getTaints())
@@ -55,34 +86,47 @@ export class ArrayValue<T extends SafeEvalValueInner = SafeEvalValueInner> exten
     return Value.of(undefined, this.getTaints())
   }
 
-  @tool(callbackSchema)
-  some(fn: (item: T, index: number) => boolean): Value<boolean> {
-    // Boolean result doesn't leak item data, just array taints
-    return Value.of(this.raw.some((v, i) => fn(v.raw, i)), this.getTaints())
+  @builtin
+  some(fn: Value<(item: Value<T>, index: Value<number>) => Value<boolean>>): Value<boolean> {
+    const result = this.raw.some((v, i) => {
+      const r = fn.raw(v, Value.of(i, []))
+      return r.raw
+    })
+    return Value.of(result, this.getTaints())
   }
 
-  @tool(callbackSchema)
-  every(fn: (item: T, index: number) => boolean): Value<boolean> {
-    // Boolean result doesn't leak item data, just array taints
-    return Value.of(this.raw.every((v, i) => fn(v.raw, i)), this.getTaints())
+  @builtin
+  every(fn: Value<(item: Value<T>, index: Value<number>) => Value<boolean>>): Value<boolean> {
+    const result = this.raw.every((v, i) => {
+      const r = fn.raw(v, Value.of(i, []))
+      return r.raw
+    })
+    return Value.of(result, this.getTaints())
   }
 
-  @tool(numberSchema)
-  at(index: number): Value<T | undefined> {
-    const found = this.raw.at(index)
-    return Value.of(found?.raw, this.getTaints())
+  @builtin
+  at(index: Value<number>): Value<T | undefined> {
+    const found = this.raw.at(index.raw)
+    if (found) {
+      return found.withTaints(this.getTaints())
+    }
+    return Value.of(undefined, this.getTaints())
   }
 
-  @tool(numberSchema.optional(), numberSchema.optional())
-  slice(start?: number, end?: number): Value<T[]> {
-    const sliced = this.raw.slice(start, end).map(v => v.raw)
-    return Value.of(sliced, this.getTaints())
+  @builtin
+  slice(start?: Value<number>, end?: Value<number>): Value<T[]> {
+    const sliced = this.raw.slice(start?.raw, end?.raw)
+    // Keep items as Values with their taints
+    const itemTaints = Value.mergeTaints(...sliced)
+    return new ArrayValue(sliced, [...this.getTaints(), ...itemTaints])
   }
 
-  @tool(z.string().optional())
-  join(separator?: string): Value<string> {
-    const joined = this.raw.map(v => v.raw).join(separator)
-    return Value.of(joined, this.getTaints())
+  @builtin
+  join(separator?: Value<string>): Value<string> {
+    // Join extracts raw values from items - result gets all taints
+    const joined = this.raw.map(v => String(v.raw)).join(separator?.raw)
+    const itemTaints = Value.mergeTaints(...this.raw)
+    return Value.of(joined, [...this.getTaints(), ...itemTaints])
   }
 
   /**
@@ -111,64 +155,64 @@ export class StringValue extends Value<string> {
     super(raw, taints, options)
   }
 
-  @tool(numberSchema, numberSchema.optional())
-  slice(start: number, end?: number): Value<string> {
-    return Value.of(this.raw.slice(start, end), this.getTaints())
+  @builtin
+  slice(start: Value<number>, end?: Value<number>): Value<string> {
+    return Value.of(this.raw.slice(start.raw, end?.raw), this.getTaints())
   }
 
-  @tool(numberSchema, numberSchema.optional())
-  substring(start: number, end?: number): Value<string> {
-    return Value.of(this.raw.substring(start, end), this.getTaints())
+  @builtin
+  substring(start: Value<number>, end?: Value<number>): Value<string> {
+    return Value.of(this.raw.substring(start.raw, end?.raw), this.getTaints())
   }
 
-  @tool(z.string())
-  includes(searchString: string): Value<boolean> {
-    return Value.of(this.raw.includes(searchString), this.getTaints())
+  @builtin
+  includes(searchString: Value<string>): Value<boolean> {
+    return Value.of(this.raw.includes(searchString.raw), this.getTaints())
   }
 
-  @tool(z.string())
-  startsWith(searchString: string): Value<boolean> {
-    return Value.of(this.raw.startsWith(searchString), this.getTaints())
+  @builtin
+  startsWith(searchString: Value<string>): Value<boolean> {
+    return Value.of(this.raw.startsWith(searchString.raw), this.getTaints())
   }
 
-  @tool(z.string())
-  endsWith(searchString: string): Value<boolean> {
-    return Value.of(this.raw.endsWith(searchString), this.getTaints())
+  @builtin
+  endsWith(searchString: Value<string>): Value<boolean> {
+    return Value.of(this.raw.endsWith(searchString.raw), this.getTaints())
   }
 
-  @tool(z.string().or(z.instanceof(RegExp)))
-  split(separator: string | RegExp): Value<string[]> {
-    return Value.of(this.raw.split(separator), this.getTaints())
+  @builtin
+  split(separator: Value<string>): Value<string[]> {
+    return Value.of(this.raw.split(separator.raw), this.getTaints())
   }
 
-  @tool()
+  @builtin
   trim(): Value<string> {
     return Value.of(this.raw.trim(), this.getTaints())
   }
 
-  @tool()
+  @builtin
   toLowerCase(): Value<string> {
     return Value.of(this.raw.toLowerCase(), this.getTaints())
   }
 
-  @tool()
+  @builtin
   toUpperCase(): Value<string> {
     return Value.of(this.raw.toUpperCase(), this.getTaints())
   }
 
-  @tool(z.string(), z.string())
-  replace(searchValue: string, replaceValue: string): Value<string> {
-    return Value.of(this.raw.replace(searchValue, replaceValue), this.getTaints())
+  @builtin
+  replace(searchValue: Value<string>, replaceValue: Value<string>): Value<string> {
+    return Value.of(this.raw.replace(searchValue.raw, replaceValue.raw), this.getTaints())
   }
 
-  @tool(z.string(), z.string())
-  replaceAll(searchValue: string, replaceValue: string): Value<string> {
-    return Value.of(this.raw.replaceAll(searchValue, replaceValue), this.getTaints())
+  @builtin
+  replaceAll(searchValue: Value<string>, replaceValue: Value<string>): Value<string> {
+    return Value.of(this.raw.replaceAll(searchValue.raw, replaceValue.raw), this.getTaints())
   }
 
-  @tool(z.string())
-  indexOf(searchString: string): Value<number> {
-    return Value.of(this.raw.indexOf(searchString), this.getTaints())
+  @builtin
+  indexOf(searchString: Value<string>): Value<number> {
+    return Value.of(this.raw.indexOf(searchString.raw), this.getTaints())
   }
 
   /**
@@ -195,3 +239,31 @@ export function registerArrayValueFactory(): void {
 
 // Auto-register on import
 registerArrayValueFactory()
+
+/**
+ * Builtin functions class. Methods are marked with @builtin so getSlot
+ * returns them with builtinFunction: true, bypassing doStubCall.
+ */
+export class BuiltinFunctions {
+  /**
+   * Await all promises in an array, preserving taints on resolved values.
+   * This is the builtin equivalent of Promise.all but taint-aware.
+   */
+  @builtin
+  async all(promises: Value<Value<Promise<Value>>[]>): Promise<Value<Value[]>> {
+    const promiseArray = promises.raw as Value<Promise<Value>>[]
+
+    // Await all promises - each resolves to a Value with taints
+    const results = await Promise.all(
+      promiseArray.map(async (p) => {
+        const resolved = await p.raw
+        // Merge the promise wrapper's taints into the resolved value
+        return resolved.withTaints(p.getTaints())
+      })
+    )
+
+    // Merge all result taints into the array + promises array taints
+    const allTaints = [...promises.getTaints(), ...Value.mergeTaints(...results)]
+    return new ArrayValue(results, allTaints)
+  }
+}

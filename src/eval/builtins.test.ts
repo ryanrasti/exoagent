@@ -6,6 +6,10 @@ beforeAll(() => {
   registerArrayValueFactory()
 })
 
+// Helper to create a Value-wrapped callback (mimics what eval does)
+const valueFn = <T, R>(fn: (item: Value<T>, index: Value<number>) => Value<R>) =>
+  Value.of(fn, [])
+
 describe('ArrayValue', () => {
   describe('Value.of returns ArrayValue for arrays', () => {
     it('creates ArrayValue for array input', () => {
@@ -22,13 +26,13 @@ describe('ArrayValue', () => {
   describe('map', () => {
     it('transforms elements', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.map(x => x * 2)
+      const result = arr.map(valueFn((x: Value<number>) => Value.of(x.raw * 2, [])))
       expect(result.raw.map(v => v.raw)).toEqual([2, 4, 6])
     })
 
     it('propagates taints from source array', () => {
       const arr = Value.of([1, 2, 3], ['source']) as ArrayValue<number>
-      const result = arr.map(x => x * 2)
+      const result = arr.map(valueFn((x: Value<number>) => Value.of(x.raw * 2, [])))
       expect(result.getTaints()).toEqual([['source', {}]])
     })
 
@@ -39,7 +43,7 @@ describe('ArrayValue', () => {
       const arr = new ArrayValue([item1, item2], [])
 
       // Map should preserve each item's taints on the corresponding result
-      const result = arr.map(x => x)
+      const result = arr.map(valueFn((x: Value<{ name: string }>) => x))
 
       // Each result item should have its source's taints
       const resultItems = result.raw as Value[]
@@ -55,7 +59,7 @@ describe('ArrayValue', () => {
 
     it('returns ArrayValue for chaining', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.map(x => x * 2)
+      const result = arr.map(valueFn((x: Value<number>) => Value.of(x.raw * 2, [])))
       expect(result).toBeInstanceOf(ArrayValue)
     })
   })
@@ -63,19 +67,19 @@ describe('ArrayValue', () => {
   describe('filter', () => {
     it('filters elements', () => {
       const arr = Value.of([1, 2, 3, 4, 5], []) as ArrayValue<number>
-      const result = arr.filter(x => x > 2)
+      const result = arr.filter(valueFn((x: Value<number>) => Value.of(x.raw > 2, [])))
       expect(result.raw.map(v => v.raw)).toEqual([3, 4, 5])
     })
 
     it('propagates taints', () => {
       const arr = Value.of([1, 2, 3], ['source']) as ArrayValue<number>
-      const result = arr.filter(x => x > 1)
+      const result = arr.filter(valueFn((x: Value<number>) => Value.of(x.raw > 1, [])))
       expect(result.getTaints()).toEqual([['source', {}]])
     })
 
     it('returns ArrayValue for chaining', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.filter(x => x > 1)
+      const result = arr.filter(valueFn((x: Value<number>) => Value.of(x.raw > 1, [])))
       expect(result).toBeInstanceOf(ArrayValue)
     })
   })
@@ -83,19 +87,19 @@ describe('ArrayValue', () => {
   describe('find', () => {
     it('finds matching element', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.find(x => x === 2)
+      const result = arr.find(valueFn((x: Value<number>) => Value.of(x.raw === 2, [])))
       expect(result.raw).toBe(2)
     })
 
     it('returns undefined when not found', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.find(x => x === 99)
+      const result = arr.find(valueFn((x: Value<number>) => Value.of(x.raw === 99, [])))
       expect(result.raw).toBeUndefined()
     })
 
     it('propagates taints', () => {
       const arr = Value.of([1, 2, 3], ['source']) as ArrayValue<number>
-      const result = arr.find(x => x === 2)
+      const result = arr.find(valueFn((x: Value<number>) => Value.of(x.raw === 2, [])))
       expect(result.getTaints()).toEqual([['source', {}]])
     })
   })
@@ -103,19 +107,19 @@ describe('ArrayValue', () => {
   describe('some', () => {
     it('returns true when some match', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.some(x => x > 2)
+      const result = arr.some(valueFn((x: Value<number>) => Value.of(x.raw > 2, [])))
       expect(result.raw).toBe(true)
     })
 
     it('returns false when none match', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.some(x => x > 10)
+      const result = arr.some(valueFn((x: Value<number>) => Value.of(x.raw > 10, [])))
       expect(result.raw).toBe(false)
     })
 
     it('propagates taints', () => {
       const arr = Value.of([1, 2, 3], ['source']) as ArrayValue<number>
-      const result = arr.some(x => x > 2)
+      const result = arr.some(valueFn((x: Value<number>) => Value.of(x.raw > 2, [])))
       expect(result.getTaints()).toEqual([['source', {}]])
     })
   })
@@ -123,19 +127,19 @@ describe('ArrayValue', () => {
   describe('every', () => {
     it('returns true when all match', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.every(x => x > 0)
+      const result = arr.every(valueFn((x: Value<number>) => Value.of(x.raw > 0, [])))
       expect(result.raw).toBe(true)
     })
 
     it('returns false when some do not match', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.every(x => x > 1)
+      const result = arr.every(valueFn((x: Value<number>) => Value.of(x.raw > 1, [])))
       expect(result.raw).toBe(false)
     })
 
     it('propagates taints', () => {
       const arr = Value.of([1, 2, 3], ['source']) as ArrayValue<number>
-      const result = arr.every(x => x > 0)
+      const result = arr.every(valueFn((x: Value<number>) => Value.of(x.raw > 0, [])))
       expect(result.getTaints()).toEqual([['source', {}]])
     })
   })
@@ -143,35 +147,35 @@ describe('ArrayValue', () => {
   describe('at', () => {
     it('gets element at positive index', () => {
       const arr = Value.of([10, 20, 30], []) as ArrayValue<number>
-      expect(arr.at(1).raw).toBe(20)
+      expect(arr.at(Value.of(1, [])).raw).toBe(20)
     })
 
     it('gets element at negative index', () => {
       const arr = Value.of([10, 20, 30], []) as ArrayValue<number>
-      expect(arr.at(-1).raw).toBe(30)
+      expect(arr.at(Value.of(-1, [])).raw).toBe(30)
     })
 
     it('returns undefined for out of bounds', () => {
       const arr = Value.of([10, 20, 30], []) as ArrayValue<number>
-      expect(arr.at(99).raw).toBeUndefined()
+      expect(arr.at(Value.of(99, [])).raw).toBeUndefined()
     })
 
     it('propagates taints', () => {
       const arr = Value.of([10, 20, 30], ['source']) as ArrayValue<number>
-      expect(arr.at(0).getTaints()).toEqual([['source', {}]])
+      expect(arr.at(Value.of(0, [])).getTaints()).toEqual([['source', {}]])
     })
   })
 
   describe('slice', () => {
     it('slices with start and end', () => {
       const arr = Value.of([1, 2, 3, 4, 5], []) as ArrayValue<number>
-      const result = arr.slice(1, 4)
+      const result = arr.slice(Value.of(1, []), Value.of(4, []))
       expect(result.raw.map(v => v.raw)).toEqual([2, 3, 4])
     })
 
     it('slices with only start', () => {
       const arr = Value.of([1, 2, 3, 4, 5], []) as ArrayValue<number>
-      const result = arr.slice(2)
+      const result = arr.slice(Value.of(2, []))
       expect(result.raw.map(v => v.raw)).toEqual([3, 4, 5])
     })
 
@@ -183,13 +187,13 @@ describe('ArrayValue', () => {
 
     it('propagates taints', () => {
       const arr = Value.of([1, 2, 3], ['source']) as ArrayValue<number>
-      const result = arr.slice(0, 2)
+      const result = arr.slice(Value.of(0, []), Value.of(2, []))
       expect(result.getTaints()).toEqual([['source', {}]])
     })
 
     it('returns ArrayValue for chaining', () => {
       const arr = Value.of([1, 2, 3], []) as ArrayValue<number>
-      const result = arr.slice(0, 2)
+      const result = arr.slice(Value.of(0, []), Value.of(2, []))
       expect(result).toBeInstanceOf(ArrayValue)
     })
   })
@@ -197,20 +201,26 @@ describe('ArrayValue', () => {
   describe('chaining', () => {
     it('chains filter and map', () => {
       const arr = Value.of([1, 2, 3, 4, 5], ['source']) as ArrayValue<number>
-      const result = arr.filter(x => x > 2).map(x => x * 10)
+      const result = arr
+        .filter(valueFn((x: Value<number>) => Value.of(x.raw > 2, [])))
+        .map(valueFn((x: Value<number>) => Value.of(x.raw * 10, [])))
       expect(result.raw.map(v => v.raw)).toEqual([30, 40, 50])
       expect(result.getTaints()).toEqual([['source', {}]])
     })
 
     it('chains map and filter', () => {
       const arr = Value.of([1, 2, 3, 4, 5], []) as ArrayValue<number>
-      const result = arr.map(x => x * 2).filter(x => x > 5)
+      const result = arr
+        .map(valueFn((x: Value<number>) => Value.of(x.raw * 2, [])))
+        .filter(valueFn((x: Value<number>) => Value.of(x.raw > 5, [])))
       expect(result.raw.map(v => v.raw)).toEqual([6, 8, 10])
     })
 
     it('chains slice and map', () => {
       const arr = Value.of([1, 2, 3, 4, 5], []) as ArrayValue<number>
-      const result = arr.slice(1, 4).map(x => x * 2)
+      const result = arr
+        .slice(Value.of(1, []), Value.of(4, []))
+        .map(valueFn((x: Value<number>) => Value.of(x.raw * 2, [])))
       expect(result.raw.map(v => v.raw)).toEqual([4, 6, 8])
     })
   })
