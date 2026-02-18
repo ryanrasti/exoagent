@@ -2,13 +2,13 @@
  * Combined mock agent with all plugins wired up
  */
 
-import { z } from 'zod'
 import { ExoAgent } from '../../policy'
 import { MockCalendarClient, CALENDAR_DTS } from '../google/calendar'
 import { MockGmailClient, GMAIL_DTS } from '../google/gmail'
 import { MockFilesystemClient, FILESYSTEM_DTS } from './filesystem'
 import { MockSlackClient, SLACK_DTS } from './slack'
 import { MockWebClient, WEB_DTS } from './web'
+import { createBuiltinToolsetClass } from '../builtin'
 
 /**
  * Combined ExoAgent with all source/sink types from all plugins
@@ -55,27 +55,8 @@ export const DEFAULT_DENY_RULES = [
 /** Combined policy with default deny rules */
 export const mockPolicy = mockExo.policy(DEFAULT_DENY_RULES)
 
-import { BuiltinFunctions } from '../../eval/builtins'
-
-/** Builtin toolset for agent control flow - extends BuiltinFunctions to get `all` */
-class BuiltinToolset extends BuiltinFunctions {
-  constructor(
-    private onRespond: (msg: string) => void = () => {},
-    private onSetResult: (result: unknown) => void = () => {},
-  ) {
-    super()
-  }
-
-  @mockExo.tool(z.string())
-  respond(msg: string) {
-    this.onRespond(msg)
-  }
-
-  @mockExo.tool(z.unknown())
-  setToolCallResult(result: unknown) {
-    this.onSetResult(result)
-  }
-}
+/** Builtin toolset for agent control flow - extends BuiltinFunctions to get taint-aware `all` */
+const BuiltinToolset = createBuiltinToolsetClass(mockExo)
 
 /** Combined type definitions for LLM */
 export const COMBINED_DTS = `
@@ -131,7 +112,7 @@ export function createMockAgent(config: MockAgentConfig = {}) {
   const slack = new MockSlackClient()
   const filesystem = new MockFilesystemClient()
   const web = new MockWebClient()
-  const builtin = new BuiltinToolset(config.onRespond, config.onSetResult)
+  const builtin = new BuiltinToolset({ onRespond: config.onRespond, onSetResult: config.onSetResult })
 
   return {
     api: {

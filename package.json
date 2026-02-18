@@ -52,6 +52,7 @@
     "start": "tsx src/index.ts",
     "mcp": "tsx src/agent/main/mcp.ts",
     "test": "vitest --run",
+    "test:live": "vitest --run --config vitest.live.config.ts",
     "typecheck": "tsc",
     "ci:capnweb": "cd packages/capnweb && npm ci && npm run build",
     "ci:examples": "npm --prefix ./examples run ci",

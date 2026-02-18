@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts', 'packages/capnweb-eval/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/.direnv/**'],
+    // Exclude live tests (API calls) from default test run - run explicitly with: npm test -- src/**/*.live.test.ts
+    exclude: ['**/node_modules/**', '**/.direnv/**', '**/*.live.test.ts'],
   },
 })

@@ -4,6 +4,7 @@ import type { Policy } from './policy'
 import { z } from 'zod'
 // Import registerArrayValueFactory to enable ArrayValue support
 import { GlobalScope, normalizeTaint, registerArrayValueFactory, safeEval, Value } from './eval'
+import { PolicyDeniedError } from './policy'
 
 // Ensure ArrayValue factory is registered
 registerArrayValueFactory()
@@ -109,11 +110,17 @@ builtin.setToolCallResult({ emailCount: emails.length })
         return { taints }
       }
       catch (err) {
-        console.warn('[codeMode] Execution error:', err)
+        const message = err instanceof Error ? err.message : String(err)
+        if (err instanceof PolicyDeniedError) {
+          console.log('[codeMode] POLICY DENIED:', message)
+        }
+        else {
+          console.log('[codeMode] Execution error:', message)
+        }
         return {
           taints: [],
           error: {
-            message: err instanceof Error ? err.message : String(err),
+            message,
             stack: err instanceof Error ? err.stack : undefined,
             code,
           },

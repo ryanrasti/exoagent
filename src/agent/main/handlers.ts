@@ -9,14 +9,13 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText, stepCountIs, tool } from 'ai'
 import { codeMode } from '../../code-mode'
 import { registerArrayValueFactory, Value } from '../../eval'
-import { ExoAgent } from '../../policy'
 
 // Ensure ArrayValue factory is registered before any policy code runs
 registerArrayValueFactory()
 import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '../google/auth'
 import { CalendarClient, MockCalendarClient } from '../google/calendar'
 import { GmailClient, MockGmailClient } from '../google/gmail'
-import { createMockAgent, COMBINED_DTS, mockPolicy } from '../mock'
+import { createMockAgent, COMBINED_DTS, mockPolicy, mockExo } from '../mock'
 
 // Combined mock agent (state persists across requests)
 const mockAgent = createMockAgent()
@@ -25,74 +24,12 @@ const mockAgent = createMockAgent()
 const mockGmail = mockAgent.clients.gmail
 const mockCalendar = mockAgent.clients.calendar
 
-import { z } from 'zod'
 import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
+import { createBuiltinToolsetClass } from '../builtin'
 
-// Combined ExoAgent for both email and calendar
-const agentExo = new ExoAgent(
-  ['email', 'calendar'] as const,
-  ['email', 'calendar'] as const,
-)
-
-/** Builtin toolset with @tool decorators for policy enforcement */
-class BuiltinToolset {
-  constructor(
-    private onRespond: (msg: string) => void = () => {},
-    private onSetResult: (result: unknown) => void = () => {},
-  ) {}
-
-  @agentExo.tool(z.string())
-  respond(msg: string) {
-    this.onRespond(msg)
-  }
-
-  @agentExo.tool(z.unknown())
-  setToolCallResult(result: unknown) {
-    this.onSetResult(result)
-  }
-
-  @agentExo.tool(z.array(z.unknown()))
-  all(promises: Promise<unknown>[]): Promise<unknown[]> {
-    return Promise.all(promises)
-  }
-
-  /** Get current date/time as ISO string (since new Date() is not supported in sandbox) */
-  @agentExo.tool(z.void())
-  now(): string {
-    return new Date().toISOString()
-  }
-
-  /** Get today's date as YYYY-MM-DD (useful for date queries) */
-  @agentExo.tool(z.void())
-  today(): string {
-    return new Date().toISOString().split('T')[0]
-  }
-
-  /** Get day of week (0=Sunday, 1=Monday, ..., 6=Saturday) for a date string */
-  @agentExo.tool(z.string().optional())
-  dayOfWeek(dateStr?: string): number {
-    const date = dateStr ? new Date(dateStr) : new Date()
-    return date.getDay()
-  }
-
-  /** Add days to a date string, returns YYYY-MM-DD */
-  @agentExo.tool(z.object({ date: z.string(), days: z.number() }))
-  addDays(args: { date: string, days: number }): string {
-    const date = new Date(args.date)
-    date.setDate(date.getDate() + args.days)
-    return date.toISOString().split('T')[0]
-  }
-
-  /** Get the next occurrence of a weekday (0=Sun, 1=Mon, ..., 6=Sat) from a date */
-  @agentExo.tool(z.object({ from: z.string().optional(), weekday: z.number() }))
-  nextWeekday(args: { from?: string, weekday: number }): string {
-    const date = args.from ? new Date(args.from) : new Date()
-    const currentDay = date.getDay()
-    const daysUntil = (args.weekday - currentDay + 7) % 7 || 7
-    date.setDate(date.getDate() + daysUntil)
-    return date.toISOString().split('T')[0]
-  }
-}
+// Use the shared mockExo from mock/index.ts - it has the correct source/sink types
+// The BuiltinToolset is created from that ExoAgent
+const BuiltinToolset = createBuiltinToolsetClass(mockExo)
 
 import { addMessage, addTaintsToThread, createThread, createSubthread, deleteThread, getMessages, getSubthreads, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
 import { handle } from './transport'
@@ -216,10 +153,10 @@ export async function llm<Sinks extends readonly string[]>(
   let toolResultData: unknown = null
 
   // Create builtin caps - use BuiltinToolset for proper @tool decorators
-  const builtinCaps = capabilities.builtinCaps ?? new BuiltinToolset(
-    (msg) => { responseMessage = msg },
-    (result) => { toolResultData = result },
-  )
+  const builtinCaps = capabilities.builtinCaps ?? new BuiltinToolset({
+    onRespond: (msg) => { responseMessage = msg },
+    onSetResult: (result) => { toolResultData = result },
+  })
 
   // Globals: api (user caps) and builtin (respond, setToolCallResult, etc.)
   const globals = { api: capabilities.api, builtin: builtinCaps }
@@ -268,7 +205,7 @@ export async function llm<Sinks extends readonly string[]>(
   if (!step?.toolResults || step.toolResults.length === 0) {
     // Tool was called but no result - likely an error occurred
     // Log full step for debugging
-    console.error('[llm] Tool called but no results. Step:', JSON.stringify(step, null, 2))
+    console.log('[llm] Tool called but no results. Step:', JSON.stringify(step, null, 2))
     throw new Error('Tool execution failed with no result. Check main process logs for details.')
   }
 

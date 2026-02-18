@@ -5,6 +5,20 @@ import z from 'zod'
 import { normalizeTaint, normalizeTaints, Value } from './eval/utils'
 import { getPolicyMetadata, setPolicyMetadata } from './meta'
 
+/**
+ * Error thrown when a policy check fails (taint flow violation).
+ */
+export class PolicyDeniedError extends Error {
+  constructor(
+    message: string,
+    public readonly source: Taint,
+    public readonly sink: Taint,
+  ) {
+    super(message)
+    this.name = 'PolicyDeniedError'
+  }
+}
+
 // Static source/sink: just taint type names
 // Dynamic source: function that takes return value and produces taints
 // Dynamic sink: function that takes args and produces taints
@@ -140,17 +154,17 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
         for (const source of incomingTaints) {
           for (const sink of sinkTaints) {
             if (denyRule(source, sink) === 'deny') {
-              throw new Error(`Method call denied: source ${source[0]} cannot flow to sink ${sink[0]}`)
+              throw new PolicyDeniedError(`Method call denied: source ${source[0]} cannot flow to sink ${sink[0]}`, source, sink)
             }
           }
         }
       }
       else {
         // Simple deny rule: match by type names
-        const hasMatchingSource = denyRule.sources.some(source => incomingTaints.some(([type]) => type === source))
-        const hasMatchingSink = denyRule.sinks.some(sink => sinkTaints.some(([type]) => type === sink))
-        if (hasMatchingSource && hasMatchingSink) {
-          throw new Error(`Method call denied: ${denyRule.sources.join(', ')} are not allowed to be used as sources and ${denyRule.sinks.join(', ')} are not allowed to be used as sinks`)
+        const matchingSource = incomingTaints.find(([type]) => denyRule.sources.includes(type))
+        const matchingSink = sinkTaints.find(([type]) => denyRule.sinks.includes(type))
+        if (matchingSource && matchingSink) {
+          throw new PolicyDeniedError(`Method call denied: ${denyRule.sources.join(', ')} are not allowed to be used as sources and ${denyRule.sinks.join(', ')} are not allowed to be used as sinks`, matchingSource, matchingSink)
         }
       }
     }
@@ -171,18 +185,18 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
           for (const source of taints) {
             for (const sink of sinkTaints) {
               if (denyRule(source, sink) === 'deny') {
-                throw new Error(`Policy violation at ${path}: source ${source[0]} cannot flow to sink ${sink[0]}`)
+                throw new PolicyDeniedError(`Policy violation at ${path}: source ${source[0]} cannot flow to sink ${sink[0]}`, source, sink)
               }
             }
           }
         }
         else {
-          const hasMatchingSource = denyRule.sources.some(source => taints.some(([type]) => type === source))
-          const hasMatchingSink = denyRule.sinks.some(s => sinkTaints.some(([type]) => type === s))
-          if (hasMatchingSource && hasMatchingSink) {
+          const matchingSource = taints.find(([type]) => denyRule.sources.includes(type))
+          const matchingSink = sinkTaints.find(([type]) => denyRule.sinks.includes(type))
+          if (matchingSource && matchingSink) {
             const taintTypes = taints.map(([type]) => type)
             const sinkTypes = sinkTaints.map(([type]) => type)
-            throw new Error(`Policy violation at ${path}: taints [${taintTypes.join(', ')}] cannot flow to sink [${sinkTypes.join(', ')}]`)
+            throw new PolicyDeniedError(`Policy violation at ${path}: taints [${taintTypes.join(', ')}] cannot flow to sink [${sinkTypes.join(', ')}]`, matchingSource, matchingSink)
           }
         }
       }
