@@ -3,7 +3,10 @@ import type { Taint } from './eval/utils'
 import type { Policy } from './policy'
 import { z } from 'zod'
 // Import registerArrayValueFactory to enable ArrayValue support
-import { GlobalScope, normalizeTaint, registerArrayValueFactory, safeEval, Value } from './eval'
+import { GlobalScope, normalizeTaint, registerArrayValueFactory, safeEval, Value, promiseUtils } from './eval'
+
+// Re-export GlobalScope for consumers that need to manage scope persistence
+export { GlobalScope }
 import { PolicyDeniedError } from './policy'
 
 // Ensure ArrayValue factory is registered
@@ -24,11 +27,15 @@ export type CodeModeOptions<Sinks extends readonly string[]> = {
   inputTaints: Taint[]
   /** Maximum cost (tool calls) per turn. Defaults to 10. */
   maxCost?: number
+  /** Existing scope to reuse (for REPL persistence). If not provided, a new scope is created. */
+  scope?: GlobalScope
+  /** Callback to capture scope after execution (avoids returning non-cloneable objects to AI SDK) */
+  onScope?: (scope: GlobalScope) => void
 }
 
-/** Result from a codeMode execution */
+/** Result from a codeMode execution (must be structuredClone-able for AI SDK) */
 export type CodeModeResult = {
-  taints: Taint[]
+  taints?: Taint[]
   error?: {
     message: string
     stack?: string
@@ -37,7 +44,7 @@ export type CodeModeResult = {
 }
 
 export function codeMode<Sinks extends readonly string[]>(opts: CodeModeOptions<Sinks>) {
-  const { globals, policy, dts = '', outputSink, inputTaints, maxCost = 10 } = opts
+  const { globals, policy, dts = '', outputSink, inputTaints, maxCost = 10, scope: existingScope, onScope } = opts
 
   return {
     description: `Execute JavaScript code. All capabilities are available as globals.
@@ -90,24 +97,45 @@ builtin.setToolCallResult({ emailCount: emails.length })
       const turn = policy.turn(maxCost, inputTaints)
       const checkPolicy = turn.createUnwrapChecker([normalizeTaint(outputSink)])
 
-      try {
-        // Wrap globals as Values and create a GlobalScope
-        // Both api and builtin methods go through policy (require @tool annotations)
+      // Reuse existing scope or create a new one
+      let scope: GlobalScope
+      // Date constructor is whitelisted for `new Date()` expressions
+      // TODO: Date constructor needs input validation - currently accepts any string/number
+      //       which could be a vector for unexpected behavior. See also TODO in utils.ts getSlot().
+      const dateConstructor = Value.of(Date, [], { constructorAllowed: true })
+      // Promise.all is taint-aware via promiseUtils
+      const promiseValue = Value.of(promiseUtils, [], { shallow: true })
+
+      if (existingScope) {
+        // Update api/builtin/Date/Promise in existing scope (they may have changed, e.g. different callbacks)
+        const raw = existingScope.globalThis.raw as { [key: string]: Value }
+        raw.api = Value.of(globals.api, [], { shallow: true })
+        raw.builtin = Value.of(globals.builtin, [], { shallow: true })
+        raw.Date = dateConstructor
+        raw.Promise = promiseValue
+        scope = existingScope
+      }
+      else {
+        // Create fresh scope with api, builtin, Date, and Promise
         const wrappedGlobals: { [key: string]: Value } = {
           api: Value.of(globals.api, [], { shallow: true }),
           builtin: Value.of(globals.builtin, [], { shallow: true }),
+          Date: dateConstructor,
+          Promise: promiseValue,
         }
-        const scope = new GlobalScope(Value.of(wrappedGlobals, [], { shallow: true }), false)
+        scope = new GlobalScope(Value.of(wrappedGlobals, [], { shallow: true }), false)
+      }
 
+      try {
         const result = await safeEval(code, scope, turn.doStubCall.bind(turn))
-
-        // Capture taints before unwrapping
-        const taints = result.getTaints()
 
         // Unwrap to run policy checks on any returned value
         result.unwrap(checkPolicy)
 
-        return { taints }
+        // Capture scope via callback (avoids returning non-cloneable objects to AI SDK)
+        onScope?.(scope)
+
+        return { taints: result.getTaints() }
       }
       catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -117,8 +145,10 @@ builtin.setToolCallResult({ emailCount: emails.length })
         else {
           console.log('[codeMode] Execution error:', message)
         }
+        // Capture scope via callback even on error so REPL state is preserved
+        onScope?.(scope)
+
         return {
-          taints: [],
           error: {
             message,
             stack: err instanceof Error ? err.stack : undefined,

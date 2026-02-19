@@ -267,3 +267,34 @@ export class BuiltinFunctions {
     return new ArrayValue(results, allTaints)
   }
 }
+
+/**
+ * Taint-aware Promise utilities. Exposed as `Promise` in the sandbox
+ * so users can write `Promise.all(...)` instead of `builtin.all(...)`.
+ */
+export class PromiseUtils {
+  /**
+   * Await all promises in an array, preserving taints on resolved values.
+   * Taint-aware replacement for Promise.all.
+   */
+  @builtin
+  async all(promises: Value<Value<Promise<Value>>[]>): Promise<Value<Value[]>> {
+    const promiseArray = promises.raw as Value<Promise<Value>>[]
+
+    // Await all promises - each resolves to a Value with taints
+    const results = await Promise.all(
+      promiseArray.map(async (p) => {
+        const resolved = await p.raw
+        // Merge the promise wrapper's taints into the resolved value
+        return resolved.withTaints(p.getTaints())
+      })
+    )
+
+    // Merge all result taints into the array + promises array taints
+    const allTaints = [...promises.getTaints(), ...Value.mergeTaints(...results)]
+    return new ArrayValue(results, allTaints)
+  }
+}
+
+/** Singleton instance for use in sandbox global scope */
+export const promiseUtils = new PromiseUtils()

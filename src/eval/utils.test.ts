@@ -1,7 +1,7 @@
+import type { Taint } from './utils.js'
 import { describe, expect, it } from 'vitest'
 import { setPolicyMetadata } from '../meta.js'
 import { formatCodeMessage, isSafeMemberRaw, normalizeTaints, Value } from './utils.js'
-import type { Taint } from './utils.js'
 
 // Helper for order-independent taint comparison (accepts string[] for convenience)
 const expectTaints = (value: Value, expected: string[]) => {
@@ -265,7 +265,7 @@ describe('isSafeMemberRaw', () => {
   })
 })
 
-describe('Value.isSafeMember', () => {
+describe('value.isSafeMember', () => {
   it('returns true for safe string values', () => {
     expect(Value.of('foo', []).isSafeMember()).toBe(true)
   })
@@ -286,7 +286,7 @@ describe('Value.isSafeMember', () => {
   })
 })
 
-describe('Value.isThenable', () => {
+describe('value.isThenable', () => {
   it('returns true for Promise-like objects', () => {
     const promise = Promise.resolve(42)
     const v = Value.of(promise, [])
@@ -323,7 +323,7 @@ describe('Value.isThenable', () => {
   })
 })
 
-describe('Value.asAwaitable', () => {
+describe('value.asAwaitable', () => {
   it('returns the value itself for non-thenables', () => {
     const v = Value.of(42, ['taint'])
     const result = v.asAwaitable()
@@ -339,7 +339,7 @@ describe('Value.asAwaitable', () => {
   })
 })
 
-describe('Value.of wrapping behavior', () => {
+describe('value.of wrapping behavior', () => {
   it('wraps nested arrays recursively', () => {
     const v = Value.of([[1, 2], [3, 4]], [])
     expect(v.isArray()).toBe(true)
@@ -381,7 +381,7 @@ describe('Value.of wrapping behavior', () => {
   })
 })
 
-describe('Value.toString', () => {
+describe('value.toString', () => {
   it('formats value with raw and taints', () => {
     const v = Value.of(42, ['a', 'b'])
     // toString now shows tuple format
@@ -396,7 +396,7 @@ describe('Value.toString', () => {
   })
 })
 
-describe('Value.Undefined', () => {
+describe('value.Undefined', () => {
   it('is a Value with undefined raw and no taints', () => {
     expect(Value.Undefined.raw).toBe(undefined)
     expect(Value.Undefined.getTaints()).toEqual([])

@@ -1,5 +1,6 @@
 import { google, Auth } from 'googleapis'
 import { createServer } from 'node:http'
+import { spawn } from 'node:child_process'
 import type { AddressInfo } from 'node:net'
 
 const SCOPES = [
@@ -54,8 +55,14 @@ export async function startOAuthFlow(clientJson: string): Promise<StoredTokens> 
 
         const { tokens } = await client.getToken(code)
 
-        res.writeHead(200, { 'Content-Type': 'text/html' })
-        res.end('<html><body style="font-family: system-ui; text-align: center; padding: 40px;"><h1>✓ Authorization successful!</h1><p>You can close this tab and return to the app.</p></body></html>')
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family: system-ui; text-align: center; padding: 40px;">
+<h1>Authorization successful!</h1>
+<p>This window will close automatically...</p>
+<script>window.close()</script>
+</body></html>`)
         server.close()
 
         resolve({
@@ -86,7 +93,6 @@ export async function startOAuthFlow(clientJson: string): Promise<StoredTokens> 
       // Clear LD_LIBRARY_PATH to avoid NixOS library conflicts with system browser
       const env = { ...process.env }
       delete env.LD_LIBRARY_PATH
-      const { spawn } = require('node:child_process')
       spawn('xdg-open', [authUrl], { env, detached: true, stdio: 'ignore' }).unref()
     })
 

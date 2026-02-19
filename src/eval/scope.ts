@@ -1,10 +1,10 @@
 import type * as acorn from 'acorn'
-import { generate } from 'astring'
-import { Evaluator } from './evaluate'
 import type { Evaluation } from './evaluate'
 import type { SafeEvalValueInner, Taint } from './utils'
-import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
+import { generate } from 'astring'
 import * as b from './ast'
+import { Evaluator } from './evaluate'
+import { assertSafeMember, evalInvariant, parseInvariant, Value } from './utils'
 
 export type EvaluateFn = (node: acorn.Expression, scope: Scope) => Evaluation<Value<SafeEvalValueInner>>
 
@@ -65,7 +65,7 @@ export abstract class Scope {
             if (bound.has(key)) {
               continue
             }
-            copy[key] = value.getSlot(Value.of(key, []))
+            copy[key] = value.getSlot(Value.of(key, []), property.argument)
           }
           this.set(property.argument, Value.of(copy, Value.mergeTaints(...Object.values(copy)), { shallow: true }))
           break
@@ -79,7 +79,7 @@ export abstract class Scope {
           key = Value.of(property.key.name, [])
         }
         evalInvariant(key.isSafeMember(), 'Member must be a safe string or number', property.key, key)
-        yield* this.bind(property.value, value.getSlot(key), evaluate)
+        yield* this.bind(property.value, value.getSlot(key, property.key), evaluate)
         bound.add(key.raw)
       }
     }
@@ -108,7 +108,9 @@ export class GlobalScope extends Scope {
     assertSafeMember(node.name, node)
     // TODO: `get` should actually accept a Value<string | number> so we
     //  can properly propagate taints
-    return this.globalThis.getSlot(Value.of(node.name, []))
+    const val = this.globalThis.getSlot(Value.of(node.name, []), node)
+    evalInvariant(val !== undefined, `Variable '${node.name}' not found in scope`, node, node.name)
+    return val
   }
 
   set(name: acorn.Identifier, value: Value<SafeEvalValueInner>) {
@@ -118,7 +120,7 @@ export class GlobalScope extends Scope {
     evalInvariant(!RESERVED_NAMES.has(name.name), `Cannot bind reserved name: ${name.name}`, name, name.name)
     assertSafeMember(name.name, name)
     const raw = this.globalThis.raw as { [key: string]: Value }
-    evalInvariant(!(name.name in raw), 'Variable already bound', name, name.name)
+    evalInvariant(!(name.name in raw), `Variable '${name.name}' already exists from a previous turn. This is a REPL - use the existing variable directly instead of redeclaring it.`, name, name.name)
     raw[name.name] = value
   }
 }
@@ -135,7 +137,7 @@ export class LocalScope extends Scope {
       return local
     if (this.parent != null)
       return (yield* this.parent.get(node))
-    return undefined
+    evalInvariant(false, `Variable '${node.name}' not found in scope`, node, node.name)
   }
 
   set(name: acorn.Identifier, value: Value<SafeEvalValueInner>) {
@@ -151,15 +153,39 @@ export type SerializedScope = {
   ast: acorn.Program
 }
 
+/** Default keys to exclude from serialization (re-injected at runtime) */
+const SCOPE_EXCLUDE_KEYS = new Set(['api', 'builtin', 'Value', 'Date', 'Promise'])
+
+/**
+ * Get the names of user-defined variables in a scope.
+ * Excludes built-in globals like api, builtin, Date, Promise.
+ */
+export function getScopeVariableNames(scope: GlobalScope): string[] {
+  const vars = scope.globalThis.raw as { [key: string]: Value<SafeEvalValueInner> }
+  return Object.keys(vars).filter(name => !SCOPE_EXCLUDE_KEYS.has(name))
+}
+
 /**
  * Serialize a GlobalScope to AST + code.
  * The result can be used to reconstruct the scope.
+ * Excludes api/builtin/Value as these are re-injected at runtime.
+ * Throws if user-defined variables can't be serialized.
  */
 export function serializeScope(scope: GlobalScope): SerializedScope {
   const vars = scope.globalThis.raw as { [key: string]: Value<SafeEvalValueInner> }
-  const declarations = Object.entries(vars).map(([name, value]) =>
-    b.constDecl(name, value.toAST()),
-  )
+  const declarations: ReturnType<typeof b.constDecl>[] = []
+
+  for (const [name, value] of Object.entries(vars)) {
+    if (SCOPE_EXCLUDE_KEYS.has(name))
+      continue
+    try {
+      declarations.push(b.constDecl(name, value.toAST()))
+    }
+    catch (err) {
+      // Re-throw with context about which variable failed
+      throw new Error(`Cannot persist variable '${name}': ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
 
   const ast = b.program(declarations)
   const code = generate(ast)
@@ -188,9 +214,12 @@ class ScopeValue {
  * Uses the evaluator with ScopeValue.of as a capability.
  */
 export function deserializeScope(serialized: SerializedScope): GlobalScope {
-  // Create temporary scope with Value.of available as a capability (via ScopeValue wrapper)
+  // Create temporary scope with Value.of and Date available as capabilities
   const tempScope = new GlobalScope(
-    Value.of({ Value: Value.of({ of: Value.of(ScopeValue.of, []) }, [], { shallow: true }) }, [], { shallow: true }),
+    Value.of({
+      Value: Value.of({ of: Value.of(ScopeValue.of, []) }, [], { shallow: true }),
+      Date: Value.of(Date, [], { constructorAllowed: true }),
+    }, [], { shallow: true }),
     false,
   )
 
@@ -201,18 +230,22 @@ export function deserializeScope(serialized: SerializedScope): GlobalScope {
   })
 
   for (const stmt of serialized.ast.body) {
-    if (stmt.type !== 'VariableDeclaration') continue
+    if (stmt.type !== 'VariableDeclaration')
+      continue
     for (const decl of stmt.declarations) {
-      if (decl.id.type !== 'Identifier' || !decl.init) continue
+      if (decl.id.type !== 'Identifier' || !decl.init)
+        continue
       const iter = evaluator.evaluate(decl.init, tempScope)
       const step = iter.next()
-      if (!step.done) throw new Error('Unexpected yield during deserialization')
+      if (!step.done)
+        throw new Error('Unexpected yield during deserialization')
       tempScope.set(decl.id, step.value)
     }
   }
 
-  // Return a clean scope without the Value helper
+  // Return a clean scope without the Value/Date helpers (they're re-injected at runtime)
   const vars = tempScope.globalThis.raw as { [key: string]: Value }
   delete vars.Value
+  delete vars.Date
   return new GlobalScope(Value.of(vars, [], { shallow: true }), false)
 }

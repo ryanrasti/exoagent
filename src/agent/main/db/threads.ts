@@ -1,5 +1,6 @@
 import { getDb } from './index'
 import type { Taint } from '../../../eval/utils'
+import type { SerializedScope } from '../../../eval/scope'
 
 export interface ThreadRow {
   id: string
@@ -8,6 +9,7 @@ export interface ThreadRow {
   pinned: number
   status: string
   taints: Taint[]
+  scope: SerializedScope | null
   created_at: number | null
   updated_at: number | null
 }
@@ -38,7 +40,7 @@ export async function createThread(id: string, title?: string): Promise<ThreadRo
     updated_at: now,
   }).execute()
 
-  return { id, parent_id: null, title: title ?? null, pinned: 0, status: 'active', taints: [], created_at: now, updated_at: now }
+  return { id, parent_id: null, title: title ?? null, pinned: 0, status: 'active', taints: [], scope: null, created_at: now, updated_at: now }
 }
 
 /** Create a subthread forked from a parent thread */
@@ -61,7 +63,7 @@ export async function createSubthread(
     updated_at: now,
   }).execute()
 
-  return { id, parent_id: parentId, title: title ?? null, pinned: 0, status: 'active', taints, created_at: now, updated_at: now }
+  return { id, parent_id: parentId, title: title ?? null, pinned: 0, status: 'active', taints, scope: null, created_at: now, updated_at: now }
 }
 
 /** Get all subthreads for a parent thread */
@@ -76,6 +78,7 @@ export async function getSubthreads(parentId: string): Promise<ThreadRow[]> {
   return rows.map(row => ({
     ...row,
     taints: JSON.parse(row.taints),
+    scope: row.scope ? JSON.parse(row.scope) : null,
   }))
 }
 
@@ -97,7 +100,11 @@ export async function getThread(id: string): Promise<ThreadRow | null> {
   const db = await getDb()
   const row = await db.selectFrom('threads').selectAll().where('id', '=', id).executeTakeFirst()
   if (!row) return null
-  return { ...row, taints: JSON.parse(row.taints) }
+  return {
+    ...row,
+    taints: JSON.parse(row.taints),
+    scope: row.scope ? JSON.parse(row.scope) : null,
+  }
 }
 
 /** Get all main threads (no parent) ordered by pinned first, then most recent */
@@ -110,7 +117,20 @@ export async function listThreads(): Promise<ThreadRow[]> {
     .orderBy('updated_at', 'desc')
     .execute()
 
-  return rows.map(row => ({ ...row, taints: JSON.parse(row.taints) }))
+  return rows.map(row => ({
+    ...row,
+    taints: JSON.parse(row.taints),
+    scope: row.scope ? JSON.parse(row.scope) : null,
+  }))
+}
+
+/** Update the REPL scope for a thread */
+export async function updateThreadScope(id: string, scope: SerializedScope): Promise<void> {
+  const db = await getDb()
+  await db.updateTable('threads')
+    .set({ scope: JSON.stringify(scope), updated_at: Date.now() })
+    .where('id', '=', id)
+    .execute()
 }
 
 /** Pin a thread */
@@ -209,7 +229,7 @@ export async function getMessages(threadId: string): Promise<MessageRow[]> {
 /** Convert messages to Turn[] format for LLM */
 export function messagesToTurns(messages: MessageRow[]): Array<
   | { role: 'user', content: string }
-  | { role: 'assistant', response: string, data: unknown, taints: Taint[] }
+  | { role: 'assistant', response: string, data: unknown, taints: Taint[], code: string | null }
 > {
   return messages.map((msg) => {
     if (msg.role === 'user') {
@@ -220,6 +240,7 @@ export function messagesToTurns(messages: MessageRow[]): Array<
       response: msg.content,
       data: msg.data,
       taints: msg.taints,
+      code: msg.code,
     }
   })
 }

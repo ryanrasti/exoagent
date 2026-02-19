@@ -35,6 +35,8 @@ export type SinkAnnotation<Sinks extends string[]>
 export type ToolProps<Sinks extends string[], Sources extends string[]> = {
   source?: SourceAnnotation<Sources>
   sink?: SinkAnnotation<Sinks>
+  /** If true, method receives Value types directly instead of unwrapped values */
+  raw?: boolean
 }
 
 const flattenArray = <T>(array: T | readonly T[]): T[] => {
@@ -224,10 +226,11 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
       throw new Error(`Method ${thisVal.raw}.${method.raw} is not a tool`)
     }
 
-    // Unwrap args first (needed for dynamic sink computation)
-    const unwrappedArgs = args.map(a => a.unwrap(() => {}))
+    // For raw mode, pass Value types directly; otherwise unwrap
+    const callArgs = toolProps.raw ? args : args.map(a => a.unwrap(() => {}))
 
-    // Compute sink taints (static or dynamic)
+    // Compute sink taints (static or dynamic) - always use unwrapped for sink computation
+    const unwrappedArgs = toolProps.raw ? args.map(a => a.unwrap(() => {})) : callArgs
     const sinkTaints: Taint[] = typeof toolProps.sink === 'function'
       ? normalizeTaints(toolProps.sink(...unwrappedArgs))
       : normalizeTaints(flattenArray(toolProps.sink ?? []))
@@ -241,7 +244,7 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
     this.checkDenyRules(incomingTaints, sinkTaints)
 
     // Execute the method
-    const rawResult = Reflect.apply(method.raw, thisVal.raw, unwrappedArgs)
+    const rawResult = Reflect.apply(method.raw, thisVal.raw, callArgs)
 
     // Helper to compute final Value with source taints
     const computeResult = (resolvedResult: unknown): Value => {
@@ -252,6 +255,12 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
 
       // Check source taint types are configured
       this.checkSourceTypesConfigured(sourceTaints.map(([type]) => type))
+
+      // For void/undefined results (sinks), don't propagate arg taints - the data was consumed, not passed through.
+      // Only propagate source taints (if any) for methods that produce new tainted data.
+      if (resolvedResult === undefined) {
+        return Value.of(resolvedResult, sourceTaints)
+      }
 
       // Build result with merged incoming taints + source taints
       const result = Value.of(resolvedResult, Value.mergeTaints(thisVal, ...args))

@@ -2,20 +2,30 @@
  * Handler implementations - shared between IPC and HTTP transports
  */
 
+import type { CodeModeResult, GlobalScope } from '../../code-mode'
 import type { Taint } from '../../eval/utils'
-import type { CodeModeResult } from '../../code-mode'
 import type { Policy } from '../../policy'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText, stepCountIs, tool } from 'ai'
 import { codeMode } from '../../code-mode'
 import { registerArrayValueFactory, Value } from '../../eval'
+// Scope serialization for DB persistence
+import { deserializeScope, serializeScope } from '../../eval/scope'
+import { createBuiltinToolsetClass } from '../builtin'
+import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '../google/auth'
+import { CalendarClient, MockCalendarClient } from '../google/calendar'
+
+import { GmailClient, MockGmailClient } from '../google/gmail'
+
+import { COMBINED_DTS, createMockAgent, mockExo, mockPolicy } from '../mock'
+
+import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
+
+import { addMessage, addTaintsToThread, createSubthread, createThread, deleteThread, getMessages, getSubthreads, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadScope, updateThreadTitle } from './db/threads'
+import { handle } from './transport'
 
 // Ensure ArrayValue factory is registered before any policy code runs
 registerArrayValueFactory()
-import { createAuthenticatedClient, parseClientConfig, startOAuthFlow } from '../google/auth'
-import { CalendarClient, MockCalendarClient } from '../google/calendar'
-import { GmailClient, MockGmailClient } from '../google/gmail'
-import { createMockAgent, COMBINED_DTS, mockPolicy, mockExo } from '../mock'
 
 // Combined mock agent (state persists across requests)
 const mockAgent = createMockAgent()
@@ -24,15 +34,42 @@ const mockAgent = createMockAgent()
 const mockGmail = mockAgent.clients.gmail
 const mockCalendar = mockAgent.clients.calendar
 
-import { deleteSecret, getSecret, getSecretsStatus, setSecret } from './db/secrets'
-import { createBuiltinToolsetClass } from '../builtin'
+// Cached real Google clients (created lazily when tokens are available)
+let cachedGoogleClients: { gmail: GmailClient, calendar: CalendarClient } | null = null
+
+/** Get the API object - uses real Google clients if tokens available, otherwise mock */
+async function getApi(): Promise<typeof mockAgent.api> {
+  // Check for Google tokens
+  const clientJson = await getSecret('googleOAuthClient')
+  const tokensJson = await getSecret('googleTokens')
+
+  if (clientJson && tokensJson) {
+    // Use real Google clients
+    if (!cachedGoogleClients) {
+      const tokens = JSON.parse(tokensJson)
+      const authClient = createAuthenticatedClient(clientJson, tokens)
+      cachedGoogleClients = {
+        gmail: new GmailClient(authClient),
+        calendar: new CalendarClient(authClient),
+      }
+    }
+    return {
+      gmail: cachedGoogleClients.gmail,
+      calendar: cachedGoogleClients.calendar,
+      // Keep using mock for other integrations
+      slack: mockAgent.clients.slack,
+      filesystem: mockAgent.clients.filesystem,
+      web: mockAgent.clients.web,
+    }
+  }
+
+  // Fall back to mock
+  return mockAgent.api
+}
 
 // Use the shared mockExo from mock/index.ts - it has the correct source/sink types
 // The BuiltinToolset is created from that ExoAgent
 const BuiltinToolset = createBuiltinToolsetClass(mockExo)
-
-import { addMessage, addTaintsToThread, createThread, createSubthread, deleteThread, getMessages, getSubthreads, getThread, listThreads, messagesToTurns, pinThread, unpinThread, updateThreadTitle } from './db/threads'
-import { handle } from './transport'
 
 /** Generate a short title for a thread based on the user's first message */
 async function generateThreadTitle(threadId: string, userMessage: string, apiKey: string): Promise<void> {
@@ -52,9 +89,9 @@ async function generateThreadTitle(threadId: string, userMessage: string, apiKey
 }
 
 /** A turn in the conversation history */
-export type Turn =
-  | { role: 'user', content: string }
-  | { role: 'assistant', response: string, data: unknown, taints: Taint[] }
+export type Turn
+  = | { role: 'user', content: string }
+    | { role: 'assistant', response: string, data: unknown, taints: Taint[], code: string | null }
 
 /** A redaction marker for content moved to a subthread */
 export type Redaction = {
@@ -113,6 +150,8 @@ export type LLMOptions<Sinks extends readonly string[]> = {
   maxCost?: number
   /** API key for the LLM provider */
   apiKey: string
+  /** Existing REPL scope to reuse (for variable persistence across turns) */
+  scope?: GlobalScope
 }
 
 /** Format history for the LLM */
@@ -122,17 +161,17 @@ function formatHistoryForLLM(history: Turn[]): Array<{ role: 'user' | 'assistant
       return { role: 'user' as const, content: turn.content }
     }
     else {
-      // Format assistant turn as JSON so LLM can see both response and data
+      // Format assistant turn as JSON - only code and data, NOT response (to prevent taint leakage)
       return {
         role: 'assistant' as const,
-        content: JSON.stringify({ response: turn.response, data: turn.data }),
+        content: JSON.stringify({ code: turn.code, data: turn.data }),
       }
     }
   })
 }
 
-/** Result from llm() - a Value containing response/data/code with taints */
-export type LLMResult = Value & { raw: { response: string, data: unknown, code: string } }
+/** Result from llm() - a Value containing response/data/code with taints, plus scope for REPL persistence */
+export type LLMResult = Value & { raw: { response: string, data: unknown, code: string }, scope: GlobalScope }
 
 /**
  * Execute an LLM turn with the given context, capabilities, and policy.
@@ -146,16 +185,21 @@ export type LLMResult = Value & { raw: { response: string, data: unknown, code: 
 export async function llm<Sinks extends readonly string[]>(
   opts: LLMOptions<Sinks>,
 ): Promise<LLMResult> {
-  const { context, capabilities, policy, outputSink, maxCost = 10, apiKey } = opts
+  const { context, capabilities, policy, outputSink, maxCost = 10, apiKey, scope: existingScope } = opts
 
   // State captured by builtin caps during execution
   let responseMessage = ''
   let toolResultData: unknown = null
+  let toolResultTaints: Taint[] = []
+  let capturedScope: GlobalScope | undefined
 
   // Create builtin caps - use BuiltinToolset for proper @tool decorators
   const builtinCaps = capabilities.builtinCaps ?? new BuiltinToolset({
     onRespond: (msg) => { responseMessage = msg },
-    onSetResult: (result) => { toolResultData = result },
+    onSetResult: (result) => {
+      toolResultData = result.unwrap(() => {})
+      toolResultTaints = result.getTaints()
+    },
   })
 
   // Globals: api (user caps) and builtin (respond, setToolCallResult, etc.)
@@ -163,7 +207,7 @@ export async function llm<Sinks extends readonly string[]>(
 
   const google = createGoogleGenerativeAI({ apiKey })
 
-  // Build the code execution tool
+  // Build the code execution tool with optional scope for REPL persistence
   const inputTaints = context.history.flatMap(turn => turn.role === 'assistant' ? turn.taints : [])
   const codeTool = codeMode({
     globals,
@@ -172,6 +216,8 @@ export async function llm<Sinks extends readonly string[]>(
     outputSink,
     maxCost,
     inputTaints,
+    scope: existingScope,
+    onScope: (scope) => { capturedScope = scope },
   })
 
   // Format history for LLM
@@ -198,7 +244,7 @@ export async function llm<Sinks extends readonly string[]>(
 
   // Check if tool was called
   if (!step?.toolCalls || step.toolCalls.length === 0) {
-    throw new Error('Assistant did not use the execute tool. Raw response: ' + llmResponse.text)
+    throw new Error(`Assistant did not use the execute tool. Raw response: ${llmResponse.text}`)
   }
 
   // Check for tool errors - AI SDK may have error info
@@ -215,20 +261,23 @@ export async function llm<Sinks extends readonly string[]>(
 
   // AI SDK tool results have the result in `output`
   const toolResult = step.toolResults[0] as { output: CodeModeResult }
-  const { taints, error } = toolResult.output
+  const { error } = toolResult.output
 
   // If there was an error, throw it with full details
   if (error) {
-    const err = new Error(error.message) as Error & { code?: string }
+    const err = new Error(error.message) as Error & { code?: string, scope?: GlobalScope }
     err.stack = error.stack
     err.code = error.code
+    err.scope = capturedScope // Include scope even on error so REPL state is preserved
     throw err
   }
 
   // Response and data come from builtin caps called during execution
-  const value = Value.of({ response: responseMessage, data: toolResultData, code: executedCode }, taints)
+  // Taints come from setToolCallResult (captured via raw: true)
+  const value = Value.of({ response: responseMessage, data: toolResultData, code: executedCode }, toolResultTaints) as LLMResult
+  value.scope = capturedScope!
 
-  return value as LLMResult
+  return value
 }
 
 // Combined agent system prompt
@@ -243,29 +292,39 @@ Two globals are available:
 IMPORTANT:
 - You MUST use the execute tool to perform any actions.
 - Use builtin.respond(message) to send a response to the user. This is the ONLY output the user will see.
-- Use builtin.setToolCallResult(data) to store structured data for future turns. This is NOT displayed to the user - it is only available to you in subsequent turns.
+
+THIS IS A REPL - Variables persist across turns:
+- All top-level \`const\` declarations persist for the entire conversation
+- You can reference variables from previous turns directly (e.g., if you defined \`const emails = ...\` before, just use \`emails\` - don't redeclare it)
+- DO NOT redeclare a variable that already exists - this will error
+- Only primitives, objects, arrays, and Date objects can be persisted
+
+CONTEXT MANAGEMENT - builtin.setToolCallResult():
+- setToolCallResult() stores data for YOU (the LLM) to see in conversation history - it does NOT create a REPL variable
+- Use it when you need to reason about data in future turns (e.g., summarize, analyze, compare)
+- By default, DO NOT call setToolCallResult() - just use REPL variables which persist across turns
+- Example: "show my emails" -> NO setToolCallResult (just display and use REPL variables)
+- Example: "show my emails and tell me which ones are urgent" -> YES setToolCallResult (you need to read the content)
 
 CODE RESTRICTIONS - The sandbox only supports a limited subset of JavaScript:
 - ONLY use \`const\` declarations (NO \`let\`, NO \`var\`)
 - NO loops (\`for\`, \`while\`, \`do-while\`) - use .map() instead
 - NO function declarations (arrow functions ARE allowed as callbacks)
 - NO object methods (Object.keys, Object.values, etc.)
-- NO \`new\` expressions - use builtin.now() or builtin.today() instead of new Date()
+- NO \`new\` expressions (except \`new Date()\` which is allowed)
 - NO \`return\` statements - use if/else instead of early returns
+- NO toString() or toLocaleString() methods
 - You CAN use: const, await, if/else, ternary operators, array indexing, property access, logical not (!)
 - You CAN use array methods: .map(), .filter(), .find(), .some(), .every(), .at(), .slice(), .length
 - Arrow functions work as callbacks: arr.map(x => x.id) or arr.filter(x => x.value > 10)
-- For async operations on arrays, use: const results = await builtin.all(arr.map(async x => await api.something(x)))
-- NEVER use Promise.all - use builtin.all instead (Promise is not available)
-- For dates: builtin.now() returns ISO timestamp, builtin.today() returns "YYYY-MM-DD"
-- Date helpers: builtin.dayOfWeek(date?) returns 0-6, builtin.addDays({date, days}) adds days, builtin.nextWeekday({weekday, from?}) gets next occurrence (0=Sun...6=Sat, e.g. 4=Thursday)
+- For async operations on arrays, use: const results = await Promise.all(arr.map(async x => await api.something(x)))
+- For dates: use \`new Date()\`, \`new Date("2024-01-15")\`, or \`new Date(timestamp)\`. Date methods like .toISOString(), .getFullYear(), etc. are available.
 
-When you receive previous assistant turns, they will contain the "response" that was shown to the user and "data" that you stored. Use the "data" to maintain context across turns.
+When you receive previous assistant turns, they will contain the "code" you executed and "data" you stored via setToolCallResult(). Use the "data" to maintain context across turns.
 `
 
 // Legacy Gmail/Calendar prompt for backwards compat
 const GMAIL_CALENDAR_SYSTEM_PROMPT = MOCK_AGENT_SYSTEM_PROMPT
-
 
 /** Chat result type */
 export interface ChatResult {
@@ -303,7 +362,13 @@ export async function handleChat(threadId: string, message: string, apiKey: stri
     content: message,
   })
 
-  // Use the generic llm() function with combined mock agent
+  // Get API (real Google clients if tokens available, otherwise mock)
+  const api = await getApi()
+
+  // Load existing scope from DB (REPL persistence)
+  const existingScope = thread.scope ? deserializeScope(thread.scope) : undefined
+
+  // Use the generic llm() function
   const result = await llm({
     context: {
       system: MOCK_AGENT_SYSTEM_PROMPT,
@@ -312,13 +377,18 @@ export async function handleChat(threadId: string, message: string, apiKey: stri
       dts: COMBINED_DTS,
     },
     capabilities: {
-      api: mockAgent.api,
+      api,
     },
     policy: mockPolicy,
     outputSink: 'email',
     maxCost: 50,
     apiKey,
+    scope: existingScope,
   })
+
+  // Save the scope to DB for next turn (REPL persistence)
+  const serializedScope = serializeScope(result.scope)
+  await updateThreadScope(threadId, serializedScope)
 
   // Unwrap the Value for the response
   const taints = result.getTaints()
@@ -390,8 +460,10 @@ export async function handleChat(threadId: string, message: string, apiKey: stri
 export function registerHandlers(): void {
   // Mock state management (for testing)
   handle('mock:seed', async (data: { emails?: any[], events?: any[] }) => {
-    if (data.emails) mockAgent.clients.gmail.seed(data.emails)
-    if (data.events) mockAgent.clients.calendar.seed(data.events)
+    if (data.emails)
+      mockAgent.clients.gmail.seed(data.emails)
+    if (data.events)
+      mockAgent.clients.calendar.seed(data.events)
     return { ok: true }
   })
 
@@ -434,11 +506,15 @@ export function registerHandlers(): void {
 
     const tokens = await startOAuthFlow(clientJson)
     await setSecret('googleTokens', JSON.stringify(tokens))
+    // Invalidate cached clients so they get recreated with new tokens
+    cachedGoogleClients = null
     return true
   })
 
   handle('secrets:clearGoogleTokens', async () => {
     await deleteSecret('googleTokens')
+    // Invalidate cached clients
+    cachedGoogleClients = null
   })
 
   // Thread management

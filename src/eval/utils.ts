@@ -84,6 +84,8 @@ export type ValueOptions = {
   parent?: Value<SafeEvalValueInner>
   propertyName?: string
   shallow?: boolean
+  /** True for whitelisted constructors (e.g., Date) that can be used with `new` */
+  constructorAllowed?: boolean
 }
 
 /**
@@ -123,7 +125,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     }
     // Use `Value.of` to recursively taint the value with the new taints.
     // Then any existing taints should just be shallowly added:
-    return Value.of(this.raw, normalizedExtra, {...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
+    return Value.of(this.raw, normalizedExtra, { ...this.options, shallow: false }).withTaints(this.taints, true) as Value<T>
   }
 
   withOptions(opts: Partial<ValueOptions>): Value<T> {
@@ -276,7 +278,55 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
   }
 
   /** Slot for key; returns Value with taints merged from this and key. */
-  getSlot(key: Value<string | number>): Value<SafeEvalValueInner> {
+  getSlotRaw(key: Value<string | number>): Value<SafeEvalValueInner> | undefined {
+    // Date objects - whitelist safe methods
+    // TODO: Date support needs more scrutiny:
+    //   1. Need a better model for handling builtin libraries (Date, Math, JSON, etc.)
+    //      - Currently using ad-hoc whitelist, should be more systematic
+    //      - Consider using @tool decorator pattern for builtins too
+    //   2. Date methods that take arguments (e.g., toLocaleString options) need input validation/parsing
+    //   3. The Date constructor in code-mode.ts also needs input validation
+    if (this.raw instanceof Date && typeof key.raw === 'string') {
+      const safeDateMethods = new Set([
+        'toISOString',
+        'toJSON',
+        'toString',
+        'toDateString',
+        'toTimeString',
+        'toLocaleDateString',
+        'toLocaleTimeString',
+        'toLocaleString',
+        'getTime',
+        'getFullYear',
+        'getMonth',
+        'getDate',
+        'getDay',
+        'getHours',
+        'getMinutes',
+        'getSeconds',
+        'getMilliseconds',
+        'getUTCFullYear',
+        'getUTCMonth',
+        'getUTCDate',
+        'getUTCDay',
+        'getUTCHours',
+        'getUTCMinutes',
+        'getUTCSeconds',
+        'getUTCMilliseconds',
+        'getTimezoneOffset',
+        'valueOf',
+      ])
+      if (safeDateMethods.has(key.raw)) {
+        const method = (this.raw as any)[key.raw].bind(this.raw)
+        return Value.of(method, this.getTaints(), {
+          propertyName: key.raw,
+          parent: this,
+          builtinFunction: true,
+        })
+      }
+      throw new Error(`Date method '${key.raw}' is not whitelisted`)
+    }
+
     if (!key.isSafeMember()) {
       throw new Error(`Key ${key.raw} is not a safe string or number`)
     }
@@ -301,6 +351,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     if (this.isPlainObject()) {
       return (this.raw[key.raw] ?? Value.Undefined).withTaints(key.getTaints())
     }
+
     if (this.isArray()) {
       // Allow accessing 'length' on arrays
       if (key.raw === 'length') {
@@ -336,7 +387,13 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
       })
     }
 
-    throw new Error(`Key ${key.raw} is not a safe string or number: ${typeof this.raw}`)
+    return undefined
+  }
+
+  getSlot(key: Value<string | number>, node: acorn.Node): Value<SafeEvalValueInner> {
+    const slot = this.getSlotRaw(key)
+    evalInvariant(slot !== undefined, `Key ${key.raw} is not a safe string or number: ${this.raw}`, node, key.raw)
+    return slot
   }
 
   /** True if this value is a safe member key (string | number, and string not unsafe). */
@@ -362,7 +419,6 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     }
     return this
   }
-
 
   toString(): string {
     const taintStrs = this.taints.map(([type, params]) => {
@@ -399,7 +455,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
     if (Array.isArray(raw)) {
       return b.array(raw.map((item) => {
         if (!(item instanceof Value)) {
-          throw new Error(`Array element is not a Value: ${item}`)
+          throw new TypeError(`Array element is not a Value: ${item}`)
         }
         return item.toAST()
       }))
@@ -413,6 +469,11 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
       return this.options.fnNode
     }
 
+    // Date objects - serialize as new Date("iso-string")
+    if (raw instanceof Date) {
+      return b.newExpr(b.id('Date'), [b.literal(raw.toISOString())])
+    }
+
     // Plain objects (contain Value instances)
     if (typeof raw === 'object') {
       const proto = Object.getPrototypeOf(raw)
@@ -421,7 +482,7 @@ export class Value<T extends SafeEvalValueInner = SafeEvalValueInner> {
       }
       return b.object(Object.entries(raw).map(([key, val]) => {
         if (!(val instanceof Value)) {
-          throw new Error(`Object property "${key}" is not a Value: ${val}`)
+          throw new TypeError(`Object property "${key}" is not a Value: ${val}`)
         }
         return b.prop(key, val.toAST())
       }))

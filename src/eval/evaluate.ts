@@ -154,7 +154,7 @@ export class Evaluator {
     else if (node.type === 'MemberExpression') {
       const { object, prop } = yield* this.evalMemberExpression(node, scope)
       this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
-      return object.getSlot(prop)
+      return object.getSlot(prop, node.property)
     }
     else if (node.type === 'CallExpression') {
       this.inv.parse(
@@ -167,7 +167,7 @@ export class Evaluator {
       if (node.callee.type === 'MemberExpression') {
         const { object: obj, prop } = yield* this.evalMemberExpression(node.callee, scope)
         object = obj
-        callee = object.getSlot(prop)
+        callee = object.getSlot(prop, node.callee)
         // Set propertyName for plain object methods so doStubCall knows the method name
         if (object.isPlainObject() && callee.isFunction() && typeof prop.raw === 'string') {
           callee = callee.withOptions({ propertyName: prop.raw, parent: object })
@@ -382,6 +382,26 @@ export class Evaluator {
       else {
         this.inv.parse(false, `Unsupported logical operator: ${node.operator}`, node)
       }
+    }
+    else if (node.type === 'NewExpression') {
+      // new Constructor(args)
+      const callee = yield* this.evaluate(node.callee, scope)
+      const args = yield* this.evalArray(node.arguments, scope)
+
+      this.inv.eval(callee.isFunction(), 'new requires a constructor function', node.callee, callee)
+      this.inv.eval(
+        callee.options.constructorAllowed === true,
+        'Constructor is not whitelisted for new expressions',
+        node.callee,
+        callee,
+      )
+
+      // Unwrap args for the constructor call
+      const unwrappedArgs = args.map(a => a.unwrap(() => {}))
+      const instance = Reflect.construct(callee.raw as new (...args: any[]) => any, unwrappedArgs)
+
+      // The result inherits taints from the arguments
+      return Value.of(instance, Value.mergeTaints(...args))
     }
     else if (node.type === 'TemplateLiteral') {
       // Template literals: `hello ${name}`

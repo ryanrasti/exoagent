@@ -7,14 +7,14 @@ import { GlobalScope } from './scope'
 import { Value } from './utils'
 
 export { Evaluator } from './evaluate'
-export { GlobalScope, LocalScope, serializeScope, deserializeScope } from './scope'
+export { GlobalScope, LocalScope, serializeScope, deserializeScope, getScopeVariableNames } from './scope'
 export type { SerializedScope } from './scope'
 export { formatCodeMessage, Invariant, Value, normalizeTaint, normalizeTaints } from './utils'
 export type { Taint, TaintParams, TaintInput, TaintsInput, PolicyChecker } from './utils'
 
 // Export builtins separately - must be imported AFTER policy is loaded
 // to avoid circular dependency (builtins -> policy -> eval -> builtins)
-export { ArrayValue, registerArrayValueFactory } from './builtins'
+export { ArrayValue, registerArrayValueFactory, promiseUtils } from './builtins'
 
 export const safeEval = (code: string, globalThis?: Value | Scope, doStubCall?: DoStubCall): Value<SafeEvalValueInner> | PromiseLike<Value<SafeEvalValueInner>> => {
   const defaultStubCall: DoStubCall = (_options, method, thisVal, args) => {

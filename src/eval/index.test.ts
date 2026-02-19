@@ -296,8 +296,18 @@ describe('evaluator edge cases - unsupported syntax', () => {
     expect(() => safeEval('--x', Value.of({ x: 0 }))).toThrow(/Unsupported expression/)
   })
 
-  it('throws on new expressions', () => {
-    expect(() => safeEval('new Date()', Value.of({}))).toThrow(/Unsupported expression/)
+  it('throws on new expressions with non-whitelisted constructor', () => {
+    // Date not in scope - callee resolves to undefined, not a constructor
+    expect(() => safeEval('new Date()', Value.of({}))).toThrow(/new requires a constructor function/)
+    // Date in scope but not whitelisted for new (no constructorAllowed flag)
+    expect(() => safeEval('new Date()', Value.of({ Date: Date }))).toThrow(/Constructor is not whitelisted/)
+  })
+
+  it('allows new expressions with whitelisted constructors', () => {
+    // Date in scope with constructorAllowed flag
+    const scope = Value.of({ Date: Value.of(Date, [], { constructorAllowed: true }) }, [], { shallow: true })
+    const result = safeEval('new Date("2024-01-15")', scope)
+    expect(result.raw).toBeInstanceOf(Date)
   })
 
   it('throws on this expression', () => {
@@ -827,7 +837,8 @@ describe('security - global object access prevention', () => {
 
 describe('security - dangerous operations blocked', () => {
   it('blocks function constructor via new', () => {
-    expect(() => safeEval('new Function("return 1")', Value.of({}))).toThrow(/Unsupported expression|new.*not allowed/)
+    // Function constructor not in scope - identifier not found
+    expect(() => safeEval('new Function("return 1")', Value.of({}))).toThrow(/Identifier not found|constructor/)
   })
 
   it('blocks import expressions', () => {

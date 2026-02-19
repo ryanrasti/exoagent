@@ -394,7 +394,35 @@ describe('codeMode - tool description and schema', () => {
 })
 
 describe('codeMode - taint tracking', () => {
-  it('captures taints from tool results', async () => {
+  it('captures taints from tool results on final expression', async () => {
+    const taintExo = new ExoAgent(['source'] as const, ['output'] as const)
+    const taintPolicy = taintExo.policy([])
+
+    class TaintToolset {
+      @taintExo.tool({ source: ['source'] })
+      getTainted() { return 'tainted data' }
+    }
+
+    const wrappedTool = codeMode({
+      globals: {
+        api: new TaintToolset(),
+        builtin: createBuiltinToolset(taintExo),
+      },
+      policy: taintPolicy,
+      outputSink: 'output',
+      inputTaints: [],
+    })
+
+    // Return tainted value as final expression - taints should be captured
+    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
+      code: `api.getTainted()`,
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(result.taints).toContainEqual(['source', {}])
+  })
+
+  it('void methods (sinks) do not propagate arg taints to result', async () => {
     const taintExo = new ExoAgent(['source'] as const, ['output'] as const)
     const taintPolicy = taintExo.policy([])
 
@@ -415,6 +443,7 @@ describe('codeMode - taint tracking', () => {
       inputTaints: [],
     })
 
+    // setToolCallResult is a void method - taints should NOT propagate to result
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<CodeModeResult>)({
       code: `
         const tainted = api.getTainted()
@@ -424,7 +453,8 @@ describe('codeMode - taint tracking', () => {
 
     expect(result.error).toBeUndefined()
     expect(data).toBe('tainted data')
-    expect(result.taints).toContainEqual(['source', {}])
+    // Void methods don't propagate taints - they consume the data
+    expect(result.taints).toEqual([])
   })
 })
 

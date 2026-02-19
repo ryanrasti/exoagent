@@ -25,6 +25,9 @@ export const member = (object: acorn.Expression, property: acorn.Expression | ac
 export const call = (callee: acorn.Expression, args: acorn.Expression[]): acorn.CallExpression =>
   node({ type: 'CallExpression', callee, arguments: args, optional: false })
 
+export const newExpr = (callee: acorn.Expression, args: acorn.Expression[]): acorn.NewExpression =>
+  node({ type: 'NewExpression', callee, arguments: args })
+
 export const array = (elements: (acorn.Expression | acorn.SpreadElement | null)[]): acorn.ArrayExpression =>
   node({ type: 'ArrayExpression', elements })
 
