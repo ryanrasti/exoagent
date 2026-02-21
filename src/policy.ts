@@ -56,7 +56,12 @@ const validate = <Inputs extends unknown[]>(methodName: string, inputSchemas: In
         throw new TypeError(`Validation must be synchronous: ${validation} ${values[i]}`)
       }
       if (validation.issues) {
-        throw new Error(`Invalid value: ${validation.issues.map(e => e.message).join(', ')}`)
+        // Format error with field paths for better debugging
+        const details = validation.issues.map((e) => {
+          const path = e.path?.map(p => typeof p === 'object' && 'key' in p ? p.key : p).join('.') || 'root'
+          return `${path}: ${e.message}`
+        }).join(', ')
+        throw new Error(`${methodName} validation failed: ${details}`)
       }
       ret.push(validation.value)
     }
@@ -243,8 +248,16 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
     this.checkIncomingTaintsConfigured(incomingTaints)
     this.checkDenyRules(incomingTaints, sinkTaints)
 
-    // Execute the method
-    const rawResult = Reflect.apply(method.raw, thisVal.raw, callArgs)
+    // Execute the method - wrap in try/catch to log external exceptions with context
+    let rawResult: unknown
+    try {
+      rawResult = Reflect.apply(method.raw, thisVal.raw, callArgs)
+    }
+    catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      console.warn(`External tool error in ${options.propertyName}: ${errMsg}`)
+      throw err
+    }
 
     // Helper to compute final Value with source taints
     const computeResult = (resolvedResult: unknown): Value => {
@@ -269,7 +282,14 @@ export class TurnPolicy<Sources extends readonly string[] = [], Sinks extends re
 
     // If result is a Promise, wrap it so the resolved value gets tainted
     if (rawResult instanceof Promise) {
-      const wrappedPromise = rawResult.then((resolvedResult: unknown) => computeResult(resolvedResult))
+      const methodName = options.propertyName
+      const wrappedPromise = rawResult
+        .then((resolvedResult: unknown) => computeResult(resolvedResult))
+        .catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err)
+          console.warn(`External tool error in ${methodName}: ${errMsg}`)
+          throw err
+        })
       // Return a Value wrapping the promise, with incoming taints
       // The promise resolves to a Value which will be handled by the evaluator
       return Value.of(wrappedPromise, Value.mergeTaints(thisVal, ...args))

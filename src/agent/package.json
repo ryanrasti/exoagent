@@ -6,7 +6,8 @@
   "main": "dist/main/index.cjs",
   "scripts": {
     "dev": "node build.mjs && concurrently \"vite\" \"sleep 1 && electron dist/main/index.cjs\"",
-    "dev:web": "npm rebuild better-sqlite3 && concurrently \"vite\" \"tsx --watch main/server.ts\"",
+    "dev:web": "npm rebuild better-sqlite3 && concurrently \"vite\" \"tsx main/server.ts\"",
+    "dev:restart": "./scripts/restart-server.sh",
     "build": "vite build && node build.mjs",
     "pack": "npm run build && electron-builder --config electron-builder.config.js",
     "gen:schema": "tsx scripts/gen-schema.ts",

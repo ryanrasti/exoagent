@@ -153,8 +153,17 @@ export class Evaluator {
     }
     else if (node.type === 'MemberExpression') {
       const { object, prop } = yield* this.evalMemberExpression(node, scope)
+      // Handle optional chaining: obj?.prop returns undefined if obj is nullish
+      if (node.optional && (object.raw === null || object.raw === undefined)) {
+        return Value.of(undefined, object.getTaints())
+      }
       this.inv.eval(prop.isSafeMember(), 'Member must be a safe string or number', node.property, prop)
       return object.getSlot(prop, node.property)
+    }
+    else if (node.type === 'ChainExpression') {
+      // ChainExpression wraps optional chains like a?.b?.c
+      // The inner expressions handle the optional logic themselves
+      return yield* this.evaluate(node.expression, scope)
     }
     else if (node.type === 'CallExpression') {
       this.inv.parse(
@@ -167,6 +176,10 @@ export class Evaluator {
       if (node.callee.type === 'MemberExpression') {
         const { object: obj, prop } = yield* this.evalMemberExpression(node.callee, scope)
         object = obj
+        // Handle optional chaining on callee: obj?.method() returns undefined if obj is nullish
+        if (node.callee.optional && (object.raw === null || object.raw === undefined)) {
+          return Value.of(undefined, object.getTaints())
+        }
         callee = object.getSlot(prop, node.callee)
         // Set propertyName for plain object methods so doStubCall knows the method name
         if (object.isPlainObject() && callee.isFunction() && typeof prop.raw === 'string') {
@@ -176,6 +189,10 @@ export class Evaluator {
       else {
         object = Value.of(undefined, [])
         callee = yield* this.evaluate(node.callee, scope)
+      }
+      // Handle optional call: fn?.() returns undefined if fn is nullish
+      if (node.optional && (callee.raw === null || callee.raw === undefined)) {
+        return Value.of(undefined, callee.getTaints())
       }
       const args = yield* this.evalArray(node.arguments, scope)
       this.inv.eval(callee.isFunction(), 'Member must be a function', node.callee, callee)

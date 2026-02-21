@@ -47,6 +47,19 @@ describe('capnweb-eval basic evaluation', () => {
     expect(await safeEval('obj', Value.of({ obj: { nested: { value: 123 } } }))).toEqual(Value.of({ nested: Value.of({ value: Value.of(123, []) }, []) }, []))
   })
 
+  it('supports optional chaining on properties', async () => {
+    // obj?.prop returns value when obj exists
+    expect(await safeEval('obj?.value', Value.of({ obj: { value: 42 } }))).toEqual(Value.of(42, []))
+    // obj?.prop returns undefined when obj is null
+    expect(await safeEval('obj?.value', Value.of({ obj: null }))).toEqual(Value.of(undefined, []))
+    // obj?.prop returns undefined when obj is undefined
+    expect(await safeEval('obj?.value', Value.of({ obj: undefined }))).toEqual(Value.of(undefined, []))
+    // nested optional chaining
+    expect(await safeEval('obj?.nested?.value', Value.of({ obj: { nested: { value: 123 } } }))).toEqual(Value.of(123, []))
+    expect(await safeEval('obj?.nested?.value', Value.of({ obj: { nested: null } }))).toEqual(Value.of(undefined, []))
+    expect(await safeEval('obj?.nested?.value', Value.of({ obj: null }))).toEqual(Value.of(undefined, []))
+  })
+
   it('accesses array elements', async () => {
     const result = await safeEval('arr', Value.of({ arr: [1, 2, 3] }))
     expect(result).toEqual(Value.of([Value.of(1, []), Value.of(2, []), Value.of(3, [])], []))

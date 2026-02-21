@@ -642,7 +642,7 @@ describe('tool decorator validation', () => {
 
     const toolset = new ValidatedToolset()
     expect(toolset.requiresNumber(5)).toBe(10)
-    expect(() => toolset.requiresNumber('not a number' as any)).toThrow(/Invalid value/)
+    expect(() => toolset.requiresNumber('not a number' as any)).toThrow(/requiresNumber validation failed/)
   })
 
   it('validates multiple inputs', () => {
@@ -653,8 +653,8 @@ describe('tool decorator validation', () => {
 
     const toolset = new MultiValidatedToolset()
     expect(toolset.concat('value:', 42)).toBe('value:42')
-    expect(() => toolset.concat(123 as any, 42)).toThrow(/Invalid value/)
-    expect(() => toolset.concat('value:', 'not a number' as any)).toThrow(/Invalid value/)
+    expect(() => toolset.concat(123 as any, 42)).toThrow(/concat validation failed/)
+    expect(() => toolset.concat('value:', 'not a number' as any)).toThrow(/concat validation failed/)
   })
 
   it('throws on too many arguments', () => {
@@ -677,8 +677,8 @@ describe('tool decorator validation', () => {
 
     const toolset = new ComplexToolset()
     expect(toolset.processUser({ name: 'Alice', age: 30 })).toBe('Alice is 30')
-    expect(() => toolset.processUser({ name: 'Bob', age: -5 })).toThrow(/Invalid value/)
-    expect(() => toolset.processUser({ name: 123 as any, age: 30 })).toThrow(/Invalid value/)
+    expect(() => toolset.processUser({ name: 'Bob', age: -5 })).toThrow(/processUser validation failed/)
+    expect(() => toolset.processUser({ name: 123 as any, age: 30 })).toThrow(/processUser validation failed/)
   })
 })
 

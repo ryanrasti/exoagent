@@ -76,7 +76,7 @@ async function generateThreadTitle(threadId: string, userMessage: string, apiKey
   const google = createGoogleGenerativeAI({ apiKey })
 
   const result = await generateText({
-    model: google('gemini-2.0-flash'),
+    model: google('gemini-3-flash-preview'),
     system: 'Generate a very short title (3-6 words max) summarizing the user\'s request. Reply with ONLY the title, no quotes or punctuation.',
     messages: [{ role: 'user', content: userMessage }],
     maxRetries: 0,
@@ -152,6 +152,10 @@ export type LLMOptions<Sinks extends readonly string[]> = {
   apiKey: string
   /** Existing REPL scope to reuse (for variable persistence across turns) */
   scope?: GlobalScope
+  /** Model to use. Defaults to gemini-2.0-flash */
+  model?: string
+  /** Allow auto-continue if setToolCallResult is called. Defaults to true. Set to false to prevent recursive calls. */
+  allowContinue?: boolean
 }
 
 /** Format history for the LLM */
@@ -161,10 +165,20 @@ function formatHistoryForLLM(history: Turn[]): Array<{ role: 'user' | 'assistant
       return { role: 'user' as const, content: turn.content }
     }
     else {
-      // Format assistant turn as JSON - only code and data, NOT response (to prevent taint leakage)
+      // Show the code that was executed - variables persist in the REPL
+      // Also show the data inline as a comment so LLM has context
+      let content = turn.code || ''
+      if (turn.data && typeof turn.data === 'object') {
+        const entries = Object.entries(turn.data as Record<string, unknown>)
+        if (entries.length > 0) {
+          const [varName, value] = entries[0]
+          // Show the value assigned to the variable to help LLM reason
+          content += `\n\n// ${varName} is now: ${JSON.stringify(value, null, 2).split('\n').join('\n// ')}`
+        }
+      }
       return {
         role: 'assistant' as const,
-        content: JSON.stringify({ code: turn.code, data: turn.data }),
+        content,
       }
     }
   })
@@ -185,7 +199,7 @@ export type LLMResult = Value & { raw: { response: string, data: unknown, code: 
 export async function llm<Sinks extends readonly string[]>(
   opts: LLMOptions<Sinks>,
 ): Promise<LLMResult> {
-  const { context, capabilities, policy, outputSink, maxCost = 10, apiKey, scope: existingScope } = opts
+  const { context, capabilities, policy, outputSink, maxCost = 10, apiKey, scope: existingScope, model = 'gemini-2.0-flash', allowContinue = true } = opts
 
   // State captured by builtin caps during execution
   let responseMessage = ''
@@ -223,9 +237,14 @@ export async function llm<Sinks extends readonly string[]>(
   // Format history for LLM
   const formattedHistory = formatHistoryForLLM(context.history)
 
+  // Log formatted history for debugging
+  if (formattedHistory.length > 0) {
+    console.log('[llm] Formatted history for LLM:', JSON.stringify(formattedHistory, null, 2))
+  }
+
   // Single LLM call - no automatic retries or multi-step loops
   const llmResponse = await generateText({
-    model: google('gemini-3-flash-preview'),
+    model: google(model),
     system: context.system,
     messages: [
       ...formattedHistory,
@@ -237,6 +256,7 @@ export async function llm<Sinks extends readonly string[]>(
     toolChoice: 'required',
     stopWhen: stepCountIs(1),
     maxRetries: 0,
+    temperature: 0,
   })
 
   // Extract the tool result
@@ -259,6 +279,8 @@ export async function llm<Sinks extends readonly string[]>(
   const toolCall = step.toolResults[0]
   const executedCode = (toolCall.input as { code?: string })?.code ?? ''
 
+  console.log('[llm] Executed code:', executedCode)
+
   // AI SDK tool results have the result in `output`
   const toolResult = step.toolResults[0] as { output: CodeModeResult }
   const { error } = toolResult.output
@@ -277,11 +299,46 @@ export async function llm<Sinks extends readonly string[]>(
   const value = Value.of({ response: responseMessage, data: toolResultData, code: executedCode }, toolResultTaints) as LLMResult
   value.scope = capturedScope!
 
+  // If setToolCallResult was called and we're allowed to continue, do one more turn
+  // so the LLM can reason about the data it just stored
+  if (toolResultData !== null && allowContinue) {
+    // Build updated history with the assistant's turn (but no new user message)
+    const updatedHistory: Turn[] = [
+      ...context.history,
+      { role: 'user', content: context.message },
+      { role: 'assistant', response: responseMessage, data: toolResultData, taints: toolResultTaints, code: executedCode },
+    ]
+
+    // Recursively call llm with allowContinue: false to prevent infinite loops
+    console.log('[llm] Auto-continuing with scope variables:', capturedScope ? Object.keys(capturedScope.globalThis.raw as object).filter(k => !['api', 'builtin', 'Value', 'Date', 'Promise'].includes(k)) : 'none')
+    const continueResult = await llm({
+      ...opts,
+      context: {
+        ...context,
+        history: updatedHistory,
+        message: '[Continue: Now use the data you just fetched to respond to the user. The variables you declared are still in scope.]',
+      },
+      scope: capturedScope,
+      allowContinue: false,
+    })
+
+    // Combine the code from both turns
+    const continueResultRaw = continueResult.unwrap(() => {}) as { response: string, data: unknown, code: string }
+    const combinedCode = `${executedCode}\n\n// --- continue ---\n\n${continueResultRaw.code}`
+    const combinedValue = Value.of(
+      { response: continueResultRaw.response, data: continueResultRaw.data, code: combinedCode },
+      continueResult.getTaints(),
+    ) as LLMResult
+    combinedValue.scope = continueResult.scope
+
+    return combinedValue
+  }
+
   return value
 }
 
-// Combined agent system prompt
-const MOCK_AGENT_SYSTEM_PROMPT = `You are an AI assistant that helps users manage their email, calendar, Slack, files, and web browsing.
+// Combined agent system prompt - exported for use in evals
+export const MOCK_AGENT_SYSTEM_PROMPT = `You are an AI assistant that helps users manage their email, calendar, Slack, files, and web browsing.
 
 You have access to a single tool called "execute" that runs JavaScript code.
 
@@ -300,11 +357,14 @@ THIS IS A REPL - Variables persist across turns:
 - Only primitives, objects, arrays, and Date objects can be persisted
 
 CONTEXT MANAGEMENT - builtin.setToolCallResult():
-- setToolCallResult() stores data for YOU (the LLM) to see in conversation history - it does NOT create a REPL variable
-- Use it when you need to reason about data in future turns (e.g., summarize, analyze, compare)
-- By default, DO NOT call setToolCallResult() - just use REPL variables which persist across turns
-- Example: "show my emails" -> NO setToolCallResult (just display and use REPL variables)
-- Example: "show my emails and tell me which ones are urgent" -> YES setToolCallResult (you need to read the content)
+- setToolCallResult() saves data for your context so you can reason about it next turn
+- Example for "summarize my meetings":
+  Turn 1: \`const events = await api.calendar.list({...}); builtin.setToolCallResult({ events })\`
+  Turn 2: \`builtin.respond("You have " + events.length + " meetings...")\`
+  NOTE: \`events\` IS ONLY IN SCOPE BECAUSE YOU STORED IT WITH \`const events = ...\`
+- CRITICAL: There is NO \`data\` object! Writing \`data.events\` WILL FAIL.
+  WRONG: \`const events = data.events\` - this will crash!
+  RIGHT: Just use the variable you declared: \`events\`
 
 CODE RESTRICTIONS - The sandbox only supports a limited subset of JavaScript:
 - ONLY use \`const\` declarations (NO \`let\`, NO \`var\`)
@@ -314,13 +374,16 @@ CODE RESTRICTIONS - The sandbox only supports a limited subset of JavaScript:
 - NO \`new\` expressions (except \`new Date()\` which is allowed)
 - NO \`return\` statements - use if/else instead of early returns
 - NO toString() or toLocaleString() methods
+- Optional chaining (\`?.\`) IS supported for safe property access
 - You CAN use: const, await, if/else, ternary operators, array indexing, property access, logical not (!)
 - You CAN use array methods: .map(), .filter(), .find(), .some(), .every(), .at(), .slice(), .length
 - Arrow functions work as callbacks: arr.map(x => x.id) or arr.filter(x => x.value > 10)
 - For async operations on arrays, use: const results = await Promise.all(arr.map(async x => await api.something(x)))
-- For dates: use \`new Date()\`, \`new Date("2024-01-15")\`, or \`new Date(timestamp)\`. Date methods like .toISOString(), .getFullYear(), etc. are available.
+- For dates: use \`new Date()\`, \`new Date("2024-01-15")\`, or \`new Date(timestamp)\`. Date getter methods (.toISOString(), .getFullYear(), .getMonth(), etc.) are available. Setter methods (.setHours(), .setDate(), etc.) are NOT allowed - create new Date objects instead.
 
-When you receive previous assistant turns, they will contain the "code" you executed and "data" you stored via setToolCallResult(). Use the "data" to maintain context across turns.
+When you receive previous assistant turns, you will see the code you executed and the results as comments. The variables you declared are still in scope - just use them directly by name.
+
+MAKE SURE TO USE maxResults where requried!
 `
 
 // Legacy Gmail/Calendar prompt for backwards compat
