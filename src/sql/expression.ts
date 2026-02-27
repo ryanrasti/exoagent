@@ -1,6 +1,6 @@
 import type { RawSql } from './sql'
 import z from 'zod'
-import { RpcToolset, tool } from '../rpc-toolset'
+import { tool } from '../exoeval/tool'
 import { buildSql, sql } from './sql'
 
 type LiteralValue = number | string | boolean | null
@@ -16,10 +16,8 @@ const zSqlExpression = z.custom<SqlExpression>((val): val is SqlExpression => va
 const zNumericSqlExpression = z.union([zSqlExpression, z.number(), z.string()])
 const zSqlExpressionIn = z.union([zSqlExpression, z.number(), z.string(), z.boolean(), z.null()])
 
-export class SqlExpression extends RpcToolset {
-  constructor(public precedence: number = 100) {
-    super()
-  }
+export class SqlExpression {
+  constructor(public precedence: number = 100) { }
 
   // `= () => ` to ensure the method is a direct property of the class instance,
   // not a method of the class prototype

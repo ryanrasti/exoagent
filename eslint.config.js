@@ -23,6 +23,7 @@ export default antfu(
       'style/max-statements-per-line': 'off',
       'ts/no-this-alias': 'off',
       'antfu/no-top-level-await': 'off',
+      'test/prefer-lowercase-title': 'off',
     },
   },
 )

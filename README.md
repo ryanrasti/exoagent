@@ -73,15 +73,14 @@ class User extends db.Table('users').as('user') {
 ```typescript
 import { google } from '@ai-sdk/google'
 import { generateText, stepCountIs } from 'ai'
-import { CodeMode, createDenoSandbox } from 'exoagent'
+import { codemode } from 'exoagent'
 
 // Create a capability scoped to user_id=1
 const userCap = User.on(u => u.id['='](1)).from()
 
-// Wrap with CodeMode for sandboxed execution
-const codeMode = new CodeMode(createDenoSandbox())
-const codeTool = await codeMode.wrap({
-  currentUser: () => userCap,
+// Wrap with codemode for sandboxed execution
+const codeTool = await codemode({
+  currentUser: userCap,
 }, schemaString) // schemaString = the class definitions above as a string
 
 const result = await generateText({
@@ -115,17 +114,15 @@ npx tsx saas-bot.ts
 
 Note the examples require:
 1. NodeJS (runtime)
-2. [Deno](https://docs.deno.com/runtime/getting_started/installation/) (sandbox)
-3. An LLM API key set via one of the env vars:
+2. An LLM API key set via one of the env vars:
    - `OPENAI_API_KEY`
    - `ANTHROPIC_API_KEY`
    - `GOOGLE_GENERATIVE_AI_API_KEY`
 
 ## Architecture
 ExoAgent sits between your LLM and your infrastructure as a regular tool.
-1. **Protocol**: Uses [Cap'n Web](https://github.com/cloudflare/capnweb) (RPC) as the transport.
-2. **Runtime**: Runs in a JS code sandbox (user-configured; Deno supported out of the box, more to come).
-3. **Query Builder**: Uses a custom capability SQL builder that compiles to safe SQL.
+1. **Evaluator**: A custom sandboxed JavaScript evaluator (`exoeval`) that only allows safe operations.
+2. **Query Builder**: A capability-based SQL builder that compiles to safe SQL with scoped access.
 
 ## ⚠️ Project Status: Experimental (v0.0.x)
 ExoAgent is an exploration of capability-based security for LLMs. While the architecture (OCaps + Sandboxing) is theoretically robust, this specific implementation is new and may contain bugs.

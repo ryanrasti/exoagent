@@ -13,7 +13,7 @@ import type { LanguageModel } from 'ai'
 import process from 'node:process'
 import { generateText, stepCountIs } from 'ai'
 import BetterSqlite3 from 'better-sqlite3'
-import { CodeMode, createDenoSandbox, tool } from 'exoagent'
+import { codemode, tool } from 'exoagent'
 import { Database } from 'exoagent/sql'
 import { SqliteDialect } from 'kysely'
 import { getModel, runRepl } from './utils'
@@ -88,11 +88,8 @@ async function chat(userPrompt: string, model: LanguageModel, userId: number = 1
   // Create a capability scoped to the specified user
   const userCap = User.on(u => u.id['='](userId)).from()
 
-  // Wrap with CodeMode for sandboxed execution
-  const codeMode = new CodeMode(createDenoSandbox())
-  const codeTool = await codeMode.wrap({
-    currentUser: () => userCap,
-  }, `class Todo extends db.Table('todos').as('todo') {
+  // Wrap with codemode for sandboxed execution
+  const codeTool = await codemode({ currentUser: userCap }, `class Todo extends db.Table('todos').as('todo') {
   id = this.column('id')
   userId = this.column('user_id')
   title = this.column('title')
@@ -118,14 +115,14 @@ class User extends db.Table('users').as('user') {
     system: `You are a helpful assistant that helps users manage their todos.
 You have access to the current user's information and their todos.
 Use the execute tool to query the database. The API provides:
-- currentUser(): Returns a query builder for the current user's data
+- currentUser: Returns a query builder for the current user's data
 - user.todos(): Returns a query builder for the user's todos.
 
 Example:
-- (api) => api.currentUser().join(({ user }) => user.todos()).select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
-- (api) => api.currentUser().join(({ user }) => user.todos()).where(({ todo }) => todo.completed['='](0)).select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
+- (api) => api.currentUser.join(({ user }) => user.todos()).select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
+- (api) => api.currentUser.join(({ user }) => user.todos()).where(({ todo }) => todo.completed['='](0)).select(({ todo }) => ({title: todo.title, completed: todo.completed})).execute()
 
-To do a SELECT *, use this shorthand: (api) => api.currentUser().join(({ user }) => user.todos()).select(({ user }) => user)
+To do a SELECT *, use this shorthand: (api) => api.currentUser.join(({ user }) => user.todos()).select(({ user }) => user)
 Select must return a row object (not a flat column).
 
 Always use .execute() at the end of your query chains to get results.`,

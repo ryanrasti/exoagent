@@ -14,13 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: git submodule update --init --recursive
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: npm
 
-      - run: cd packages/capnweb && npm ci && npm run build
       - run: npm ci
       - run: npm run build
       - run: cd website && npm ci
@@ -46,13 +44,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: latest
 
-      - run: cd packages/capnweb && npm ci && npm run build
       - run: npm ci
       - run: npm run build
       - run: npm run test
-      - run: cd examples && npm ci &&npm run ci
+      - run: cd examples && npm ci && npm run check

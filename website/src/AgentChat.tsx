@@ -1,7 +1,6 @@
-import type { RpcTarget } from 'capnweb'
 import type { Database } from 'sql.js'
-import type { Api, CodeResult, SqlResult } from '../worker/index'
-import { explicitCallback, newHttpBatchRpcSession, newWebSocketRpcSession, setGlobalRpcSessionOptions } from 'capnweb'
+import type { Api, SqlResult } from '../worker/index'
+import { newHttpBatchRpcSession, newWebSocketRpcSession } from 'capnweb'
 import React, { useEffect, useRef, useState } from 'react'
 import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
@@ -513,7 +512,7 @@ export function RawSqlAgentChat({ sessionIdPromise, leaderboard, isBountyClaimed
     using agent = api.currentSession({ sessionId: await sessionIdPromise })
 
     const db = await getDb()
-    return await agent.chatRawSql(message, explicitCallback(async (sql: string): Promise<SqlResult> => {
+    return await agent.chatRawSql(message, async (sql: string): Promise<SqlResult> => {
       // eslint-disable-next-line no-console
       console.log('running sql', sql)
       try {
@@ -526,7 +525,7 @@ export function RawSqlAgentChat({ sessionIdPromise, leaderboard, isBountyClaimed
         console.error('error executing sql', error)
         return { error: String(error) }
       }
-    }, 'stub'))
+    })
   }
 
   const hasLeaderboard = leaderboard && (leaderboard.last24h.length > 0 || leaderboard.recent.length > 0)
@@ -580,14 +579,6 @@ export function RawSqlAgentChat({ sessionIdPromise, leaderboard, isBountyClaimed
 }
 
 export function ExoAgentChat({ sessionIdPromise }: { sessionIdPromise: Promise<string> }) {
-  // Set default mode to record/replay
-  useEffect(() => {
-    setGlobalRpcSessionOptions(() => ({ recordReplayMode: 'all' }))
-    return () => {
-      setGlobalRpcSessionOptions(() => ({}))
-    }
-  }, [])
-
   // ExoAgent chat callback
   const chat = async (message: string): Promise<ChatResult> => {
     using api = newWebSocketRpcSession<Api>('/api/bounty/rpc', undefined, {
@@ -595,23 +586,7 @@ export function ExoAgentChat({ sessionIdPromise }: { sessionIdPromise: Promise<s
     })
     using agent = api.currentSession({ sessionId: await sessionIdPromise })
 
-    return await agent.chatExoAgent(message, explicitCallback(async (code: string, api: RpcTarget): Promise<CodeResult> => {
-      // eslint-disable-next-line no-console
-      console.log('executing code', code)
-
-      let queryResult: unknown
-
-      try {
-        // eslint-disable-next-line no-new-func -- we're running this code (that the user is prompting) intentionally for the hack challenge
-        const fn = new Function('api', `return (${code})(api)`)
-        queryResult = await fn(api)
-      }
-      catch (error) {
-        console.error('error executing code', error)
-        throw error
-      }
-      return queryResult as CodeResult
-    }, 'stub'))
+    return await agent.chatExoAgent(message)
   }
 
   return (

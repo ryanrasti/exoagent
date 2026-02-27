@@ -1,14 +1,14 @@
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Tool, ToolExecutionOptions } from 'ai'
-import { asSchema } from 'ai'
+import type { ToolFunction } from './exoeval'
+import { asSchema } from '@ai-sdk/provider-utils'
 import camelCase from 'camelcase'
-import { RpcTarget } from 'capnweb'
-import { validate } from 'json-schema'
 import { compile as compileJsonSchemaToTs } from 'json-schema-to-typescript'
-import invariant from 'tiny-invariant'
 import { zodToJsonSchema } from 'zod-to-json-schema'
-import { RpcToolset } from './rpc-toolset'
+import { asToolFn } from './exoeval'
+import { isToolableFunction } from './exoeval/tool'
 
-export type WrappableTools = { [key: string]: Tool | (() => RpcToolset) } | Tool[]
+export type WrappableTools = { [key: string]: Tool } | Tool[] | { [k in string]: ToolFunction }
 
 const extractTypeBody = (interfaceCode: string): string => {
   const match = interfaceCode.match(/interface \w+ \{([\s\S]*)\}/)
@@ -58,6 +58,35 @@ const getJsonSchema = (schema: unknown): Parameters<typeof compileJsonSchemaToTs
   return schema as Parameters<typeof compileJsonSchemaToTs>[0]
 }
 
+const toStandardSchema = (schema: Tool['inputSchema']): StandardSchemaV1 => {
+  if (schema && typeof schema === 'object' && '~standard' in schema) {
+    return schema
+  }
+
+  const base = asSchema(schema as any)
+  const vendor = '@ai-sdk/provider-utils'
+
+  const validateFn = base.validate
+  if (!validateFn) {
+    throw new TypeError('Schema has no validate method; use a schema with validation (e.g. Zod) or add JSON Schema validation support')
+  }
+  return {
+    '~standard': {
+      version: 1,
+      vendor,
+      validate: (value: unknown) => {
+        const result = validateFn(value)
+        if (!('success' in result)) {
+          throw new Error('Validation must be synchronous')
+        }
+        return result.success
+          ? { value: result.value }
+          : { issues: [{ message: result.error.message }] }
+      },
+    },
+  }
+}
+
 export async function* generateToolTypes(
   tools: WrappableTools,
   name: string,
@@ -75,12 +104,6 @@ export async function* generateToolTypes(
     : Object.entries(tools)
 
   for (const [toolName, tool] of toolEntries) {
-    if (typeof tool === 'function') {
-      const toolset = tool()
-      yield `// \`RpcToolset\`: ${toolName} (see .d.ts below for methods)`
-      yield `  ${toolName}: () => RpcPromise<${toolset.constructor.name}>`
-      continue
-    }
     const inputSchema = getJsonSchema(tool.inputSchema)
     const outputSchema = tool.outputSchema
       ? getJsonSchema(tool.outputSchema)
@@ -122,65 +145,23 @@ export async function* generateToolTypes(
   yield `}\n\nexport default ${name};`
 }
 
-export const generateToolApi = (tools: WrappableTools, opts: ToolExecutionOptions) => {
-  class ToolApi extends RpcTarget {
-    __return_value__: unknown = null
-    __raw_code__: string
-
-    constructor(code: string) {
-      super()
-      this.__raw_code__ = code
-    }
-
-    async __code__(): Promise<string> {
-      return this.__raw_code__
-    }
-
-    __return__(result: unknown) {
-      this.__return_value__ = result
-    }
+const wrapTool = (tool: Tool, opts: ToolExecutionOptions): ((...args: unknown[]) => unknown) => {
+  if (!tool.execute) {
+    throw new Error(`Tool ${tool.title} does not have an execute function`)
   }
+  const schema = toStandardSchema(tool.inputSchema)
+  return asToolFn((input: unknown) => tool.execute!(input, opts), [schema])
+}
 
+export const wrapTools = (tools: WrappableTools, opts: ToolExecutionOptions): { [k in string]: ToolFunction } => {
   const toolEntries = Array.isArray(tools)
     ? tools.map(
         (tool, index) =>
           [
             tool.title ?? `tool_${index}`,
-            tool,
-          ] as [string, Tool],
+            wrapTool(tool, opts),
+          ] as const,
       )
-    : Object.entries(tools)
-  for (const [toolName, tool] of toolEntries) {
-    // We modify the prototype because Cap'n Web will only call methods on the
-    // prototype, not the instance.
-    (ToolApi.prototype as any)[toolName] = async function (this: ToolApi, ...args: any) {
-      if (typeof tool === 'function') {
-        // If it's a toolset, then it's a zero-arg function:
-        const toolset = tool()
-        invariant(toolset instanceof RpcToolset, 'Tool must return an instance of RpcToolset')
-        return toolset
-      }
-
-      if (args.length !== 1) {
-        throw new Error(`Tool ${toolName} only accepts exactly one argument, but ${args.length} were provided`)
-      }
-      // Get JSON schema for validation
-      const schema = asSchema(tool.inputSchema)
-      const jsonSchema = await schema.jsonSchema
-
-      // Validate arguments
-      const validation = validate(args[0], jsonSchema)
-      if (!validation.valid) {
-        throw new Error(`Invalid arguments for tool ${toolName}: ${validation.errors.map(e => e.message || e.property).join(', ')}`)
-      }
-      if (!tool.execute) {
-        throw new Error(`Tool ${toolName} does not have an execute function`)
-      }
-      return tool.execute(args[0], opts)
-    }
-  }
-
-  return ToolApi
+    : Object.entries(tools).map(([toolName, tool]) => [toolName, isToolableFunction(tool) ? tool : wrapTool(tool, opts)])
+  return Object.fromEntries(toolEntries)
 }
-
-export type ToolApi = InstanceType<ReturnType<typeof generateToolApi>>

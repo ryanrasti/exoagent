@@ -13,7 +13,7 @@ import type { LanguageModel } from 'ai'
 import process from 'node:process'
 import { generateText, stepCountIs } from 'ai'
 import BetterSqlite3 from 'better-sqlite3'
-import { CodeMode, createDenoSandbox, tool } from 'exoagent'
+import { codemode, tool } from 'exoagent'
 import { Database } from 'exoagent/sql'
 import { SqliteDialect } from 'kysely'
 import { getModel, runRepl } from './utils'
@@ -200,10 +200,9 @@ async function chat(userPrompt: string, model: LanguageModel, orgId: number = 1)
   // Create a capability scoped to the specified organization
   const orgCap = Organization.on(o => o.id['='](orgId)).from()
 
-  // Wrap with CodeMode for sandboxed execution
-  const codeMode = new CodeMode(createDenoSandbox())
-  const codeTool = await codeMode.wrap({
-    organization: () => orgCap,
+  // Wrap with codemode for sandboxed execution
+  const codeTool = await codemode({
+    organization: orgCap,
   }, `class Comment extends db.Table('comments').as('comment') {
   id = this.column('id')
   taskId = this.column('task_id')
@@ -281,15 +280,15 @@ class Organization extends db.Table('organizations').as('org') {
 You have access to the current organization's data including projects, tasks, and team members.
 
 Use the execute tool to query the database. The API provides:
-- organization(): Returns a query builder for the current org
+- organization: Returns a query builder for the current org
 - org.members(): Returns the org's team members
 - org.projects(): Returns the org's projects
 - project.tasks(): Returns a project's tasks
 - task.comments(): Returns a task's comments
 
 Examples:
-- (api) => api.organization().join(({ org }) => org.members()).select(({ member }) => member).execute()
-- (api) => api.organization().join(({ org }) => org.projects()).join(({ project }) => project.tasks()).select(({ project, task }) => ({ projectName: project.name, taskName: task.title })).execute()
+- (api) => api.organization.join(({ org }) => org.members()).select(({ member }) => member).execute()
+- (api) => api.organization.join(({ org }) => org.projects()).join(({ project }) => project.tasks()).select(({ project, task }) => ({ projectName: project.name, taskName: task.title })).execute()
 
 Select must return a row object (not a flat column).
 
