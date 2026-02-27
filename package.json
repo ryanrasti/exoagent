@@ -56,6 +56,9 @@
     "ai": "^6.0.0"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.48",
+    "@ai-sdk/google": "^3.0.33",
+    "@ai-sdk/openai": "^3.0.36",
     "camelcase": "^9.0.0",
     "json-schema": "^0.4.0",
     "json-schema-to-typescript": "^15.0.0",
@@ -77,6 +80,7 @@
     "eslint": "9.39.2",
     "kysely-pglite-dialect": "^1.2.0",
     "lint-staged": "16.2.7",
+    "playwright": "^1.57.0",
     "publint": "0.3.16",
     "simple-git-hooks": "2.13.1",
     "tinyexec": "1.0.2",

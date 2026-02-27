@@ -5,7 +5,9 @@ import { transform } from 'esbuild'
 import { z } from 'zod'
 import { exoImport } from './exoeval'
 import { tool } from './exoeval/tool'
+import { BrowserClient } from './plugins/browser'
 import { MockGmailClient } from './plugins/gmail'
+import { LlmClient } from './plugins/llm'
 
 class TaskExecutor {
   private loadResult?: (caps: Caps) => void
@@ -40,6 +42,12 @@ export class Caps {
   @tool()
   public readonly gmail = new MockGmailClient()
 
+  @tool()
+  public readonly browser = new BrowserClient()
+
+  @tool()
+  public readonly llm = new LlmClient()
+
   constructor(public readonly task: string) {}
 
   @tool(z.string())
@@ -71,18 +79,45 @@ async function loadTasks(tasksDir = TASKS_DIR): Promise<Map<string, TaskExecutor
 }
 
 const main = async () => {
-  const tasks = await loadTasks()
+  const filter = process.argv[2]
+  const allTasks = await loadTasks()
+
+  const tasks = filter
+    ? new Map([...allTasks].filter(([name]) => name === filter))
+    : allTasks
+
+  if (filter && tasks.size === 0) {
+    console.error(`task not found: ${filter}`)
+    console.error(`available: ${[...allTasks.keys()].join(', ')}`)
+    process.exit(1)
+  }
+
   for (const [task, executor] of tasks.entries()) {
     await executor.load()
   }
   // eslint-disable-next-line no-console
-  console.log('loaded tasks:', [...tasks.keys()])
+  console.log('running tasks:', [...tasks.keys()])
 
   for (const [task, executor] of tasks.entries()) {
     executor.execute()
   }
 
-  console.log('executed tasks:', [...tasks.keys()])
+  // await all task promises
+  for (const [task, executor] of tasks.entries()) {
+    try {
+      await executor.promise
+    }
+    catch (err) {
+      console.error(`task ${task} failed:`, err)
+    }
+  }
+
+  // cleanup
+  for (const [, executor] of tasks.entries()) {
+    await executor.caps.browser.close()
+  }
+
+  console.log('done')
 }
 
 main()
