@@ -23,80 +23,6 @@ const composeEmailSchema = z.object({
 
 type ComposeEmailInput = z.infer<typeof composeEmailSchema>
 
-export class MockGmailClient {
-  private emails: Map<string, EmailMessage> = new Map()
-  private drafts: Map<string, EmailMessage> = new Map()
-  private nextId = 1
-
-  constructor(seedData: EmailMessage[] = MOCK_SEED) {
-    for (const email of seedData) {
-      this.emails.set(email.id, email)
-    }
-  }
-
-  @tool(z.object({
-    maxResults: z.number(),
-    query: z.string(),
-  }))
-  async list({ maxResults, query }: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>> {
-    const emails = [...this.emails.values()]
-    const isGmailQuery = query.includes(':')
-    const filtered = isGmailQuery
-      ? emails.filter(e => e.labels.includes('INBOX'))
-      : query
-        ? emails.filter(e =>
-            e.subject?.toLowerCase().includes(query.toLowerCase())
-            || e.text?.toLowerCase().includes(query.toLowerCase()))
-        : emails
-    return filtered.slice(0, maxResults).map(e => ({ id: e.id, threadId: e.threadId }))
-  }
-
-  @tool(z.object({ id: z.string() }))
-  async get({ id }: { id: string }): Promise<EmailMessage> {
-    const email = this.emails.get(id)
-    if (!email) {
-      throw new Error(`Email not found: ${id}`)
-    }
-    return email
-  }
-
-  @tool(composeEmailSchema)
-  async send({ to, cc, bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, id: string }> {
-    const id = `msg-${this.nextId++}`
-    const email: EmailMessage = {
-      id,
-      threadId: `thread-${id}`,
-      labels: ['SENT'],
-      from: 'me@example.com',
-      to,
-      cc: cc ?? [],
-      subject,
-      date: new Date(),
-      text,
-    }
-    this.emails.set(id, email)
-    return { success: true, id }
-  }
-
-  @tool(composeEmailSchema)
-  async createDraft({ to, cc, bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, draftId: string }> {
-    const draftId = `draft-${this.nextId++}`
-    const email: EmailMessage = {
-      id: draftId,
-      threadId: `thread-${draftId}`,
-      labels: ['DRAFT'],
-      from: 'me@example.com',
-      to,
-      cc: cc ?? [],
-      subject,
-      date: new Date(),
-      text,
-    }
-    this.drafts.set(draftId, email)
-    return { success: true, draftId }
-  }
-}
-
 export const MOCK_SEED: EmailMessage[] = [
   {
     id: 'email-1',
@@ -154,3 +80,77 @@ export const MOCK_SEED: EmailMessage[] = [
     text: 'Are you free for dinner on Sunday? Dad wants to try that new Italian place downtown.',
   },
 ]
+
+export class MockGmailClient {
+  private emails: Map<string, EmailMessage> = new Map()
+  private drafts: Map<string, EmailMessage> = new Map()
+  private nextId = 1
+
+  constructor(seedData: EmailMessage[] = MOCK_SEED) {
+    for (const email of seedData) {
+      this.emails.set(email.id, email)
+    }
+  }
+
+  @tool(z.object({
+    maxResults: z.number(),
+    query: z.string(),
+  }))
+  async list({ maxResults, query }: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>> {
+    const emails = [...this.emails.values()]
+    const isGmailQuery = query.includes(':')
+    const filtered = isGmailQuery
+      ? emails.filter(e => e.labels.includes('INBOX'))
+      : query
+        ? emails.filter(e =>
+            e.subject?.toLowerCase().includes(query.toLowerCase())
+            || e.text?.toLowerCase().includes(query.toLowerCase()))
+        : emails
+    return filtered.slice(0, maxResults).map(e => ({ id: e.id, threadId: e.threadId }))
+  }
+
+  @tool(z.object({ id: z.string() }))
+  async get({ id }: { id: string }): Promise<EmailMessage> {
+    const email = this.emails.get(id)
+    if (!email) {
+      throw new Error(`Email not found: ${id}`)
+    }
+    return email
+  }
+
+  @tool(composeEmailSchema)
+  async send({ to, cc, bcc: _bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, id: string }> {
+    const id = `msg-${this.nextId++}`
+    const email: EmailMessage = {
+      id,
+      threadId: `thread-${id}`,
+      labels: ['SENT'],
+      from: 'me@example.com',
+      to,
+      cc: cc ?? [],
+      subject,
+      date: new Date(),
+      text,
+    }
+    this.emails.set(id, email)
+    return { success: true, id }
+  }
+
+  @tool(composeEmailSchema)
+  async createDraft({ to, cc, bcc: _bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, draftId: string }> {
+    const draftId = `draft-${this.nextId++}`
+    const email: EmailMessage = {
+      id: draftId,
+      threadId: `thread-${draftId}`,
+      labels: ['DRAFT'],
+      from: 'me@example.com',
+      to,
+      cc: cc ?? [],
+      subject,
+      date: new Date(),
+      text,
+    }
+    this.drafts.set(draftId, email)
+    return { success: true, draftId }
+  }
+}

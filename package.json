@@ -59,6 +59,8 @@
     "@ai-sdk/anthropic": "^3.0.48",
     "@ai-sdk/google": "^3.0.33",
     "@ai-sdk/openai": "^3.0.36",
+    "@effect/cli": "^0.73.2",
+    "@effect/platform-node": "^0.104.1",
     "camelcase": "^9.0.0",
     "json-schema": "^0.4.0",
     "json-schema-to-typescript": "^15.0.0",

@@ -1,10 +1,8 @@
-import { join } from 'node:path'
-import { chromium } from 'playwright'
 import type { Browser, BrowserContext, Page } from 'playwright'
+import process from 'node:process'
+import { chromium } from 'playwright'
 import { z } from 'zod'
 import { tool } from '../../exoeval/tool'
-
-const USER_DATA_DIR = join(import.meta.dirname, '..', '..', '..', '.exoagent', 'browser-profile')
 
 export class BrowserClient {
   private browser: Browser | null = null

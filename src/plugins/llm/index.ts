@@ -1,4 +1,5 @@
 import type { LanguageModel } from 'ai'
+import process from 'node:process'
 import { generateText } from 'ai'
 import { z } from 'zod'
 import { tool } from '../../exoeval/tool'
