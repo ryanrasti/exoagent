@@ -42,8 +42,8 @@ export function exoEval(code: string, ctx = new IdentityContext()): unknown {
   return evaluator.Program(ast)
 }
 
-export function exoImport(code: string): { default: unknown }
-export function exoImport<T>(code: string, ctx: ExpressionContext<T>): { default: T }
+export function exoImport(code: string): { [key: string]: unknown } | Promise<{ [key: string]: unknown }>
+export function exoImport<T>(code: string, ctx: ExpressionContext<T>): { [key: string]: unknown } | Promise<{ [key: string]: unknown }>
 export function exoImport(code: string, ctx = new IdentityContext()): { [key: string]: unknown } | Promise<{ [key: string]: unknown }> {
   const ast = parse(code, { ecmaVersion: 2022, sourceType: 'module' })
   const rootScope = new Scope<unknown>(undefined)

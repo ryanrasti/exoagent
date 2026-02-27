@@ -5,6 +5,7 @@ import { transform } from 'esbuild'
 import { z } from 'zod'
 import { exoImport } from './exoeval'
 import { tool } from './exoeval/tool'
+import { MockGmailClient } from './plugins/gmail'
 
 class TaskExecutor {
   private loadResult?: (caps: Caps) => void
@@ -17,8 +18,8 @@ class TaskExecutor {
     public readonly caps: Caps,
   ) {}
 
-  load() {
-    const mod = exoImport(this.code)
+  async load() {
+    const mod = await exoImport(this.code)
     if (typeof mod.default !== 'function') {
       throw new TypeError('Task must export default a function')
     }
@@ -36,6 +37,9 @@ class TaskExecutor {
 }
 
 export class Caps {
+  @tool()
+  public readonly gmail = new MockGmailClient()
+
   constructor(public readonly task: string) {}
 
   @tool(z.string())
@@ -69,7 +73,7 @@ async function loadTasks(tasksDir = TASKS_DIR): Promise<Map<string, TaskExecutor
 const main = async () => {
   const tasks = await loadTasks()
   for (const [task, executor] of tasks.entries()) {
-    executor.load()
+    await executor.load()
   }
   // eslint-disable-next-line no-console
   console.log('loaded tasks:', [...tasks.keys()])
