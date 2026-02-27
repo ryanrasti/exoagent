@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import { RpcToolset, tool } from './rpc-toolset'
+import { tool } from './exoeval/tool'
 import { Database } from './sql/builder'
 import { dummyDialect } from './sql/test-helpers'
 
-export class TestToolset extends RpcToolset {
+export class TestToolset {
   @tool(z.object({
     a: z.number(),
     b: z.number(),
@@ -25,7 +25,7 @@ export class TestToolset extends RpcToolset {
   }
 }
 
-export class TestToolset2 extends RpcToolset {
+export class TestToolset2 {
   @tool(z.object({
     a: z.number(),
     b: z.number(),

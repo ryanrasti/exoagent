@@ -1,11 +1,10 @@
 import type { CompiledQuery, Dialect } from 'kysely'
-import type { ToolCallback } from '../rpc-toolset'
 import type { SqlExpressionIn } from './expression'
 import type { RawSql } from './sql'
 import { Kysely } from 'kysely'
 import invariant from 'tiny-invariant'
 import z from 'zod'
-import { RpcToolset, setToolMetadata, tool } from '../rpc-toolset'
+import { fn, registerToolField, tool } from '../exoeval/tool'
 import { asSqlExpression, ColumnReferenceExpression, isSqlExpressionIn, OrderByValue, SqlExpression, UnboundColumnReferenceExpression } from './expression'
 import { buildSql, sql } from './sql'
 
@@ -113,7 +112,7 @@ const combinePredicates = (...predicates: (SqlExpression | undefined)[]): SqlExp
 type TableNamespace = {
   [key: string]: RowLike
 }
-type OrderByItem<TN extends TableNamespace> = NamespacedExpression<TN, SqlExpression | SqlExpression[] | OrderByValue | OrderByValue[] | (SqlExpression | OrderByValue)[]>
+type OrderByItem = SqlExpression | SqlExpression[] | OrderByValue | OrderByValue[] | (SqlExpression | OrderByValue)[]
 type Tables<TN extends TableNamespace> = {
   [k in keyof TN & string]: {
     fromItem: FromItem<k, TN[k]>
@@ -123,6 +122,13 @@ type Tables<TN extends TableNamespace> = {
     on?: SqlExpression
     isLateral: boolean
   }
+}
+
+const isOrderByItem = (value: unknown): value is OrderByItem => {
+  if (Array.isArray(value)) {
+    return value.every(e => e instanceof SqlExpression || e instanceof OrderByValue)
+  }
+  return value instanceof SqlExpression || value instanceof OrderByValue
 }
 
 const namespacedArg = <TN extends TableNamespace>(tables: Tables<TN>): TN => {
@@ -141,7 +147,7 @@ type QueryBuilderParams<N extends string, TN extends TableNamespace, S extends R
   rawTable: TableClass<N> | undefined // set only when created directly from a TableClass
 }
 
-class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLike> extends RpcToolset implements FromItem<N, S> {
+class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLike> implements FromItem<N, S> {
   #db: Database
   public readonly alias: N
   private selectRowLike: S
@@ -154,7 +160,6 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   private rawTable: TableClass | undefined // set only when created directly from a TableClass
 
   constructor(params: QueryBuilderParams<N, TN, S>) {
-    super()
     this.#db = params.db
     this.alias = params.alias
     this.selectRowLike = params.selectRowLike
@@ -167,39 +172,32 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
     this.rawTable = params.rawTable
   }
 
-  @tool.callback()
-  select<S2 extends RowLikeIn>(select: ToolCallback<(arg: TN) => S2>) {
-    const selectUnwrapped = tool.unwrap(select, isRowLikeIn as (arg: unknown) => arg is S2)
-    return selectUnwrapped(this.arg, (result) => {
-      return new QueryBuilder<N, TN, AsRowLike<S2>>({ ...this.paramsForCopy(), selectRowLike: asRowLike(result) })
-    })
+  // @ts-expect-error — tool() overload resolution fails with generic method signature
+  @tool(fn.returns(z.any()))
+  select<S2 extends RowLikeIn>(select: (arg: TN) => S2) {
+    const result = select(this.arg)
+    invariant(isRowLikeIn(result), 'select must return a RowLikeIn')
+    return new QueryBuilder<N, TN, AsRowLike<S2>>({ ...this.paramsForCopy(), selectRowLike: asRowLike(result) })
   }
 
-  @tool.callback()
-  where(where: ToolCallback<(arg: TN) => SqlExpressionIn>) {
-    const whereUnwrapped = tool.unwrap(where, isSqlExpressionIn)
-    return whereUnwrapped(this.arg, (result) => {
-      return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), whereExpression: combinePredicates(this.whereExpression, asSqlExpression(result)) })
-    })
+  // @ts-expect-error — tool() overload resolution fails with generic method signature
+  @tool(fn.returns(z.custom(isSqlExpressionIn)))
+  where(where: (arg: TN) => SqlExpressionIn) {
+    const result = where(this.arg)
+    return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), whereExpression: combinePredicates(this.whereExpression, asSqlExpression(result)) })
   }
 
-  @tool.callback()
-  orderBy(orderBy: ToolCallback<OrderByItem<TN>>) {
-    const orderByUnwrapped = tool.unwrap(orderBy, (arg): arg is ReturnType<OrderByItem<TN>> => {
-      if (Array.isArray(arg)) {
-        return arg.every(e => e instanceof SqlExpression || e instanceof OrderByValue)
-      }
-      return arg instanceof SqlExpression || arg instanceof OrderByValue
+  // @ts-expect-error — tool() overload resolution fails with generic method signature
+  @tool(fn.returns(z.custom(isOrderByItem<TN>)))
+  orderBy(orderBy: (arg: TN) => OrderByItem) {
+    const raw = orderBy(this.arg)
+    const rawArray = Array.isArray(raw) ? raw : [raw]
+    const exprs = rawArray.map((e) => {
+      invariant(e instanceof SqlExpression || e instanceof OrderByValue, 'orderBy must return a SqlExpression/OrderByValue or an array of SqlExpressions/OrderByValues')
+      return e instanceof SqlExpression ? new OrderByValue(e) : e
     })
-    return orderByUnwrapped(this.arg, (raw) => {
-      const rawArray = Array.isArray(raw) ? raw : [raw]
-      const exprs = rawArray.map((e) => {
-        invariant(e instanceof SqlExpression || e instanceof OrderByValue, 'orderBy must return a SqlExpression/OrderByValue or an array of SqlExpressions/OrderByValues')
-        return e instanceof SqlExpression ? new OrderByValue(e) : e
-      })
 
-      return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), orderByExpressions: (this.orderByExpressions ?? []).concat(exprs) })
-    })
+    return new QueryBuilder<N, TN, S>({ ...this.paramsForCopy(), orderByExpressions: (this.orderByExpressions ?? []).concat(exprs) })
   }
 
   // Note that `limit` "attenuates": the new limit is the minimum of the new limit and the existing limit
@@ -222,50 +220,47 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   join<N2 extends string, F2 extends RowLike>(fromItem: FromItem<N2, F2>
     | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>): QueryBuilder<N, TN & { [k in N2]: F2 }, S>
 
-  @tool.unsafeNoValidation()
+  @tool(z.any(), z.any())
   join<N2 extends string, F2 extends RowLikeRaw>(fromItem: FromItem<N2, F2>
     | NamespacedExpression<TN, FromItem<N2, F2>>, on?: NamespacedExpression<TN & { [k in N2]: F2 }, SqlExpressionIn>) {
     const fromItemCallbackRaw = isFromItem(fromItem) ? () => fromItem : fromItem as NamespacedExpression<TN, FromItem<N2, F2>>
-    const fromItemCallback = tool.unwrap(fromItemCallbackRaw, isFromItem as (arg: unknown) => arg is FromItem<N2, F2>)
 
-    const res = fromItemCallback(this.arg, (fromItemResolved) => {
-      if (fromItemResolved instanceof QueryBuilder && fromItemResolved.rawTable) {
-        // If we're joining to a raw table, use it because it might have an `onExpression`
-        //  (and its more efficient to use the raw table than to re-SELECT from it)
-        fromItemResolved = fromItemResolved.rawTable as unknown as FromItem<N2, F2>
-      }
-      const alias = fromItemResolved.alias
+    let fromItemResolved: FromItem<N2, F2> = fromItemCallbackRaw(this.arg)
+    invariant(isFromItem(fromItemResolved), 'fromItem must return a FromItem')
+    if (fromItemResolved instanceof QueryBuilder && fromItemResolved.rawTable) {
+      // If we're joining to a raw table, use it because it might have an `onExpression`
+      //  (and its more efficient to use the raw table than to re-SELECT from it)
+      fromItemResolved = fromItemResolved.rawTable as unknown as FromItem<N2, F2>
+    }
+    const alias = fromItemResolved.alias
+    invariant(typeof alias === 'string' && isSafeAlias(alias), 'alias must be a safe alias')
 
-      if (this.tables[alias]) {
-        throw new Error(`Join already exists: ${alias} in ${Object.keys(this.tables)}`)
-      }
+    if (this.tables[alias]) {
+      throw new Error(`Join already exists: ${alias} in ${Object.keys(this.tables)}`)
+    }
 
-      const arg = {
-        ...this.arg,
-        [alias]: fromItemResolved.toRowLike(),
-      }
+    const arg = {
+      ...this.arg,
+      [alias]: fromItemResolved.toRowLike(),
+    }
 
-      const onCallback = tool.unwrap(on ?? (() => undefined), (raw: unknown): raw is SqlExpressionIn | undefined => raw === undefined || isSqlExpressionIn(raw))
-      return onCallback(arg, (onRaw) => {
-        const onResolved = combinePredicates(onRaw !== undefined ? asSqlExpression(onRaw) : undefined, fromItemResolved.onExpression)
-        invariant(onResolved != null, 'Must specify an `on` expression or use `Table.on` to set the on expression')
+    const onRaw = on?.(arg)
+    invariant(onRaw === undefined || isSqlExpressionIn(onRaw), 'on must return a SqlExpressionIn')
+    const onResolved = combinePredicates(onRaw !== undefined ? asSqlExpression(onRaw) : undefined, (fromItemResolved as FromItem<N2, F2>).onExpression)
+    invariant(onResolved != null, 'Must specify an `on` expression or use `Table.on` to set the on expression')
 
-        invariant(onResolved instanceof SqlExpression, 'on must return a SqlExpression')
-        const tablesWithAlias: Tables<TN & { [k in N2]: F2 }> = {
-          ...this.tables,
-          [alias]: {
-            fromItem: fromItemResolved,
-            on: onResolved,
-            joinType: 'inner',
-            // If `fromItem` is a function that returns a QueryBuilder, it is implicitly a lateral join (depends on the other tables)
-            isLateral: !isFromItem(fromItem) && fromItemResolved instanceof QueryBuilder,
-          },
-        } as Tables<TN & { [k in N2]: F2 }>
-        return new QueryBuilder({ ...this.paramsForCopy(), tables: tablesWithAlias })
-      })
-    })
-
-    return res
+    invariant(onResolved instanceof SqlExpression, 'on must return a SqlExpression')
+    const tablesWithAlias: Tables<TN & { [k in N2]: F2 }> = {
+      ...this.tables,
+      [alias]: {
+        fromItem: fromItemResolved,
+        on: onResolved,
+        joinType: 'inner',
+        // If `fromItem` is a function that returns a QueryBuilder, it is implicitly a lateral join (depends on the other tables)
+        isLateral: !isFromItem(fromItem) && fromItemResolved instanceof QueryBuilder,
+      },
+    } as Tables<TN & { [k in N2]: F2 }>
+    return new QueryBuilder({ ...this.paramsForCopy(), tables: tablesWithAlias })
   }
 
   @tool()
@@ -334,7 +329,7 @@ class QueryBuilder<N extends string, TN extends TableNamespace, S extends RowLik
   }
 }
 
-class TableBase extends RpcToolset {
+class TableBase {
   opts?: { remapColumns?: boolean }
   // `= () => ` to ensure the method is a direct property of the class instance,
   // not a method of the class prototype
@@ -395,26 +390,11 @@ const table = <N extends string>(db: Database, name: N): TableClass<N> => {
     static toRowLike = function <T extends TableClass<string>>(this: T, opts?: { remapColumns?: boolean }): InstanceType<T> {
       const rowLike = new this(opts) as unknown as InstanceType<T>
 
-      // Convert any unbound column references to getters that are bound to the current
-      // table alias. This serves two purposes:
-      // 1. It allows the columns to be lazily bound to the both the subquery alias and column alias when the row is created.
-      // 2. By binding to prototype instead of `this`, it tells Cap'n Web columns can be traversed over RPC.
       for (const key of Object.keys(rowLike)) {
-        const value = rowLike[key as keyof typeof rowLike]
+        const value = (rowLike as Record<string, unknown>)[key]
         if (value instanceof UnboundColumnReferenceExpression) {
-          const proto = Object.getPrototypeOf(rowLike)
-          const getter = function (this: InstanceType<TableClass<string>>) {
-            const cls = this.constructor as TableClass<string>
-            // remapColumns means we've rebound the column to the subquery alias
-            return new ColumnReferenceExpression(cls.alias ?? cls.tableName, this.opts?.remapColumns ? key : value.column)
-          }
-          setToolMetadata(getter, { runtimeValidationEnabled: true })
-          Object.defineProperty(proto, key, {
-            get: getter,
-            enumerable: true,
-            configurable: true,
-          })
-          delete rowLike[key as keyof typeof rowLike]
+          (rowLike as Record<string, unknown>)[key] = new ColumnReferenceExpression(this.alias ?? this.tableName, opts?.remapColumns ? key : value.column)
+          registerToolField(rowLike, key)
         }
       }
 

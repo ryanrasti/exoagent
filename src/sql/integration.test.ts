@@ -1,9 +1,7 @@
-import { setGlobalRpcSessionOptions } from 'capnweb'
 import { describe, expect, it } from 'vitest'
-import { TestHarness } from '../capnweb-test-helpers'
-import { CodeMode } from '../code-mode'
-import { createDenoSandbox } from '../code-mode-deno'
-import { RpcToolset, tool } from '../rpc-toolset'
+import { codemode } from '../code-mode'
+import { exoFn } from '../exoeval'
+import { tool } from '../exoeval/tool'
 import { Database } from './builder'
 import { sql } from './sql'
 import { pgliteDialect } from './test-helpers'
@@ -28,7 +26,7 @@ class Post extends db.Table('posts').as('post') {
   content = this.column('content')
 }
 
-class Api extends RpcToolset {
+class Api {
   @tool()
   users() {
     return User.from()
@@ -53,71 +51,43 @@ db.execute(sql`CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, titl
 db.execute(sql`INSERT INTO posts (id, user_id, title, content) VALUES (1, 1, 'Hello, world!', 'This is a test post')`)
 db.execute(sql`INSERT INTO posts (id, user_id, title, content) VALUES (2, 2, 'Hello, world!', 'This is a test post')`)
 
-setGlobalRpcSessionOptions(() => ({ recordReplayMode: 'all' }))
-
-describe('sql integration over capnweb', () => {
+describe('sql integration over exoeval', () => {
   it('executes a basic query over RPC', async () => {
-    await using harness = new TestHarness(new Api())
-    const api = harness.stub
+    const fn = exoFn(async (api: Api) => {
+      const users = api.users()
+      const query = users.select(({ user }) => ({
+        id: user.id,
+        name: user.name,
+      }))
 
-    using users = api.users()
-    using query = users.select(({ user }) => ({
-      id: user.id,
-      name: user.name,
-    }))
+      return await query.execute()
+    })
 
-    const { results } = await query.execute()
-
+    const { results } = await fn(new Api())
     expect(results).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
   })
 
   it('executes a join query over RPC', async () => {
-    await using harness = new TestHarness(new Api())
-    const api = harness.stub
+    const fn = exoFn(async (api: Api) => {
+      const users = api.users()
+      const posts = api.posts()
+      const join = users.join(posts, ({ user, post }) => user.id['=']((post as Post).userId))
+      const query = join.select(({ user, post }) => ({
+        id: user.id,
+        name: user.name,
+        title: (post as Post).title,
+      }))
 
-    using users = api.users()
-    using posts = api.posts()
-    // Unfortuneately when wrapping with stubs, some generics get lost so we need
-    //  manual type assertions to get the right types.
-    // @ts-expect-error - there's also random TS issues here:L
-    using join = users.join(posts, ({ user, post }) => user.id['=']((post as Post).userId))
-    using query = join.select(({ user, post }) => ({
-      id: user.id,
-      name: user.name,
-      title: (post as Post).title,
-    }))
+      return await query.execute()
+    })
 
-    const { results } = await query.execute()
-
+    const { results } = await fn(new Api())
     expect(results).toEqual([{ id: 1, name: 'John Doe', title: 'Hello, world!' }, { id: 2, name: 'Jane Doe', title: 'Hello, world!' }])
   })
 
-  it('executes a query in a `map` (no `usings` needed)', async () => {
-    await using harness = new TestHarness(new Api())
-    const api = harness.stub
-
-    const { results } = await api.map(api =>
-      api.users().select(({ user }) => ({
-        id: user.id,
-        name: user.name,
-      })).execute(),
-    )
-    expect(results).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
-  })
-
-  it('executes a nested closures in a `map` (no `usings` needed)', async () => {
-    // const localResult = await new Api().users().join(({ user }) => new Api().posts().select(({ user }) => ({
-    //   id: user.id,
-    //   name: user.name,
-    // })).execute(), ({ user, post }) => user.id['='](post.userId))
-
-    // expect(localResult).toEqual([{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }])
-
-    await using harness = new TestHarness(new Api())
-    const api = harness.stub
-
-    const { results } = await api.map(api =>
-      api.users()
+  it('executes a nested closures', async () => {
+    const fn = exoFn(async (api: Api) => {
+      return await api.users()
         // TODO: for some reaons we need the explicit `{ user: User }` so that the right
         //   type is inferred later.
         .join(({ user }: { user: User }) => api.posts().select(({ post }) => ({
@@ -134,52 +104,42 @@ describe('sql integration over capnweb', () => {
           postId: post.postId,
           postTitle: post.postTitle,
         }))
-        .execute(),
-    )
+        .execute()
+    })
+
+    const { results } = await fn(new Api())
     expect(results).toEqual([{ userName: 'John Doe', postUserName: 'John Doe', userId: 1, postId: 1, postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postUserName: 'Jane Doe', userId: 2, postId: 2, postTitle: 'Hello, world!' }])
   })
 
-  it('cannot reference own properties', async () => {
-    await using harness = new TestHarness(new Api())
-    const api = harness.stub
+  it('cannot reference unexposed properties', async () => {
+    const api = new Api()
+    expect(exoFn((api: Api) => api.users().compile)(api)).toBeUndefined()
+    expect(() => (exoFn((api: Api) => api.users().compile())(api))).toThrow(/callee is not a toolable function \(value: undefined\)/)
 
-    await expect(async () => {
-      using users = api.users()
-      return await users.compile()
-    }).rejects.toThrow('Attempted to access property \'compile\', which is an instance property of the RpcTarget.')
+    // Just for sanity, a different field should be accessible:
+    expect(exoFn((api: Api) => api.users().limit)(api)).toBeDefined()
 
-    await expect(async () => {
-      using users = api.users()
-      return await users.select(
-        ({ user }) => ({ foo: user.column('foo') }),
-      )
-    }).rejects.toThrow('Attempted to access property \'column\', which is an instance property of the RpcTarget.')
-
-    // TODO: this is actually being allowed, but it shouldn't be:
-    await expect(async () => {
-      using posts = api.posts()
-      return await posts.compile()
-    }).rejects.toThrow('Attempted to access property \'compile\', which is an instance property of the RpcTarget.')
+    const fn2 = exoFn(async (api: Api) => {
+      const users = api.users()
+      return users.select(({ user }) => ({ foo: user.column('foo') }))
+    })
+    await expect(fn2(new Api())).rejects.toThrow(/callee is not a toolable function \(value: undefined\)/)
   })
 
   it('can do a join to a toolset method', async () => {
-    await using harness = new TestHarness(new Api())
-    const api = harness.stub
+    const fn = exoFn(async ({ users }: Api) => {
+      return await users().join(({ user }) => user.posts()).select(({ user, post }) => ({ userName: user.name, postTitle: post.title })).execute()
+    })
 
-    const { results } = await api.map(api =>
-      api.users().join(({ user }) => user.posts()).select(({ user, post }) => ({ userName: user.name, postTitle: post.title })).execute(),
-    )
+    const { results } = await fn(new Api())
 
     expect(results).toEqual([{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }])
   })
 })
 
-describe('sql integration with deno sandbox', () => {
-  it('executes a basic select via CodeMode', async () => {
-    const codeMode = new CodeMode(createDenoSandbox())
-    const codeTool = await codeMode.wrap({
-      users: () => User.from(),
-    }, `class User extends db.Table('users').as('user') {
+describe('sql integration with codemode', () => {
+  it('executes a basic select via codemode', async () => {
+    const codeTool = await codemode(new Api(), `class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
@@ -194,13 +154,10 @@ describe('sql integration with deno sandbox', () => {
     }, { toolCallId: 'test-1', messages: [] })
 
     expect(result).toEqual({ results: [{ id: 1, name: 'John Doe' }, { id: 2, name: 'Jane Doe' }] })
-  }, 10000)
+  })
 
-  it('executes a join via CodeMode', async () => {
-    const codeMode = new CodeMode(createDenoSandbox())
-    const codeTool = await codeMode.wrap({
-      users: () => User.from(),
-    }, `class User extends db.Table('users').as('user') {
+  it('executes a join via codemode', async () => {
+    const codeTool = await codemode({ users: User.from() }, `class User extends db.Table('users').as('user') {
   id = this.column('id')
   name = this.column('name')
   email = this.column('email')
@@ -220,7 +177,7 @@ class Post extends db.Table('posts').as('post') {
 
     const result = await codeTool.execute({
       code: `async ({ users }) => {
-        return await users()
+        return await users
           .join(({ user }) => user.posts())
           .select(({ user, post }) => ({ userName: user.name, postTitle: post.title }))
           .execute()
@@ -228,5 +185,5 @@ class Post extends db.Table('posts').as('post') {
     }, { toolCallId: 'test-2', messages: [] })
 
     expect(result).toEqual({ results: [{ userName: 'John Doe', postTitle: 'Hello, world!' }, { userName: 'Jane Doe', postTitle: 'Hello, world!' }] })
-  }, 10000)
+  })
 })

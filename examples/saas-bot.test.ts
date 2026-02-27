@@ -7,7 +7,7 @@ describe('saas-bot example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ organization }) => {
-          return await organization()
+          return await organization
             .join(({ org }) => org.projects())
             .select(({ project }) => ({ name: project.name, status: project.status }))
             .execute()
@@ -34,7 +34,7 @@ describe('saas-bot example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ organization }) => {
-          return await organization()
+          return await organization
             .join(({ org }) => org.projects())
             .join(({ project }) => project.tasks())
             .select(({ project, task }) => ({
@@ -69,7 +69,7 @@ describe('saas-bot example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ organization }) => {
-          return await organization()
+          return await organization
             .join(({ org }) => org.projects())
             .join(({ project }) => project.tasks())
             .join(({ task }) => task.comments())
@@ -102,7 +102,7 @@ describe('saas-bot example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ organization }) => {
-          return await organization()
+          return await organization
             .join(({ org }) => org.members())
             .select(({ member }) => ({ name: member.name, role: member.role }))
             .execute()
@@ -129,7 +129,7 @@ describe('saas-bot example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ organization }) => {
-          return await organization()
+          return await organization
             .join(({ org }) => org.projects())
             .join(({ project }) => project.tasks())
             .select(({ task }) => ({ title: task.title, status: task.status, priority: task.priority }))

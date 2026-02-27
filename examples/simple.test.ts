@@ -7,7 +7,7 @@ describe('simple example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ currentUser }) => {
-          return await currentUser()
+          return await currentUser
             .join(({ user }) => user.todos())
             .select(({ todo }) => ({ title: todo.title, completed: todo.completed }))
             .execute()
@@ -34,7 +34,7 @@ describe('simple example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ currentUser }) => {
-          return await currentUser()
+          return await currentUser
             .join(({ user }) => user.todos())
             .select(({ todo }) => ({ title: todo.title, completed: todo.completed }))
             .where(({ todo }) => todo.completed['='](0))
@@ -61,7 +61,7 @@ describe('simple example e2e', () => {
     const model = createMockModel([
       {
         code: `async ({ currentUser }) => {
-          return await currentUser()
+          return await currentUser
             .join(({ user }) => user.todos())
             .select(({ user, todo }) => ({ userName: user.name, title: todo.title }))
             .execute()

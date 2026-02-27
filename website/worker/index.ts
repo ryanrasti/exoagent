@@ -2,9 +2,9 @@ import type { LanguageModel } from 'ai'
 import type { StatsResult } from './stats'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText, stepCountIs } from 'ai'
-import { newWorkersRpcResponse } from 'capnweb'
+import { newWorkersRpcResponse, RpcTarget } from 'capnweb'
 import { env } from 'cloudflare:workers'
-import { CodeMode, RpcToolset, tool } from 'exoagent'
+import { codemode, tool } from 'exoagent'
 import { z } from 'zod'
 import { User } from './bounty-db'
 import { getStats } from './stats'
@@ -66,7 +66,7 @@ async function validateSession(sessionId: string, db: D1Database): Promise<boole
   return result?.id === sessionId
 }
 
-export class Api extends RpcToolset {
+export class Api extends RpcTarget {
   #db: D1Database
   #clientIp: string | undefined
 
@@ -208,7 +208,7 @@ async function saveChatThread(
   }
 }
 
-export class BountyAgent extends RpcToolset {
+export class BountyAgent extends RpcTarget {
   #model: LanguageModel
   #db: D1Database
   #sessionId: string
@@ -224,7 +224,7 @@ export class BountyAgent extends RpcToolset {
   }
 
   // Raw SQL chat - client provides SQL executor callback
-  @tool.unsafeNoValidation()
+  @tool(z.any(), z.any())
   async chatRawSql(
     message: string,
     executeSql: (sql: string) => Promise<SqlResult>,
@@ -306,14 +306,10 @@ NOTE: ALL QUERIES MUST BE SCOPED AGAINST USER WITH \`id = 1\`. THIS IS VERY IMPO
   }
 
   // ExoAgent chat - client provides code executor callback
-  @tool.unsafeNoValidation()
+  @tool(z.string().max(MAX_MESSAGE_LENGTH))
   async chatExoAgent(
     message: string,
-    executeCode: (code: string, api: RpcToolset) => Promise<CodeResult>,
   ): Promise<{ text: string, toolResults: Array<{ toolName: string, args: unknown, result: unknown }> }> {
-    z.string().max(MAX_MESSAGE_LENGTH).parse(message)
-    z.function().parse(executeCode)
-
     // Load thread (checks rate limit and conversation limit)
     const { entries, threadId } = await getChatThread(this.#db, this.#sessionId, 'exoagent')
 
@@ -356,13 +352,7 @@ class User extends db.Table('users').as('user') {
     return Account.on(account => account.userId['='](this.id)).from()
   }
 }`
-    const codeMode = await new CodeMode({
-      kind: 'rpc',
-      safeEval: async (code: string, api: RpcToolset) => {
-        return codeResultSchema.parse(await executeCode(code, api))
-      },
-    })
-      .wrap({ users: () => User.on(user => user.id['='](1)).from() }, dts)
+    const codeMode = await codemode({ users: User.on(user => user.id['='](1)).from() }, dts)
 
     const result = await generateText({
       model: this.#model,
@@ -373,22 +363,22 @@ class User extends db.Table('users').as('user') {
 
 IMPORTANT: You MUST use the execute_code tool to run queries. Never output code directly in your response - always execute it via the tool.
 
-IMPORTANT: api.users() is the ONLY entry point. To access related data, you MUST use .join():
-- WRONG: api.users().accounts()
-- CORRECT: api.users().join(({ user }) => user.accounts())
+IMPORTANT: api.users is the ONLY entry point. To access related data, you MUST use .join():
+- WRONG: api.users.accounts()
+- CORRECT: api.users.join(({ user }) => user.accounts())
 
 Examples:
-- Select all user columns: api.users().select(({ user }) => user).execute()
-- Select specific columns: api.users().select(({ user }) => ({ id: user.id, name: user.name })).execute()
-- Join accounts: api.users().join(({ user }) => user.accounts()).select(({ user, account }) => ({ id: user.id, accountName: account.accountName })).execute()
-- Join wallets: api.users().join(({ user }) => user.accounts()).join(({ account }) => account.wallet()).select(({ user, account, wallet }) => ({ name: user.name, walletName: wallet.name })).execute()
-- Select all columns from joined table: api.users().join(({ user }) => user.accounts()).select(({ account }) => account).execute()
+- Select all user columns: api.users.select(({ user }) => user).execute()
+- Select specific columns: api.users.select(({ user }) => ({ id: user.id, name: user.name })).execute()
+- Join accounts: api.users.join(({ user }) => user.accounts()).select(({ user, account }) => ({ id: user.id, accountName: account.accountName })).execute()
+- Join wallets: api.users.join(({ user }) => user.accounts()).join(({ account }) => account.wallet()).select(({ user, account, wallet }) => ({ name: user.name, walletName: wallet.name })).execute()
+- Select all columns from joined table: api.users.join(({ user }) => user.accounts()).select(({ account }) => account).execute()
 
 NOTE: all callbacks receive the current namespace object, e.g., select((ns) => ({ id: ns.user.id }))
 
-api.users() is already auto-scoped to user with id = 1. No need to do any additional checks.
+api.users is already auto-scoped to user with id = 1. No need to do any additional checks.
 
-As a shorthand for selecting all columns, you can do e.g., api.users().select(({ user }) => user)
+As a shorthand for selecting all columns, you can do e.g., api.users.select(({ user }) => user)
 `,
       messages,
       tools: { execute_code: codeMode },

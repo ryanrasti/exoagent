@@ -1,63 +1,26 @@
 import type { Tool } from 'ai'
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Readable, Writable } from 'node:stream'
-import { jsonSchema } from 'ai'
+import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { CodeMode } from './code-mode.js'
+import { z } from 'zod'
+import { codemode } from './code-mode.js'
 import { TestToolset } from './rpc-toolset-test-helpers'
-
-const codeMode = new CodeMode({
-  kind: 'direct',
-  safeEval: async (code: string) => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'exoagent-test-'))
-    const tempFile = join(tempDir, 'code.mjs')
-    await writeFile(tempFile, code, 'utf-8')
-    const child = spawn('node', [tempFile], { stdio: ['pipe', 'pipe', 'inherit'] })
-    return {
-      input: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-      output: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      wait: () => new Promise<void>((resolve, reject) => {
-        child.on('exit', async (code) => {
-          await rm(tempDir, { recursive: true, force: true }).catch(() => {})
-          code === 0 ? resolve() : reject(new Error(`Process exited with code ${code}`))
-        })
-        child.on('error', async (err) => {
-          await rm(tempDir, { recursive: true, force: true }).catch(() => {})
-          reject(err)
-        })
-      }),
-    }
-  },
-  sandboxContext: `(async () => {
-    const { Readable, Writable } = await import('node:stream')
-    return {
-      input: Readable.toWeb(process.stdin),
-      output: Writable.toWeb(process.stdout),
-      onSuccess: () => process.exit(0),
-      onFailure: () => process.exit(1)
-    }
-  })()`,
-})
 
 describe('codeMode', () => {
   it('executes user code that calls tools', async () => {
     const tools: Tool[] = [
       {
         description: 'Adds two numbers',
-        inputSchema: jsonSchema({ type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'] }),
+        inputSchema: z.object({ a: z.number(), b: z.number() }),
         execute: async ({ a, b }: { a: number, b: number }) => ({ result: a + b }),
       },
       {
         description: 'Greets a person',
-        inputSchema: jsonSchema({ type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }),
+        inputSchema: z.object({ name: z.string() }),
         execute: async ({ name }: { name: string }) => ({ message: `Hello, ${name}!` }),
       },
     ]
 
-    const wrappedTool = await codeMode.wrap(tools)
+    const wrappedTool = await codemode(tools)
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
         const addResult = await api.tool_0({ a: 5, b: 3 })
@@ -69,63 +32,34 @@ describe('codeMode', () => {
     expect(result).toEqual({ sum: 8, greeting: 'Hello, World!' })
   }, 10000)
 
-  it('handles tool errors', async () => {
-    const tools: Tool[] = [{
-      description: 'Throws an error',
-      inputSchema: jsonSchema({ type: 'object', properties: {} }),
-      execute: async () => { throw new Error('Test error') },
-    }]
-
-    const wrappedTool = await codeMode.wrap(tools)
-    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
-      code: `async (api) => {
-        try {
-          await api.tool_0({})
-          return { success: false }
-        } catch (error) {
-          return { success: true, error: error.message }
-        }
-      }`,
-    })
-
-    expect(result).toEqual({ success: true, error: 'Test error' })
-  }, 10000)
-
   it('validates tool arguments and rejects invalid input', async () => {
     const tools: Tool[] = [
       {
         description: 'Adds two numbers',
-        inputSchema: jsonSchema({ type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'] }),
+        inputSchema: z.object({ a: z.number(), b: z.number() }),
         execute: async ({ a, b }: { a: number, b: number }) => ({ result: a + b }),
       },
     ]
 
-    const wrappedTool = await codeMode.wrap(tools)
-    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+    const wrappedTool = await codemode(tools)
+    const result = (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
-        try {
-          // Passing string for number field 'a'
-          await api.tool_0({ a: 'not a number', b: 3 })
-          return { success: false, error: 'Should have failed validation' }
-        } catch (error) {
-          const errorMsg = error?.message || String(error)
-          return { success: true, error: errorMsg }
-        }
+        await api.tool_0({ a: 'not a number', b: 3 })
+        return { success: false, error: 'Should have failed validation' }
       }`,
     })
 
-    expect(result).toMatchObject({ success: true })
-    expect((result as { error: string }).error).toBe('Invalid arguments for tool tool_0: not a number - string value found, but a number is required')
+    await expect(result).rejects.toThrow(/Invalid value/)
   }, 10000)
 
   it('executes user code that calls RpcToolset tools', async () => {
     // Assume npm run build:test-deps has been run
-    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.mts', 'utf-8')
+    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.ts', 'utf-8')
 
-    const wrappedTool = await codeMode.wrap({ testToolset: () => new TestToolset() }, dtsContent)
+    const wrappedTool = await codemode({ testToolset: new TestToolset() }, dtsContent)
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
-        const toolset = await api.testToolset()
+        const toolset = api.testToolset
         const addResult = await toolset.add({ a: 10, b: 5 })
         return { result: addResult }
       }`,
@@ -136,15 +70,14 @@ describe('codeMode', () => {
 
   it('executes user code that chains RpcToolset tools', async () => {
     // Assume npm run build:test-deps has been run
-    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.mts', 'utf-8')
+    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.ts', 'utf-8')
 
-    const wrappedTool = await codeMode.wrap({ testToolset: () => new TestToolset() }, dtsContent)
+    const wrappedTool = await codemode({ testToolset: new TestToolset() }, dtsContent)
     const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
-        // Note we *don't* need \`await\`s here because Cap'n Web implement promise-pipelining
-        const toolset1 = api.testToolset()
-        const toolset2 = toolset1.toolset2()
-        return { result: toolset2.subtract({ a: 20, b: 8 }) }
+        const toolset1 = api.testToolset
+        const toolset2 = await toolset1.toolset2()
+        return { result: await toolset2.subtract({ a: 20, b: 8 }) }
       }`,
     })
 
@@ -153,24 +86,18 @@ describe('codeMode', () => {
 
   it('validates RpcToolset tool arguments and rejects invalid input', async () => {
     // Assume npm run build:test-deps has been run
-    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.mts', 'utf-8')
+    const dtsContent = await readFile('dist/rpc-toolset-test-helpers.d.ts', 'utf-8')
 
-    const wrappedTool = await codeMode.wrap({ testToolset: () => new TestToolset() }, dtsContent)
-    const result = await (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
+    const wrappedTool = await codemode({ testToolset: new TestToolset() }, dtsContent)
+    const result = (wrappedTool.execute as (input: { code: string }) => Promise<unknown>)({
       code: `async (api) => {
-        try {
-          const toolset = api.testToolset()
+          const toolset = api.testToolset
           // Passing string for number field 'a'
           await toolset.add({ a: 'not a number', b: 3 })
           return { success: false, error: 'Should have failed validation' }
-        } catch (error) {
-          const errorMsg = error?.message || String(error)
-          return { success: true, error: errorMsg }
-        }
       }`,
     })
 
-    expect(result).toMatchObject({ success: true })
-    expect((result as { error: string }).error).toContain('Invalid value')
+    await expect(result).rejects.toThrow(/Invalid value: Invalid input: expected number, received string for argument 0/)
   }, 10000)
 })
