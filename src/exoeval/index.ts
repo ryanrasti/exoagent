@@ -42,6 +42,29 @@ export function exoEval(code: string, ctx = new IdentityContext()): unknown {
   return evaluator.Program(ast)
 }
 
+export function exoImport(code: string): { default: unknown }
+export function exoImport<T>(code: string, ctx: ExpressionContext<T>): { default: T }
+export function exoImport(code: string, ctx = new IdentityContext()): { [key: string]: unknown } | Promise<{ [key: string]: unknown }> {
+  const ast = parse(code, { ecmaVersion: 2022, sourceType: 'module' })
+  const rootScope = new Scope<unknown>(undefined)
+  const evaluator = new Evaluator(ast, code, ctx, rootScope, {
+    Array: ExoArray.prototype,
+    String: ExoString.prototype,
+    Date: ExoDate.prototype,
+  })
+
+  for (const [name, value] of Object.entries(builtins)) {
+    rootScope.set(
+      { type: 'Identifier', name, start: 0, end: 0 } as acorn.Identifier,
+      ctx.of(value),
+      evaluator,
+    )
+  }
+
+  const result = evaluator.Program(ast, { module: true })
+  return result as { [key: string]: unknown } | Promise<{ [key: string]: unknown }>
+}
+
 export function exoFn<T extends (...args: any[]) => unknown>(fn: T): T {
   return exoEval(fn.toString()) as T
 }

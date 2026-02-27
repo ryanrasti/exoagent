@@ -192,16 +192,27 @@ export class Evaluator<Expr> {
     return result
   }
 
-  * evalStatements(statements: (acorn.Statement | acorn.ModuleDeclaration)[]): EvalResult<Expr> {
+  * evalStatements(statements: (acorn.Statement | acorn.ModuleDeclaration)[], { module = false } = {}): EvalResult<Expr> {
     let result = this.ctx.of(undefined)
+    const exports: Record<string, Expr> = {}
     for (const statement of statements) {
-      this.inv.parse(
-        statement.type !== 'ImportDeclaration' && statement.type !== 'ExportAllDeclaration' && statement.type !== 'ExportNamedDeclaration' && statement.type !== 'ExportDefaultDeclaration',
-        'statement is not a statement',
-        statement,
-      )
+      if (statement.type === 'ImportDeclaration') {
+        this.inv.parse(false, 'imports are not allowed', statement)
+      }
+      if (statement.type === 'ExportAllDeclaration' || statement.type === 'ExportNamedDeclaration') {
+        this.inv.parse(false, 'only export default is allowed', statement)
+      }
+      if (statement.type === 'ExportDefaultDeclaration') {
+        this.inv.parse(module, 'export is not allowed in script mode', statement)
+        const exported = yield* this.Expression(statement.declaration as acorn.Expression)
+        this.defineProperty(exports, 'default', exported, statement)
+        continue
+      }
 
       result = yield* this.Statement(statement)
+    }
+    if (module) {
+      return this.ctx.distribute(exports)
     }
     return result
   }
@@ -450,8 +461,8 @@ export class Evaluator<Expr> {
     this.inv.parse(false, 'unsupported statement type', node)
   }
 
-  Program(node: acorn.Program): Expr | Promise<Expr> {
-    const iter = this.ctx.doGen(this.evalStatements(node.body))
+  Program(node: acorn.Program, { module = false } = {}): Expr | Promise<Expr> {
+    const iter = this.ctx.doGen(this.evalStatements(node.body, { module }))
     let step = iter.next()
     if (step.done) {
       return step.value
