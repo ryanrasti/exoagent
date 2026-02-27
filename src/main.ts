@@ -5,6 +5,7 @@ import process from 'node:process'
 import * as Cli from '@effect/cli'
 import { NodeContext, NodeRuntime } from '@effect/platform-node'
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 import { transform } from 'esbuild'
 import { z } from 'zod'
 import { exoEval, exoImport } from './exoeval'
@@ -164,26 +165,25 @@ const runTasks = (filter?: string) =>
   })
 
 const command = Cli.Command.make('exoagent', {
-  eval: Cli.Options.text('eval'),
+  eval: Cli.Options.text('eval').pipe(Cli.Options.optional),
+  task: Cli.Options.text('task').pipe(Cli.Options.withAlias('t'), Cli.Options.optional),
   args: Cli.Args.text({ name: 'arg' }).pipe(Cli.Args.repeated),
 }).pipe(
   Cli.Command.withDescription('Run exoagent tasks or eval code'),
-  Cli.Command.withHandler(({ eval: code, args }) => {
-    if (code) {
-      if (!code) {
-        console.error('Usage: exoagent --eval "<code>"')
-        return Effect.fail(new Error('Missing code for --eval'))
-      }
-      return runEval(code)
+  Cli.Command.withHandler(({ eval: evalOpt, task, args }) => {
+    if (Option.isSome(evalOpt)) {
+      return runEval(evalOpt.value)
     }
 
-    if (args.length > 1) {
-      console.error('Unexpected extra arguments. Pass at most one task name.')
-      return Effect.fail(new Error('Too many positional arguments'))
+    // Support both -t/--task and positional argument for task name
+    const taskName = Option.getOrElse(task, () => args[0])
+
+    if (args.length > 1 || (Option.isSome(task) && args.length > 0)) {
+      console.error('Unexpected extra arguments. Use -t <task> or pass task name as argument.')
+      return Effect.fail(new Error('Too many arguments'))
     }
 
-    const [task] = args
-    return runTasks(task)
+    return runTasks(taskName)
   }),
 )
 

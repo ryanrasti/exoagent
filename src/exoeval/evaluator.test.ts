@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { exoEval } from './index'
+import { tool } from './tool'
 
 describe('exoEval', () => {
   it('literal (number)', () => {
@@ -362,6 +363,64 @@ describe('exoEval', () => {
       // eslint-disable-next-line no-template-curly-in-string
       expect(exoEval('const x = "X"; `${x}`')).toBe('X')
     })
+    it('implicitly calls toString on Date', () => {
+      // eslint-disable-next-line no-template-curly-in-string
+      const result = exoEval('const d = new Date("2024-01-15T12:00:00Z"); `date: ${d}`')
+      expect(result).toBe('date: 2024-01-15T12:00:00.000Z')
+    })
+    it('implicitly calls toString on null and undefined', () => {
+      // eslint-disable-next-line no-template-curly-in-string
+      expect(exoEval('`${null}`')).toBe('null')
+      // eslint-disable-next-line no-template-curly-in-string
+      expect(exoEval('`${undefined}`')).toBe('undefined')
+    })
+  })
+
+  describe('implicit toString on custom objects', () => {
+    @tool()
+    class WithToString {
+      @tool()
+      get toString() {
+        return () => 'custom-string'
+      }
+    }
+
+    class WithoutToString {
+      value = 42
+    }
+
+    it('uses @tool toString on Date in template literal', () => {
+      // eslint-disable-next-line no-template-curly-in-string
+      expect(exoEval('`${new Date("2024-01-01T00:00:00Z")}`')).toBe('2024-01-01T00:00:00.000Z')
+    })
+
+    it('uses @tool toString on Date in binary +', () => {
+      expect(exoEval('"prefix:" + new Date("2024-01-01T00:00:00Z")')).toBe('prefix:2024-01-01T00:00:00.000Z')
+    })
+
+    it('uses @tool toString on custom class in template literal', () => {
+      // eslint-disable-next-line no-template-curly-in-string
+      const fn = exoEval('(obj) => `value: ${obj}`') as (obj: unknown) => string
+      expect(fn(new WithToString())).toBe('value: custom-string')
+    })
+
+    it('uses @tool toString on custom class in binary +', () => {
+      const fn = exoEval('(obj) => "prefix:" + obj') as (obj: unknown) => string
+      expect(fn(new WithToString())).toBe('prefix:custom-string')
+    })
+
+    it('falls back to [object] for class without @tool toString', () => {
+      // eslint-disable-next-line no-template-curly-in-string
+      const fn = exoEval('(obj) => `value: ${obj}`') as (obj: unknown) => string
+      expect(fn(new WithoutToString())).toBe('value: [object]')
+    })
+
+    it('falls back to [object] for plain objects without toString', () => {
+      // eslint-disable-next-line no-template-curly-in-string
+      expect(exoEval('`${{}}`')).toBe('[object]')
+      // eslint-disable-next-line no-template-curly-in-string
+      expect(exoEval('`${{ a: 1, b: 2 }}`')).toBe('[object]')
+    })
   })
 
   describe('edge cases', () => {
@@ -379,6 +438,13 @@ describe('exoEval', () => {
       expect(exoEval('"hello" + " " + "world"')).toBe('hello world')
       expect(exoEval('"x" + 1')).toBe('x1')
       expect(exoEval('1 + "x"')).toBe('1x')
+    })
+    it('binary + implicitly calls toString on Date', () => {
+      expect(exoEval('"date: " + new Date("2024-01-15T12:00:00Z")')).toBe('date: 2024-01-15T12:00:00.000Z')
+      expect(exoEval('new Date("2024-01-15T12:00:00Z") + " end"')).toBe('2024-01-15T12:00:00.000Z end')
+    })
+    it('binary + with plain object without toString falls back to [object]', () => {
+      expect(exoEval('"obj: " + { a: 1 }')).toBe('obj: [object]')
     })
     it('logical with nested binary', () => {
       expect(exoEval('(1 < 2) && (3 > 2)')).toBe(true)
@@ -758,7 +824,6 @@ describe('exoEval', () => {
       'Reflect',
       'Symbol',
       'Error',
-      'Promise',
       'setTimeout',
       'setInterval',
       'Buffer',

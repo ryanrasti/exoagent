@@ -1,3 +1,6 @@
+import type { gmail_v1 } from 'googleapis'
+import type { Auth } from 'googleapis'
+import { google } from 'googleapis'
 import { z } from 'zod'
 import { tool } from '../../exoeval/tool'
 
@@ -11,6 +14,14 @@ export interface EmailMessage {
   subject: string | undefined
   date: Date | undefined
   text: string | undefined
+}
+
+/** Interface for Gmail operations */
+export interface IGmail {
+  list(opts: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>>
+  get(opts: { id: string }): Promise<EmailMessage>
+  send(opts: { to: string[], cc?: string[], bcc?: string[], subject: string, text: string }): Promise<{ success: boolean, id: string }>
+  createDraft(opts: { to: string[], cc?: string[], bcc?: string[], subject: string, text: string }): Promise<{ success: boolean, draftId: string }>
 }
 
 const composeEmailSchema = z.object({
@@ -81,7 +92,109 @@ export const MOCK_SEED: EmailMessage[] = [
   },
 ]
 
-export class MockGmailClient {
+/** Real Gmail client using Google APIs */
+export class GmailClient implements IGmail {
+  private gmail: gmail_v1.Gmail
+
+  constructor(auth: Auth.OAuth2Client) {
+    this.gmail = google.gmail({ version: 'v1', auth })
+  }
+
+  @tool(z.object({
+    maxResults: z.number(),
+    query: z.string(),
+  }))
+  async list({ maxResults, query }: { maxResults: number, query: string }): Promise<Array<{ id: string, threadId: string }>> {
+    const res = await this.gmail.users.messages.list({
+      userId: 'me',
+      maxResults,
+      q: query,
+    })
+    return (res.data.messages || []).map(m => ({ id: m.id!, threadId: m.threadId! }))
+  }
+
+  @tool(z.object({ id: z.string() }))
+  async get({ id }: { id: string }): Promise<EmailMessage> {
+    const res = await this.gmail.users.messages.get({
+      userId: 'me',
+      id,
+      format: 'full',
+    })
+
+    const headers = res.data.payload?.headers || []
+    const getHeader = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value
+
+    const from = getHeader('from')
+    const to = getHeader('to')?.split(',').map(s => s.trim()) || []
+    const cc = getHeader('cc')?.split(',').map(s => s.trim()) || []
+    const subject = getHeader('subject')
+    const dateStr = getHeader('date')
+
+    // Extract text body
+    let text: string | undefined
+    const payload = res.data.payload
+    if (payload?.body?.data) {
+      text = Buffer.from(payload.body.data, 'base64').toString('utf-8')
+    }
+    else if (payload?.parts) {
+      const textPart = payload.parts.find(p => p.mimeType === 'text/plain')
+      if (textPart?.body?.data) {
+        text = Buffer.from(textPart.body.data, 'base64').toString('utf-8')
+      }
+    }
+
+    return {
+      id: res.data.id!,
+      threadId: res.data.threadId!,
+      labels: res.data.labelIds || [],
+      from: from ?? undefined,
+      to,
+      cc,
+      subject: subject ?? undefined,
+      date: dateStr ? new Date(dateStr) : undefined,
+      text,
+    }
+  }
+
+  @tool(composeEmailSchema)
+  async send({ to, cc, bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, id: string }> {
+    const message = this.createMimeMessage({ to, cc, bcc, subject, text })
+    const encoded = Buffer.from(message).toString('base64url')
+
+    const res = await this.gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw: encoded },
+    })
+    return { success: true, id: res.data.id! }
+  }
+
+  @tool(composeEmailSchema)
+  async createDraft({ to, cc, bcc, subject, text }: ComposeEmailInput): Promise<{ success: boolean, draftId: string }> {
+    const message = this.createMimeMessage({ to, cc, bcc, subject, text })
+    const encoded = Buffer.from(message).toString('base64url')
+
+    const res = await this.gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: { message: { raw: encoded } },
+    })
+    return { success: true, draftId: res.data.id! }
+  }
+
+  private createMimeMessage({ to, cc, bcc, subject, text }: ComposeEmailInput): string {
+    const lines = [
+      `To: ${to.join(', ')}`,
+      cc?.length ? `Cc: ${cc.join(', ')}` : '',
+      bcc?.length ? `Bcc: ${bcc.join(', ')}` : '',
+      `Subject: ${subject}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      text,
+    ].filter(Boolean)
+    return lines.join('\r\n')
+  }
+}
+
+export class MockGmailClient implements IGmail {
   private emails: Map<string, EmailMessage> = new Map()
   private drafts: Map<string, EmailMessage> = new Map()
   private nextId = 1

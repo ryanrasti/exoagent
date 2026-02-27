@@ -1,7 +1,7 @@
 import type * as acorn from 'acorn'
 import type { ExpressionContext } from './expr'
 import { parse } from 'acorn'
-import { ExoArray, ExoBoolean, ExoDate, ExoJSON, ExoMath, ExoNumber, ExoObject, ExoString } from './builtins'
+import { ExoArray, ExoBoolean, ExoDate, ExoJSON, ExoMath, ExoNumber, ExoObject, ExoPromise, ExoString } from './builtins'
 import { Evaluator } from './evaluator'
 import { IdentityContext } from './expr'
 import { Scope } from './scope'
@@ -18,6 +18,7 @@ const builtins: Record<string, unknown> = {
   JSON: ExoJSON,
   Math: ExoMath,
   Number: ExoNumber,
+  Promise: ExoPromise,
 }
 
 export function exoEval(code: string): unknown
@@ -29,6 +30,8 @@ export function exoEval(code: string, ctx = new IdentityContext()): unknown {
     Array: ExoArray.prototype,
     String: ExoString.prototype,
     Date: ExoDate.prototype,
+    Number: ExoNumber.prototype,
+    Boolean: ExoBoolean.prototype,
   })
 
   for (const [name, value] of Object.entries(builtins)) {
@@ -51,6 +54,8 @@ export function exoImport(code: string, ctx = new IdentityContext()): { [key: st
     Array: ExoArray.prototype,
     String: ExoString.prototype,
     Date: ExoDate.prototype,
+    Number: ExoNumber.prototype,
+    Boolean: ExoBoolean.prototype,
   })
 
   for (const [name, value] of Object.entries(builtins)) {

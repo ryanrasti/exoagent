@@ -141,11 +141,6 @@ const makeFnSchema = (retSchema: StandardSchemaV1, allowOptional = false): Stand
         return {
           value: (...args: unknown[]) => {
             const res = Reflect.apply(value, undefined, args)
-            if (res != null && typeof res === 'object' && 'then' in res && typeof (res as Promise<unknown>).then === 'function') {
-              // For now, just disable returning promises -- we need a special tool for promises
-              // that we can add later.
-              throw new TypeError(`${value.name}: Promise not allowed`)
-            }
             return validate(retSchema, res)
           },
         }
