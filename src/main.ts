@@ -7,12 +7,8 @@ import { NodeContext, NodeRuntime } from '@effect/platform-node'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import { transform } from 'esbuild'
-import { z } from 'zod'
 import { exoEval, exoImport } from './exoeval'
-import { tool } from './exoeval/tool'
-import { BrowserClient } from './plugins/browser'
-import { MockGmailClient } from './plugins/gmail'
-import { LlmClient } from './plugins/llm'
+import { Capabilities, Caps } from './capabilities'
 
 class TaskExecutor {
   private loadResult?: (caps: Caps) => void
@@ -43,50 +39,8 @@ class TaskExecutor {
   }
 }
 
-type Resource = {
-  close: () => Promise<void>
-}
-
-export class Caps {
-  private resources: Resource[] = []
-
-  @tool()
-  public readonly gmail = new MockGmailClient()
-
-  @tool()
-  public browser(): BrowserClient {
-    return this.register(new BrowserClient())
-  }
-
-  @tool()
-  public readonly llm = new LlmClient()
-
-  constructor(public readonly task: string) {
-    this.resources = []
-  }
-
-  register<T extends Resource>(resource: T): T {
-    this.resources.push(resource)
-    return resource
-  }
-
-  @tool(z.string())
-  log(message: string) {
-    // eslint-disable-next-line no-console
-    console.log(message)
-  }
-
-  async close() {
-    for (const resource of this.resources.reverse()) {
-      try {
-        await resource.close()
-      }
-      catch (err) {
-        console.error(`error closing resource: ${resource}`, err)
-      }
-    }
-  }
-}
+// Re-export for backwards compatibility
+export { Caps, Capabilities }
 
 const TASKS_DIR = join(import.meta.dirname, 'tasks')
 
