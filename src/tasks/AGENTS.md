@@ -30,9 +30,9 @@ The first tasks to build for our demo:
 Here's what will be needed:
 1. `subagent` plugin: should be a simple wrapper around ai sdk + `src/code-mode.ts`.
    The idea is that subagent creates a task -- but does so dynamically -- and executes it.
-   For now, just have a convention that `dts()` is manually specified by the capability
-   that is passed in. `llm` is just `subagent` without any capabilities passed in.
-    * Note that in general `subagent` should be discouraged except for well-scoped tasks.
+   * `subagent` is **not** the preferred way to implement new tasks *except* for cases where
+     it drastically simplifies the setup/makes the task more robust without meaningfully
+     increasing the risk of prompt-injection
 1. setup-gmail: instead of the current approach, just make a few subagent invocations with a browser
    bound to `console.cloud.google.com`. That should be robust to ux quirks and changes
 

@@ -3,6 +3,7 @@ import type { WrappableTools } from './tool-wrapper'
 import { z } from 'zod'
 import { exoEval } from './exoeval'
 import { generateToolTypes, wrapTools } from './tool-wrapper'
+import type { DtsCapability } from './capabilities'
 
 type FlatTools = { [key: string]: Tool } | Tool[]
 
@@ -12,12 +13,40 @@ type ExecutableTool<R> = {
   execute: (input: { code: string }, opts: ToolExecutionOptions) => Promise<R>
 }
 
+/**
+ * Build the combined .d.ts from all caps that have dts() method
+ */
+async function buildDts(caps: Record<string, object>): Promise<string> {
+  const parts: string[] = []
+
+  for (const [name, cap] of Object.entries(caps)) {
+    if (cap && typeof cap === 'object' && 'dts' in cap && typeof (cap as DtsCapability).dts === 'function') {
+      const capDts = await (cap as DtsCapability).dts()
+      parts.push(`// <${name}>\n${capDts}`)
+    }
+  }
+
+  // Add the Api type
+  const capNames = Object.keys(caps)
+    .map((k) => `${k}: typeof import('./${k}')`)
+    .join('; ')
+  parts.push(`\n// <api>\nexport interface Api { ${capNames} }`)
+  parts.push(`export default async function(api: Api): Promise<unknown>`)
+
+  return parts.join('\n\n')
+}
+
 export function codemode<R>(tools: FlatTools): Promise<ExecutableTool<R>>
 export function codemode<R>(tools: object, dts: string): Promise<ExecutableTool<R>>
 export async function codemode<R>(tools: object, dts?: string): Promise<ExecutableTool<R>> {
   const typeDefinitions: string[] = []
+  const hasDts = Object.values(tools).some((tool) => typeof (tool as DtsCapability).dts === 'function')
+
   if (dts) {
     typeDefinitions.push(dts)
+  }
+  else if (hasDts) {
+    typeDefinitions.push(await buildDts(tools))
   }
   else {
     for await (const chunk of generateToolTypes(tools as WrappableTools, 'Tools')) {
@@ -52,7 +81,7 @@ export async function codemode<R>(tools: object, dts?: string): Promise<Executab
       if (typeof fn !== 'function') {
         throw new TypeError('Code did not return a function')
       }
-      const wrapped = dts ? tools : wrapTools(tools as WrappableTools, opts)
+      const wrapped = dts || hasDts ? tools : wrapTools(tools as WrappableTools, opts)
       return await fn(wrapped)
     },
   }

@@ -1,108 +1,62 @@
 import type { Caps } from '../../main'
+import subagent from '../../plugins/subagent'
 
 const PROJECT_NAME = 'exoagent-personal'
 
-export default async ({ browser, llm, log }: Caps) => {
-  // Step 1: Go to project selector to find if our project exists
-  await browser.navigate({ url: 'https://console.cloud.google.com/cloud-resource-manager' })
-  log('Checking for existing project...')
-
-  const listSnap = await browser.snapshot()
-  const projectId = await llm.ask({
-    system: 'If you find a project with the given name, return ONLY its project ID (not the display name). If not found, return ONLY the word "none". No other text.',
-    prompt: `Find a project named "${PROJECT_NAME}" in this resource manager page.\n\n${listSnap}`,
+export default async ({ subagent, browser, log }: Caps) => {
+  // Step 1: Create the project if it doesn't exist
+  const createResult = await subagent({
+    prompt: `Ensure a Google Cloud project named "${PROJECT_NAME}" exists. If not, create it. Return the project ID.`,
+    caps: { browser },
+    verbose: true,
   })
-  log(`Project lookup result: ${projectId}`)
 
-  const foundProjectId = projectId !== 'none' ? projectId : null
-
-  if (foundProjectId) {
-    log(`Project "${PROJECT_NAME}" exists with ID: ${foundProjectId}`)
+  if (!createResult.success) {
+    log('Subagent failed to create project:', createResult.error)
+    return
   }
-
-  if (foundProjectId === null) {
-    // Create the project
-    await browser.navigate({ url: 'https://console.cloud.google.com/projectcreate' })
-    log('Creating project...')
-    await browser.fillByLabel({ label: 'Project name', text: PROJECT_NAME })
-
-    // Read the auto-generated project ID
-    const createSnap = await browser.snapshot()
-    const newProjectId = await llm.ask({
-      system: 'Return ONLY the project ID shown on the page (like "beaming-storm-488708-v1"), nothing else.',
-      prompt: `What is the Project ID shown on this project creation page?\n\n${createSnap}`,
-    })
-    log(`New project ID will be: ${newProjectId}`)
-
-    await browser.clickRole({ role: 'button', name: 'Create' })
-    log('Project creation initiated')
-
-    // Wait for it
-    await browser.snapshot()
-    log('Project created')
-  }
-
-  // Use whichever project ID we have
-  const pid = foundProjectId || 'exoagent-personal'
-  log(`Using project ID: ${pid}`)
+  const projectId = createResult.result as string
+  log(`Using project ID: ${projectId}`)
 
   // Step 2: Enable Gmail API
-  await browser.navigate({ url: `https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=${pid}` })
-  log('Navigated to Gmail API page')
-
-  const apiSnap = await browser.snapshot()
-  const apiStatus = await llm.ask({
-    system: 'Answer with ONLY "enabled" or "not_enabled", nothing else.',
-    prompt: `Is the Gmail API already enabled on this page (shows "Manage" or "API enabled") or not yet enabled (shows "Enable" button)?\n\n${apiSnap}`,
+  const enableResult = await subagent({
+    prompt: `Using the browser, enable the Gmail API for project ID "${projectId}".`,
+    caps: { browser },
+    verbose: true,
   })
 
-  if (apiStatus === 'enabled') {
-    log('Gmail API already enabled')
+  if (!enableResult.success) {
+    log('Subagent failed to enable Gmail API:', enableResult.error)
+    return
   }
-  else {
-    await browser.clickRole({ role: 'button', name: 'Enable' })
-    log('Enabling Gmail API...')
-    await browser.snapshot()
-    log('Gmail API enabled')
-  }
+  log('Gmail API enabled')
 
-  // Step 3: OAuth consent screen
-  await browser.navigate({ url: `https://console.cloud.google.com/apis/credentials/consent?project=${pid}` })
-  log('Navigated to OAuth consent screen')
-
-  const consentSnap = await browser.snapshot()
-  const consentStatus = await llm.ask({
-    system: 'Answer with ONLY "configured", "needs_user_type", or "needs_setup", nothing else.',
-    prompt: `What is the state of the OAuth consent screen?\n- "configured" if it shows an already-configured app with edit buttons\n- "needs_user_type" if it shows Internal/External radio buttons\n- "needs_setup" if it shows something else\n\n${consentSnap}`,
+  // Step 3: Configure OAuth consent screen
+  const consentResult = await subagent({
+    prompt: `Configure the OAuth consent screen for project ID "${projectId}". Select "External" user type. You can use "Test App" for the app name and your email for the support email.`,
+    caps: { browser },
+    verbose: true,
   })
-  log(`Consent screen status: ${consentStatus}`)
 
-  if (consentStatus === 'needs_user_type') {
-    await browser.clickRole({ role: 'radio', name: 'External' })
-    await browser.clickRole({ role: 'button', name: 'Create' })
-    log('Selected External user type')
+  if (!consentResult.success) {
+    log('Subagent failed to configure OAuth consent screen:', consentResult.error)
+    return
   }
-
-  if (consentStatus !== 'configured') {
-    log('OAuth consent screen needs manual configuration — check the browser')
-  }
+  log('OAuth consent screen configured')
 
   // Step 4: Create OAuth client
-  await browser.navigate({ url: `https://console.cloud.google.com/apis/credentials?project=${pid}` })
-  log('Navigated to credentials page')
-
-  const credsSnap = await browser.snapshot()
-  const hasClient = await llm.ask({
-    system: 'Answer with ONLY "yes" or "no", nothing else.',
-    prompt: `Does this credentials page show any existing OAuth 2.0 Client IDs?\n\n${credsSnap}`,
+  const clientResult = await subagent({
+    prompt: `Create an OAuth 2.0 Client ID for a "Desktop app" in project ID "${projectId}".`,
+    caps: { browser },
+    verbose: true,
   })
 
-  if (hasClient === 'yes') {
-    log('OAuth client already exists')
+  if (!clientResult.success) {
+    log('Subagent failed to create OAuth client:', clientResult.error)
+    return
   }
-  else {
-    log('Need to create OAuth client — check the browser')
-  }
+  log('OAuth client created')
 
   log('Setup task complete')
 }
+
