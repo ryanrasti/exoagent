@@ -1,33 +1,58 @@
 import { z } from 'zod'
 import { tool } from '../../exoeval/tool'
-import { runSubagent } from '../subagent'
+import { google } from '@ai-sdk/google'
+import { generateText, Output, stepCountIs } from 'ai'
+import { codemode } from '../../code-mode'
 
-export class LlmClient {
+const SubagentOptionsSchema = z.object({
+  prompt: z.string(),
+  system: z.string().optional(),
+  maxTurns: z.number().optional(),
+  capabilities: z.object({
+    raw: z.record(z.any(), z.any()),
+    dts: z.string(),
+  }).optional(),
+  options: z.array(z.string()).optional(),
+})
+export type SubagentOptions = z.infer<typeof SubagentOptionsSchema>
+
+const runSubagent = async (options: SubagentOptions) => {
+  const result = await generateText({
+    model: google('gemini-2.5-flash'),
+    tools: options.capabilities ? { codemode: await codemode(options.capabilities.raw, options.capabilities.dts) } : {},
+    stopWhen: stepCountIs(options.maxTurns ?? 1),
+    system: options.system,
+    prompt: options.prompt,
+    temperature: 0,
+    seed: 1,
+    output: Output.object({schema: 
+      z.object({
+        result: options.options ? z.enum(options.options).optional() : z.string().optional(),
+        error: z.string().optional(),
+      })
+    }),
+  })
+  return result.output
+}
+
+export class Llm {
   @tool(z.object({
     prompt: z.string(),
     system: z.string().optional(),
+    options: z.array(z.string()).optional(),
   }))
-  async ask({ prompt, system }: { prompt: string; system?: string }): Promise<string> {
+  async ask({ prompt, system, options }: { prompt: string; system?: string; options?: string[] }) {
     const result = await runSubagent({
       prompt,
       system,
       maxTurns: 1,
+      options,
     })
-    return String(result.result ?? '')
+    return result
   }
 
-  @tool(z.object({
-    prompt: z.string(),
-    options: z.array(z.string()),
-    system: z.string().optional(),
-  }))
-  async choose({ prompt, options, system }: { prompt: string; options: string[]; system?: string }): Promise<string> {
-    const optionsList = options.map((o, i) => `${i + 1}. ${o}`).join('\n')
-    const result = await runSubagent({
-      prompt: `${prompt}\n\nOptions:\n${optionsList}`,
-      system: system ?? 'You are a helpful assistant. Respond with ONLY the exact text of the chosen option, nothing else.',
-      maxTurns: 1,
-    })
-    return String(result.result ?? '').trim()
+  @tool(SubagentOptionsSchema)
+  async subagent(options: SubagentOptions) {
+    return await runSubagent(options)
   }
 }

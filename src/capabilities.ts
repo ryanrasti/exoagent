@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { tool } from './exoeval/tool'
 import { BrowserClient } from './plugins/browser'
 import { MockGmailClient } from './plugins/gmail'
-import { LlmClient } from './plugins/llm'
+import { Llm } from './plugins/llm'
 
 type Resource = {
   close: () => Promise<void>
@@ -37,7 +37,7 @@ export class Capabilities {
    * Get a browser client connected to existing Chrome (via CDP_URL or localhost:9222)
    */
   @tool()
-  public browser(): BrowserClient {
+  public newBrowser(): BrowserClient {
     return this.register(new BrowserClient())
   }
 
@@ -45,7 +45,7 @@ export class Capabilities {
    * Get a browser client with an ephemeral profile (cleaned up on close)
    */
   @tool()
-  public ephemeralBrowser(): BrowserClient {
+  public newEphemeralBrowser(): BrowserClient {
     return this.register(new BrowserClient({ ephemeral: true }))
   }
 
@@ -55,12 +55,15 @@ export class Capabilities {
    * Useful for keeping login sessions across runs.
    */
   @tool(z.string())
-  public browserWithProfile(profile: string): BrowserClient {
+  public newBrowserWithProfile(profile: string): BrowserClient {
     return this.register(new BrowserClient({ profile }))
   }
 
   @tool()
-  public readonly llm = new LlmClient()
+  public readonly llm = new Llm()
+
+  @tool()
+  public readonly subagent = this.llm.subagent
 
   constructor(public readonly task: string) {
     this.resources = []
@@ -72,8 +75,8 @@ export class Capabilities {
   }
 
   @tool(z.string())
-  log(message: string) {
-    console.log(message)
+  log(message: string, ...args: any[]) {
+    console.log(message, ...args)
   }
 
   async close() {
@@ -107,6 +110,3 @@ export class Capabilities {
     return parts.join('\n\n')
   }
 }
-
-// Re-export as Caps for backwards compatibility
-export { Capabilities as Caps }
