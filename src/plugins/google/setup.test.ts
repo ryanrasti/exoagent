@@ -1,98 +1,46 @@
-import { rm } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { BrowserClient } from '../browser'
-import { setupGmail } from './setup'
+import { Llm } from '../llm'
+import { GoogleSetup } from './setup'
 
 /**
- * Integration tests for Gmail setup flow.
+ * Integration test for subagent-driven Gmail setup.
  *
  * Prerequisites:
  * - Chrome/Chromium installed
- * - gcloud CLI installed and authenticated
- * - A Google account to use for testing
- *
- * These tests are marked with .skip by default since they require
- * real browser automation and Google account access.
+ * - Logged into a Google account in the test browser profile
  *
  * To run: GMAIL_SETUP_TEST=1 npm test -- src/plugins/google/setup.test.ts
  */
 
 const TEST_PROJECT_NAME = 'Exoagent Test'
-const TEST_PROJECT_ID = 'exoagent-test-' + Date.now().toString(36)
-const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL || 'test@example.com'
-const STORAGE_DIR = join(homedir(), '.exoagent', 'storage', `google-${TEST_PROJECT_ID}`)
 const RUN_TESTS = process.env.GMAIL_SETUP_TEST === '1'
 
 describe.skipIf(!RUN_TESTS)('Gmail Setup Integration', () => {
-  let browser: BrowserClient
+  it('should ensure a GCP project exists and return project ID', async () => {
+    const browser = new BrowserClient({ profile: 'gmail-setup-test' })
+    const llm = new Llm()
+    const setup = new GoogleSetup(
+      () => browser,
+      llm.subagent.bind(llm),
+    )
 
-  beforeAll(async () => {
-    // Use persistent profile so we can be logged into Google
-    browser = new BrowserClient({ profile: 'gmail-setup-test' })
-  }, 30000)
+    try {
+      const result = await setup.setupGmail({
+        projectName: TEST_PROJECT_NAME,
+      })
 
-  afterAll(async () => {
-    if (browser) {
+      expect(result.projectId).toBeTruthy()
+      expect(typeof result.projectId).toBe('string')
+      console.log('Project ID:', result.projectId)
+    } finally {
       await browser.close()
     }
-    // Clean up test storage
-    try {
-      await rm(STORAGE_DIR, { recursive: true, force: true })
-    } catch {
-      // Ignore
-    }
-  })
-
-  it('should complete full setup flow', async () => {
-    const result = await setupGmail({
-      browser,
-      projectName: TEST_PROJECT_NAME,
-      projectId: TEST_PROJECT_ID,
-      testUserEmail: TEST_USER_EMAIL,
-      verbose: true,
-    })
-
-    expect(result.projectId).toBe(TEST_PROJECT_ID)
-    expect(result.credentialsStored).toBe(true)
-    expect(result.tokensStored).toBe(true)
-    expect(result.gmailWorking).toBe(true)
-  }, 120000) // 2 minute timeout for full flow
-
-  it('should be idempotent - second run skips completed steps', async () => {
-    // Run setup again - should skip already-done steps
-    const result = await setupGmail({
-      browser,
-      projectName: TEST_PROJECT_NAME,
-      projectId: TEST_PROJECT_ID,
-      testUserEmail: TEST_USER_EMAIL,
-      verbose: true,
-    })
-
-    // Should still succeed
-    expect(result.projectId).toBe(TEST_PROJECT_ID)
-    expect(result.credentialsStored).toBe(true)
-    expect(result.tokensStored).toBe(true)
-    expect(result.gmailWorking).toBe(true)
-  }, 60000) // Should be faster second time
-
-  it('should handle existing project gracefully', async () => {
-    // This tests that we don't fail if project already exists
-    const result = await setupGmail({
-      browser,
-      projectName: TEST_PROJECT_NAME,
-      projectId: TEST_PROJECT_ID,
-      testUserEmail: TEST_USER_EMAIL,
-      verbose: false,
-    })
-
-    expect(result.gmailWorking).toBe(true)
-  }, 60000)
+  }, 120000)
 })
 
 describe('Gmail Setup Unit Tests', () => {
-  it('should export setupGmail function', () => {
-    expect(typeof setupGmail).toBe('function')
+  it('should export GoogleSetup class', () => {
+    expect(typeof GoogleSetup).toBe('function')
   })
 })

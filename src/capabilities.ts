@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { tool } from './exoeval/tool'
 import { BrowserClient } from './plugins/browser'
 import { MockGmailClient } from './plugins/gmail'
+import { GoogleSetup } from './plugins/google/setup'
 import { Llm } from './plugins/llm'
 
 type Resource = {
@@ -65,6 +66,12 @@ export class Capabilities {
   @tool()
   public readonly subagent = this.llm.subagent
 
+  @tool()
+  public readonly googleSetup = new GoogleSetup(
+    () => this.newBrowserWithProfile('google-setup'),
+    this.llm.subagent.bind(this.llm),
+  )
+
   constructor(public readonly task: string) {
     this.resources = []
   }
@@ -77,6 +84,11 @@ export class Capabilities {
   @tool(z.string())
   log(message: string, ...args: any[]) {
     console.log(message, ...args)
+  }
+
+  @tool(z.number())
+  async sleep(ms: number) {
+    await new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   async close() {

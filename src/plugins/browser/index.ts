@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { z } from 'zod'
 import { tool } from '../../exoeval/tool'
+import { tsToDts } from '../../ts-to-dts'
 
 const PROFILES_DIR = join(homedir(), '.exoagent', 'browser-profiles')
 
@@ -254,6 +255,7 @@ export class BrowserClient {
 
   @tool(z.object({ url: z.string() }))
   async navigate({ url }: { url: string }): Promise<{ title: string; url: string }> {
+    console.log(`[browser] navigate: ${url}`)
     // Pre-check domain before navigation attempt (gives clearer error)
     const { allowedDomains } = this.options
     if (allowedDomains && allowedDomains.length > 0 && !isAllowedDomain(url, allowedDomains)) {
@@ -262,62 +264,80 @@ export class BrowserClient {
 
     const page = await this.ensurePage()
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 })
-    return { title: await page.title(), url: page.url() }
+    const result = { title: await page.title(), url: page.url() }
+    console.log(`[browser] navigate done: ${result.title}`)
+    return result
   }
 
   @tool()
   async snapshot(): Promise<string> {
+    console.log(`[browser] snapshot`)
     const page = await this.ensurePage()
     await page.waitForTimeout(2000)
     const snap = await (page as any)._snapshotForAI()
+    console.log(`[browser] snapshot done: ${(snap.full as string).length} chars`)
     return snap.full as string
   }
 
   @tool(z.object({ selector: z.string() }))
   async click({ selector }: { selector: string }): Promise<{ clicked: string }> {
+    console.log(`[browser] click: ${selector}`)
     const page = await this.ensurePage()
     await page.click(selector)
+    console.log(`[browser] click done`)
     return { clicked: selector }
   }
 
   @tool(z.object({ role: z.string(), name: z.string() }))
   async clickRole({ role, name }: { role: string, name: string }): Promise<{ clicked: string }> {
+    console.log(`[browser] clickRole: ${role} "${name}"`)
     const page = await this.ensurePage()
     await page.getByRole(role as any, { name }).click()
+    console.log(`[browser] clickRole done`)
     return { clicked: `${role}:${name}` }
   }
 
   @tool(z.object({ selector: z.string(), text: z.string() }))
   async type({ selector, text }: { selector: string, text: string }): Promise<{ typed: string, into: string }> {
+    console.log(`[browser] type: "${text}" into ${selector}`)
     const page = await this.ensurePage()
     await page.fill(selector, text)
+    console.log(`[browser] type done`)
     return { typed: text, into: selector }
   }
 
   @tool(z.object({ label: z.string(), text: z.string() }))
   async fillByLabel({ label, text }: { label: string, text: string }): Promise<{ typed: string, into: string }> {
+    console.log(`[browser] fillByLabel: "${text}" into "${label}"`)
     const page = await this.ensurePage()
     await page.getByLabel(label).fill(text)
+    console.log(`[browser] fillByLabel done`)
     return { typed: text, into: label }
   }
 
   @tool(z.object({ key: z.string() }))
   async press({ key }: { key: string }): Promise<{ pressed: string }> {
+    console.log(`[browser] press: ${key}`)
     const page = await this.ensurePage()
     await page.keyboard.press(key)
+    console.log(`[browser] press done`)
     return { pressed: key }
   }
 
   @tool()
   async title(): Promise<string> {
     const page = await this.ensurePage()
-    return await page.title()
+    const t = await page.title()
+    console.log(`[browser] title: ${t}`)
+    return t
   }
 
   @tool()
   async url(): Promise<string> {
     const page = await this.ensurePage()
-    return page.url()
+    const u = page.url()
+    console.log(`[browser] url: ${u}`)
+    return u
   }
 
   @tool()
@@ -376,12 +396,12 @@ export class BrowserClient {
 
   /**
    * Generate TypeScript definitions for this capability.
-   * Returns the source of this file for use in codemode.
+   * Returns clean .d.ts declarations for use in codemode.
    */
   async dts(): Promise<string> {
     const thisFile = fileURLToPath(import.meta.url)
     const content = await readFile(thisFile, 'utf-8')
-    return content
+    return tsToDts(content)
   }
 
   /**

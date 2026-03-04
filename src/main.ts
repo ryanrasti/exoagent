@@ -8,7 +8,7 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import { transform } from 'esbuild'
 import { exoEval, exoImport } from './exoeval'
-import { Capabilities, Caps } from './capabilities'
+import { Capabilities as Caps } from './capabilities'
 
 class TaskExecutor {
   private loadResult?: (caps: Caps) => void
@@ -40,7 +40,7 @@ class TaskExecutor {
 }
 
 // Re-export for backwards compatibility
-export { Caps, Capabilities }
+export { Caps, Caps as Capabilities }
 
 const TASKS_DIR = join(import.meta.dirname, 'tasks')
 
