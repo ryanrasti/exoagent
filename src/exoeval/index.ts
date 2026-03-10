@@ -1,7 +1,7 @@
 import type * as acorn from 'acorn'
 import type { ExpressionContext } from './expr'
 import { parse } from 'acorn'
-import { ExoArray, ExoBoolean, ExoDate, ExoJSON, ExoMath, ExoNumber, ExoObject, ExoString } from './builtins'
+import { ExoArray, ExoBoolean, ExoDate, ExoJSON, ExoMath, ExoNumber, ExoObject, ExoPromise, ExoString } from './builtins'
 import { Evaluator } from './evaluator'
 import { IdentityContext } from './expr'
 import { Scope } from './scope'
@@ -18,6 +18,7 @@ const builtins: Record<string, unknown> = {
   JSON: ExoJSON,
   Math: ExoMath,
   Number: ExoNumber,
+  Promise: ExoPromise,
 }
 
 export function exoEval(code: string): unknown
@@ -29,6 +30,8 @@ export function exoEval(code: string, ctx = new IdentityContext()): unknown {
     Array: ExoArray.prototype,
     String: ExoString.prototype,
     Date: ExoDate.prototype,
+    Number: ExoNumber.prototype,
+    Boolean: ExoBoolean.prototype,
   })
 
   for (const [name, value] of Object.entries(builtins)) {
@@ -40,6 +43,31 @@ export function exoEval(code: string, ctx = new IdentityContext()): unknown {
   }
 
   return evaluator.Program(ast)
+}
+
+export function exoImport(code: string): { [key: string]: unknown } | Promise<{ [key: string]: unknown }>
+export function exoImport<T>(code: string, ctx: ExpressionContext<T>): { [key: string]: unknown } | Promise<{ [key: string]: unknown }>
+export function exoImport(code: string, ctx = new IdentityContext()): { [key: string]: unknown } | Promise<{ [key: string]: unknown }> {
+  const ast = parse(code, { ecmaVersion: 2022, sourceType: 'module' })
+  const rootScope = new Scope<unknown>(undefined)
+  const evaluator = new Evaluator(ast, code, ctx, rootScope, {
+    Array: ExoArray.prototype,
+    String: ExoString.prototype,
+    Date: ExoDate.prototype,
+    Number: ExoNumber.prototype,
+    Boolean: ExoBoolean.prototype,
+  })
+
+  for (const [name, value] of Object.entries(builtins)) {
+    rootScope.set(
+      { type: 'Identifier', name, start: 0, end: 0 } as acorn.Identifier,
+      ctx.of(value),
+      evaluator,
+    )
+  }
+
+  const result = evaluator.Program(ast, { module: true })
+  return result as { [key: string]: unknown } | Promise<{ [key: string]: unknown }>
 }
 
 export function exoFn<T extends (...args: any[]) => unknown>(fn: T): T {

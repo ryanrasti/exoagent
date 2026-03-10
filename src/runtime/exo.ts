@@ -8,87 +8,41 @@
  * }
  * ```
  *
- * Only the destructured caps are available. exoeval enforces this at the
- * interpreter level.
+ * Only the destructured caps are available — exoeval enforces this at
+ * the interpreter level. Every exo gets the full cap set; the destructure
+ * is the audit trail for what it actually uses.
  */
 
-import type { Provider } from './provider'
+import { exoImport } from '../exoeval'
 
 /**
  * An exo module's default export signature.
  * Caps are received as a single object, destructured by the exo.
  */
-export type ExoFn = (caps: Record<string, object>) => Promise<void>
+export type ExoFn = (caps: Record<string, object>) => void | Promise<void>
 
 /**
  * Metadata for an exo — loaded from its module.
  */
 export interface ExoDef {
   readonly name: string
-  readonly path: string
   readonly run: ExoFn
 }
 
 /**
- * Loads an exo from a module. The module must `export default` an async
- * function that takes a caps object.
+ * Loads an exo from source code via exoImport (the sandboxed interpreter).
+ * The source must `export default` a function that takes a caps object.
  *
- * For now (pre-exoeval), we just dynamically import the module.
- * Task 3 will wire this through exoeval + esbuild.
+ * Source should already be plain JS (run through esbuild if TypeScript).
  */
-export async function loadExo(name: string, path: string): Promise<ExoDef> {
-  const mod = await import(path)
+export async function loadExo(name: string, code: string): Promise<ExoDef> {
+  const mod = await exoImport(code)
   const run = mod.default
 
   if (typeof run !== 'function') {
-    throw new TypeError(`Exo "${name}" must export default an async function, got ${typeof run}`)
+    throw new TypeError(`Exo "${name}" must export default a function, got ${typeof run}`)
   }
 
-  return { name, path, run }
+  return { name, run: run as ExoFn }
 }
 
-/**
- * Runs an exo with scoped caps from an environment.
- *
- * The runner:
- * 1. Resolves which caps the exo needs (for now: passes all caps)
- * 2. Builds a scoped cap object
- * 3. Executes the exo
- *
- * When exoeval is wired in (Task 3), the scoping will be enforced by
- * the interpreter — only destructured caps are accessible.
- */
-export class ExoRunner {
-  private providers: Map<string, Provider> = new Map()
-
-  /** Register a provider by name. */
-  use(name: string, provider: Provider): this {
-    this.providers.set(name, provider)
-    return this
-  }
-
-  /** Build the full caps object from all registered providers. */
-  private buildCaps(): Record<string, object> {
-    const caps: Record<string, object> = {}
-    for (const [name, provider] of this.providers) {
-      caps[name] = provider.capabilities()
-    }
-    return caps
-  }
-
-  /** Run an exo with the full caps. exoeval will scope via destructuring. */
-  async run(exo: ExoDef): Promise<void> {
-    const caps = this.buildCaps()
-    await exo.run(caps)
-  }
-
-  /** Shut down all providers. */
-  async close(): Promise<void> {
-    const providers = [...this.providers.values()].reverse()
-    for (const provider of providers) {
-      if (provider.close) {
-        await provider.close()
-      }
-    }
-  }
-}

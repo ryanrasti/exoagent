@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { tool } from '../exoeval/tool'
-import { StubProvider } from './dev'
-import { ExoRunner } from './exo'
+import { loadExo } from './exo'
 
 // A simple @tool()-decorated capability
 @tool()
@@ -31,89 +30,78 @@ class MockSandbox {
   }
 }
 
-describe('ExoRunner', () => {
-  it('passes caps to an exo', async () => {
-    const storage = new MockStorage()
-    const runner = new ExoRunner()
-    runner.use('storage', new StubProvider('storage', storage))
-
-    const exo = {
-      name: 'test',
-      path: 'test.ts',
-      run: async ({ storage: s }: Record<string, any>) => {
-        await s.set('key', 'value')
-        const val = await s.get('key')
-        expect(val).toBe('value')
-      },
-    }
-
-    await runner.run(exo)
+describe('loadExo', () => {
+  it('loads an exo from source code via exoImport', async () => {
+    const exo = await loadExo('test', `
+      export default async (caps) => {
+        await caps.storage.set("loaded", true)
+      }
+    `)
+    expect(exo.name).toBe('test')
+    expect(typeof exo.run).toBe('function')
   })
 
-  it('provides multiple caps to an exo', async () => {
+  it('rejects modules without a default export function', async () => {
+    await expect(loadExo('bad', `
+      export default 42
+    `)).rejects.toThrow(/must export default a function/)
+  })
+})
+
+describe('runExo', () => {
+  it('passes caps to an exo loaded via exoImport', async () => {
     const storage = new MockStorage()
-    const sandbox = new MockSandbox()
+    const caps = { storage }
 
-    const runner = new ExoRunner()
-    runner.use('storage', new StubProvider('storage', storage))
-    runner.use('sandbox', new StubProvider('sandbox', sandbox))
+    const exo = await loadExo('test', `
+      export default async ({ storage }) => {
+        await storage.set("key", "value")
+      }
+    `)
 
-    const exo = {
-      name: 'test',
-      path: 'test.ts',
-      run: async ({ storage: s, sandbox: sb }: Record<string, any>) => {
-        await s.set('greeting', 'hello')
-        await sb.exec({ command: 'echo hello' })
-        expect(await s.get('greeting')).toBe('hello')
-        expect(sb.commands).toEqual(['echo hello'])
-      },
-    }
-
-    await runner.run(exo)
+    await exo.run(caps)
+    expect(await storage.get('key')).toBe('value')
   })
 
-  it('exo only sees caps it destructures', async () => {
+  it('provides multiple caps', async () => {
     const storage = new MockStorage()
     const sandbox = new MockSandbox()
+    const caps = { storage, sandbox }
 
-    const runner = new ExoRunner()
-    runner.use('storage', new StubProvider('storage', storage))
-    runner.use('sandbox', new StubProvider('sandbox', sandbox))
+    const exo = await loadExo('test', `
+      export default async ({ storage, sandbox }) => {
+        await storage.set("greeting", "hello")
+        await sandbox.exec({ command: "echo hello" })
+      }
+    `)
+
+    await exo.run(caps)
+    expect(await storage.get('greeting')).toBe('hello')
+    expect(sandbox.commands).toEqual(['echo hello'])
+  })
+
+  it('exo receives full cap set (destructure is audit trail)', async () => {
+    const storage = new MockStorage()
+    const sandbox = new MockSandbox()
+    const caps = { storage, sandbox }
 
     // This exo only destructures storage — sandbox is in the caps
-    // object but the exo doesn't use it. When exoeval is wired in,
-    // the interpreter will enforce that sandbox is inaccessible.
-    const exo = {
-      name: 'test',
-      path: 'test.ts',
-      run: async ({ storage: s }: Record<string, any>) => {
-        await s.set('only-storage', true)
-        expect(await s.get('only-storage')).toBe(true)
-      },
-    }
+    // but not used. The destructure is the audit trail.
+    const exo = await loadExo('test', `
+      export default async ({ storage }) => {
+        await storage.set("only-storage", true)
+      }
+    `)
 
-    await runner.run(exo)
+    await exo.run(caps)
+    expect(await storage.get('only-storage')).toBe(true)
+    expect(sandbox.commands).toEqual([])
   })
 
-  it('closes providers in reverse order', async () => {
-    const order: string[] = []
-
-    const p1 = {
-      name: 'first',
-      capabilities: () => ({}),
-      close: async () => { order.push('first') },
-    }
-    const p2 = {
-      name: 'second',
-      capabilities: () => ({}),
-      close: async () => { order.push('second') },
-    }
-
-    const runner = new ExoRunner()
-    runner.use('first', p1)
-    runner.use('second', p2)
-
-    await runner.close()
-    expect(order).toEqual(['second', 'first'])
+  it('exo can return void (sync)', async () => {
+    const exo = await loadExo('noop', `
+      export default ({ }) => { }
+    `)
+    await exo.run({})
   })
 })

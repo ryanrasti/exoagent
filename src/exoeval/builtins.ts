@@ -53,6 +53,9 @@ export class ExoArray<T = unknown> {
   @tool(fn.returns(z.any()))
   get flatMap() { return Array.prototype.flatMap }
 
+  @tool(fn.returns(z.void()))
+  get forEach() { return Array.prototype.forEach }
+
   @tool(fn.returns(z.any()).optional())
   get toSorted() { return Array.prototype.toSorted }
 
@@ -97,6 +100,9 @@ export class ExoArray<T = unknown> {
 
   @tool(z.number(), z.any())
   get with() { return Array.prototype.with }
+
+  @tool()
+  get toString() { return Array.prototype.toString }
 
   // Statics
   @tool(z.array(z.any()))
@@ -189,6 +195,9 @@ export class ExoString {
 
   @tool()
   get trimStart() { return String.prototype.trimStart }
+
+  @tool()
+  get toString() { return String.prototype.toString }
 }
 
 @tool(z.union([z.string(), z.number(), z.instanceof(Date)]).optional())
@@ -239,6 +248,9 @@ export class ExoDate {
 
   @tool()
   get valueOf() { return Date.prototype.valueOf }
+
+  @tool()
+  get toString() { return Date.prototype.toISOString }
 
   // Statics
   @tool()
@@ -292,6 +304,9 @@ export class ExoBoolean {
 
   @tool()
   get valueOf() { return Boolean.prototype.valueOf }
+
+  @tool()
+  get toString() { return Boolean.prototype.toString }
 }
 
 export class ExoJSON {
@@ -342,12 +357,32 @@ export class ExoMath {
   static trunc(x: number) { return Math.trunc(x) }
 }
 
+export class ExoPromise {
+  @tool(z.array(z.any()))
+  static all(values: unknown[]) { return Promise.all(values as Promise<unknown>[]) }
+
+  @tool(z.array(z.any()))
+  static allSettled(values: unknown[]) { return Promise.allSettled(values as Promise<unknown>[]) }
+
+  @tool(z.array(z.any()))
+  static race(values: unknown[]) { return Promise.race(values as Promise<unknown>[]) }
+
+  @tool(z.any())
+  static resolve(value: unknown) { return Promise.resolve(value) }
+
+  @tool(z.any())
+  static reject(reason: unknown) { return Promise.reject(reason) }
+}
+
 @tool(z.union([z.string(), z.number(), z.bigint()]))
 export class ExoNumber {
   constructor(...args: Parameters<typeof Number>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new Number(...args)
   }
+
+  @tool(z.number().optional())
+  get toString() { return Number.prototype.toString }
 
   @tool(z.string(), z.number().optional())
   static parseInt(s: string, radix?: number) { return Number.parseInt(s, radix) }

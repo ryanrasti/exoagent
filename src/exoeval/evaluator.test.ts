@@ -758,7 +758,6 @@ describe('exoEval', () => {
       'Reflect',
       'Symbol',
       'Error',
-      'Promise',
       'setTimeout',
       'setInterval',
       'Buffer',

@@ -1,5 +1,14 @@
 # ExoAgent Runtime
 
+## Workflow
+
+Don't commit until we move on. The loop is: prompt → do → review → iterate →
+commit once settled. No intermediate commits during iteration.
+
+No skeletons or stubs. Don't write a file until it's actually used. No
+placeholder providers, no empty composition roots, no "will be wired later"
+code.
+
 ## Overview
 
 **exoagentd** is a runtime daemon. It manages:
@@ -350,8 +359,9 @@ Provider interface. Exo definition with cap destructuring. Dev environment
 that wires provider classes to config. No exoeval yet — exos run as plain
 functions to prove the composition model.
 
-### Task 2: eslint rule for exos
-**Files:** eslint config / custom rule, `src/exoeval/allowed.ts`
+### Task 2: eslint rule + tsconfig for exos
+**Files:** eslint config / custom rule, `src/exoeval/allowed.ts`,
+`src/runtime/exos/tsconfig.json`
 
 exoeval already has whitelists in `evaluator.ts`:
 - **Expressions** (line 402): `ArrayExpression`, `ArrowFunctionExpression`,
@@ -367,6 +377,14 @@ Export these as shared constants from `src/exoeval/allowed.ts`. The eslint
 rule for `src/runtime/exos/` imports the same whitelist and flags anything
 not in it. Single source of truth — if exoeval adds a node type, the lint
 rule allows it automatically.
+
+Custom `tsconfig.json` for the exos folder: sets `noLib` so none of the
+standard lib types (DOM, ES20xx, Node, etc.) are available. Instead, exos
+get a single `.d.ts` generated from the builtins that exoeval actually
+exposes (Array methods, String methods, JSON, Math, Date, Object.keys/
+values/entries, etc.). This way TypeScript itself catches attempts to use
+APIs that don't exist in the sandbox — you get red squiggles in the editor,
+not just runtime errors.
 
 ### Task 3: Exo execution in exoeval
 **Files:** `exo.ts`
