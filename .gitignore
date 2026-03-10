@@ -12,3 +12,6 @@ temp
 
 .direnv
 .claude
+.exobox
+.env
+.exoagent
