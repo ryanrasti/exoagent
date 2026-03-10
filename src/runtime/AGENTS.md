@@ -4,9 +4,9 @@
 
 **exoagentd** is a runtime daemon. It manages:
 
-- **Tasks** — like systemd units. Code runs in exoeval (sandboxed JS
-  interpreter). Tasks declare their caps by destructuring at the top of the
-  file. They are the untrusted layer.
+- **Exos** — sandboxed programs (like systemd units). Code runs in exoeval
+  (sandboxed JS interpreter). Exos declare their caps by destructuring at
+  the top of the file. They are the untrusted layer.
 - **Providers** — capability classes. Their instantiations are caps. Providers
   run in the main daemon process (no sandbox) — they have access to secrets
   and the host. They are the trusted layer.
@@ -16,12 +16,12 @@ into cap instances with the right config/secrets.
 
 The system is **recursive and self-extending**:
 
-1. The **init task** is a coding agent. It hooks pi directly to stdin/stdout.
+1. The **init exo** is a coding agent. It hooks pi directly to stdin/stdout.
    The coding agent gets basic caps: `bash`, `read`, `write`, `edit` — these
    execute inside a bwrap sandbox via the sandbox provider.
 
 2. The coding agent can **create, update, and delete custom providers and
-   tasks** — but all changes go through a **review cap**. The review cap
+   exos** — but all changes go through a **review cap**. The review cap
    pushes a branch and creates a code review (Forgejo). Once approved, code
    is merged and the daemon hot-reloads.
 
@@ -34,7 +34,7 @@ The system is **recursive and self-extending**:
 
 - **Providers** = trusted code. Unsandboxed, hold secrets, make API calls.
   Either builtin or human-reviewed via the review cap.
-- **Tasks** = untrusted code. Run in exoeval. Can only call `@tool()`
+- **Exos** = untrusted code. Run in exoeval. Can only call `@tool()`
   methods on destructured caps. Cannot import, access globals, or escape.
 - **The review cap** = the escalation boundary. The agent proposes changes
   (branch + sha), a human reviews in Forgejo, approves or rejects. This is
@@ -48,12 +48,12 @@ The system is **recursive and self-extending**:
 
 ### Daemon (exoagentd)
 
-The long-running host process. When you run `exoagentd`, the init task starts
+The long-running host process. When you run `exoagentd`, the init exo starts
 and pi connects directly to stdin/stdout — you're talking to the coding agent.
 
 Responsibilities:
 - Load and manage providers (trusted, unsandboxed)
-- Load and execute tasks (untrusted, in exoeval)
+- Load and execute exos (untrusted, in exoeval)
 - Hold secrets
 - Manage sandbox lifecycles (bwrap)
 - Host pi sessions (SDK, LLM API keys)
@@ -82,7 +82,7 @@ Each provider has a string name — the top-level key in the root cap object.
   overlay on /nix/store. Depends on storage for persistent sessions.
 - **pi** — spawns pi sessions via SDK. Replaces pi's builtin tools with
   sandbox-backed versions (bash/read/write/edit). Manages session lifecycle.
-  The init task hooks pi directly to stdin/stdout.
+  The init exo hooks pi directly to stdin/stdout.
 - **review** — the escalation cap. `review.propose(branch, sha)` creates a
   code review in a local Forgejo instance. Returns approved/rejected. On
   approval, triggers daemon hot-reload.
@@ -95,11 +95,12 @@ Each provider has a string name — the top-level key in the root cap object.
 **Custom providers** are created by the coding agent, reviewed in Forgejo,
 and loaded by the daemon. They live in `src/runtime/providers/`.
 
-### Tasks
+### Exos
 
-A task is an exoeval program. Caps are declared by destructuring:
+An exo is a sandboxed program. Caps are declared by destructuring:
 
 ```javascript
+// src/runtime/exos/implement-issue.ts
 export default async ({ linear, github, pi, review }) => {
   const issue = await linear.getIssue({ id: input.issueId })
   await pi.prompt(`Implement this: ${issue.title}\n${issue.description}`)
@@ -108,12 +109,12 @@ export default async ({ linear, github, pi, review }) => {
 }
 ```
 
-Tasks live in `src/runtime/tasks/`. Only the destructured caps are available.
+Exos live in `src/runtime/exos/`. Only the destructured caps are available.
 exoeval enforces this at the interpreter level.
 
 **exoeval keeps its restricted syntax** (const-only, no for/while/try-catch).
 This is intentional — it enables expression-based information flow control.
-A custom eslint rule for the tasks folder flags disallowed syntax with clear
+A custom eslint rule for the exos folder flags disallowed syntax with clear
 error messages before exoeval rejects them at runtime.
 
 ### Secrets
@@ -141,7 +142,7 @@ A special cap. JSON file at `.exoagent/secrets.json`:
 ```
 
 Each provider receives its own secrets by name. The secrets cap is passed
-to providers during construction — never to tasks or sandboxes.
+to providers during construction — never to exos or sandboxes.
 
 ### The Review Cap
 
@@ -188,13 +189,13 @@ becomes repointing to a new RPC target.
 exoagentd
 ```
 
-Starts with builtin providers. The init task spawns immediately. Pi connects
+Starts with builtin providers. The init exo spawns immediately. Pi connects
 to stdin/stdout — you're talking to the coding agent.
 
-### Step 1: Init task
+### Step 1: Init exo
 
 ```javascript
-// src/runtime/tasks/init.ts
+// src/runtime/exos/init.ts
 export default async ({ sandbox, review, storage, pi }) => {
   await pi.interactive({
     capabilities: { sandbox, review, storage },
@@ -217,11 +218,11 @@ The coding agent:
 3. Calls `review.propose('feat/github-provider', sha)`
 4. User reviews in Forgejo, approves
 5. Daemon hot-reloads, `github` provider is now available
-6. Future tasks can destructure `github` from their caps
+6. Future exos can destructure `github` from their caps
 
 ### Step 3: System runs itself
 
-Custom tasks use custom providers. The coding agent can update anything.
+Custom exos use custom providers. The coding agent can update anything.
 Every change goes through Forgejo review. The system grows organically.
 
 ---
@@ -276,7 +277,7 @@ anything but can't reach the host or LAN.
 ### Sandbox ↔ Host RPC
 
 The unix socket carries both network packets (via slirp4netns) and RPC calls
-(task → provider caps on host). Multiplexed with a simple framing:
+(exo → provider caps on host). Multiplexed with a simple framing:
 
 ```
 0x01 = network packet
@@ -288,7 +289,7 @@ The unix socket carries both network packets (via slirp4netns) and RPC calls
 
 ## Pi Integration
 
-Pi runs on the host via SDK. The init task hooks it directly to stdin/stdout:
+Pi runs on the host via SDK. The init exo hooks it directly to stdin/stdout:
 
 ```javascript
 await pi.interactive({
@@ -319,7 +320,7 @@ src/runtime/
   AGENTS.md
   daemon.ts            The exoagentd process
   provider.ts          Provider interface
-  task.ts              Task definition + exoeval execution
+  exo.ts               Exo definition + exoeval execution
   dev.ts               Dev environment (wires providers to config)
 
   providers/
@@ -329,8 +330,8 @@ src/runtime/
     storage.ts         Persistent KV + directory management
     secrets.ts         Secrets cap — passed to providers
 
-  tasks/
-    init.ts            The init task — spawns the coding agent on stdio
+  exos/
+    init.ts            The init exo — spawns the coding agent on stdio
 
 .exoagent/             (in repo root, gitignored except structure)
   secrets.json         Provider secrets
@@ -343,13 +344,13 @@ src/runtime/
 ## Build Plan
 
 ### Task 1: Core abstractions
-**Files:** `provider.ts`, `task.ts`, `dev.ts`
+**Files:** `provider.ts`, `exo.ts`, `dev.ts`
 
-Provider interface. Task definition with cap destructuring. Dev environment
-that wires provider classes to config. No exoeval yet — tasks run as plain
+Provider interface. Exo definition with cap destructuring. Dev environment
+that wires provider classes to config. No exoeval yet — exos run as plain
 functions to prove the composition model.
 
-### Task 2: eslint rule for tasks
+### Task 2: eslint rule for exos
 **Files:** eslint config / custom rule, `src/exoeval/allowed.ts`
 
 exoeval already has whitelists in `evaluator.ts`:
@@ -363,14 +364,14 @@ exoeval already has whitelists in `evaluator.ts`:
   `ReturnStatement`, `IfStatement`
 
 Export these as shared constants from `src/exoeval/allowed.ts`. The eslint
-rule for `src/runtime/tasks/` imports the same whitelist and flags anything
+rule for `src/runtime/exos/` imports the same whitelist and flags anything
 not in it. Single source of truth — if exoeval adds a node type, the lint
 rule allows it automatically.
 
-### Task 3: Task execution in exoeval
-**Files:** `task.ts`
+### Task 3: Exo execution in exoeval
+**Files:** `exo.ts`
 
-Wire task runner to execute through exoeval. Task source transformed via
+Wire exo runner to execute through exoeval. Exo source transformed via
 esbuild, run through `exoImport`. Destructured caps are the only authority.
 
 ### Task 4: Storage provider
@@ -396,7 +397,7 @@ Depends on storage for persistent sessions.
 **Files:** `providers/pi.ts`
 
 Pi SDK integration. Custom tools backed by sandbox. Session management.
-Init task hooks to stdin/stdout via `pi.interactive({ stdio: true })`.
+Init exo hooks to stdin/stdout via `pi.interactive({ stdio: true })`.
 
 ### Task 8: Review provider (Forgejo)
 **Files:** `providers/review.ts`
@@ -411,10 +412,10 @@ Includes Forgejo setup/management (nix package, local instance).
 **Files:** `daemon.ts`
 
 The exoagentd process. Loads dev environment, starts builtin providers,
-launches init task, hot-reloads on review approval.
+launches init exo, hot-reloads on review approval.
 
-### Task 10: Init task
-**Files:** `tasks/init.ts`
+### Task 10: Init exo
+**Files:** `exos/init.ts`
 
 Spawns pi on stdin/stdout with sandbox + review + storage caps. The coding
 agent takes over.
@@ -424,7 +425,7 @@ agent takes over.
 The coding agent builds:
 - GitHub provider → branch, Forgejo review, approved, loaded
 - Linear provider → same flow
-- implement-issue task → same flow
+- implement-issue exo → same flow
 
 Each goes through the review cap.
 
@@ -433,14 +434,14 @@ Each goes through the review cap.
 ```
 1  Core abstractions          (no deps)
 2  eslint rule                (no deps)
-3  Task execution in exoeval  (depends on 1)
+3  Exo execution in exoeval   (depends on 1)
 4  Storage provider           (depends on 1)
 5  Secrets provider           (depends on 1)
 6  Sandbox provider           (depends on 1, 4)
 7  Pi provider                (depends on 1, 6)
 8  Review provider            (depends on 1)
 9  Daemon                     (depends on 1, 3, 4, 5, 6, 7, 8)
-10 Init task                  (depends on 9)
+10 Init exo                   (depends on 9)
 11 Agent builds the rest      (depends on 10)
 ```
 
