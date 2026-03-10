@@ -45,4 +45,3 @@ export async function loadExo(name: string, code: string): Promise<ExoDef> {
 
   return { name, run: run as ExoFn }
 }
-

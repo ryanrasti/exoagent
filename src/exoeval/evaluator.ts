@@ -1,5 +1,6 @@
 import type * as acorn from 'acorn'
 import type { Control, ExpressionContext } from './expr'
+import { allowedExpressions } from './allowed'
 import { getControl, isPlainObject, makeControl } from './expr'
 import { Scope } from './scope'
 import { getTool, isExprFunction, isToolableConstructor, isToolableFunction } from './tool'
@@ -158,8 +159,10 @@ export class Evaluator<Expr> {
    */
   * toString(obj: Expr, node: acorn.Node): EvalResult<Expr, string> {
     const raw = yield obj
-    if (raw === null) return 'null'
-    if (raw === undefined) return 'undefined'
+    if (raw === null)
+      return 'null'
+    if (raw === undefined)
+      return 'undefined'
 
     // Get .toString method from builtin prototype
     const toStringFn = yield* this.getExoProperty(obj, 'toString', node, true)
@@ -167,7 +170,8 @@ export class Evaluator<Expr> {
     if (typeof toStringRaw === 'function') {
       const result = this.ctx.call(this.ctx.of(toStringFn), [])
       const resultRaw = yield result
-      if (typeof resultRaw === 'string') return resultRaw
+      if (typeof resultRaw === 'string')
+        return resultRaw
     }
 
     // Fallback
@@ -443,8 +447,7 @@ export class Evaluator<Expr> {
   }
 
   * Expression(node: acorn.Expression): EvalResult<Expr> {
-    const supportedExpressions = ['ArrayExpression', 'ArrowFunctionExpression', 'AwaitExpression', 'BinaryExpression', 'CallExpression', 'ConditionalExpression', 'Function', 'Identifier', 'Literal', 'LogicalExpression', 'MemberExpression', 'NewExpression', 'ObjectExpression', 'TemplateLiteral', 'UnaryExpression', 'ChainExpression'] as const
-    this.inv.parse(supportedExpressions.includes(node.type as (typeof supportedExpressions)[number]), `unsupported expression type: ${node.type}`, node)
+    this.inv.parse(allowedExpressions.includes(node.type as (typeof allowedExpressions)[number]), `unsupported expression type: ${node.type}`, node)
     return yield* (this as any)[node.type](node) as unknown as EvalResult<Expr>
   }
 

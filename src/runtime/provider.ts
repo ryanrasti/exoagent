@@ -10,8 +10,8 @@
  */
 export interface Provider<TCaps extends object = object> {
   /** The @tool()-decorated capability object(s) this provider exposes. */
-  capabilities(): TCaps
+  capabilities: () => TCaps
 
   /** Optional cleanup. */
-  close?(): Promise<void>
+  close?: () => Promise<void>
 }

@@ -75,8 +75,8 @@ A provider is a class. Its instantiation is a cap. The environment layer
 ```typescript
 interface Provider {
   readonly name: string
-  capabilities(): Record<string, object>  // @tool() decorated
-  close?(): Promise<void>
+  capabilities: () => Record<string, object> // @tool() decorated
+  close?: () => Promise<void>
 }
 ```
 
@@ -113,7 +113,7 @@ An exo is a sandboxed program. Caps are declared by destructuring:
 export default async ({ linear, github, pi, review }) => {
   const issue = await linear.getIssue({ id: input.issueId })
   await pi.prompt(`Implement this: ${issue.title}\n${issue.description}`)
-  await github.createPR({ ... })
+  await github.createPR({ title: issue.title, body: issue.description })
   await linear.transition({ id: issue.id, status: 'in_review' })
 }
 ```
@@ -208,7 +208,7 @@ to stdin/stdout — you're talking to the coding agent.
 export default async ({ sandbox, review, storage, pi }) => {
   await pi.interactive({
     capabilities: { sandbox, review, storage },
-    stdio: true,  // hook to stdin/stdout
+    stdio: true, // hook to stdin/stdout
   })
 }
 ```

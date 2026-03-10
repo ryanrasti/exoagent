@@ -1,4 +1,5 @@
 import type { ExpressionContext } from './expr'
+import type { IExoArray, IExoBoolean, IExoDate, IExoJSON, IExoMath, IExoNumber, IExoPromise, IExoString } from './lib'
 import sjson from 'secure-json-parse'
 import z from 'zod'
 import { isPlainObject } from './expr'
@@ -6,11 +7,13 @@ import { expr, fn, tool } from './tool'
 import { disallowedProperties } from './utils'
 
 @tool()
-export class ExoArray<T = unknown> {
+export class ExoArray<T = unknown> implements IExoArray<T> {
   constructor(...args: Parameters<typeof Array>) {
     // eslint-disable-next-line unicorn/no-new-array
     return new Array(...args) as unknown as ExoArray<T>
   }
+
+  [index: number]: T
 
   @tool()
   get length(): number {
@@ -113,7 +116,7 @@ export class ExoArray<T = unknown> {
 }
 
 @tool(z.union([z.string(), z.number(), z.instanceof(Date), z.boolean(), z.null(), z.undefined(), z.bigint()]))
-export class ExoString {
+export class ExoString implements IExoString {
   constructor(...args: Parameters<typeof String>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new String(...args) as unknown as ExoString
@@ -201,7 +204,7 @@ export class ExoString {
 }
 
 @tool(z.union([z.string(), z.number(), z.instanceof(Date)]).optional())
-export class ExoDate {
+export class ExoDate implements IExoDate {
   constructor()
   constructor(value: string | number | Date)
   constructor(year: number, month: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number)
@@ -296,7 +299,7 @@ export class ExoObject {
 }
 
 @tool(z.any())
-export class ExoBoolean {
+export class ExoBoolean implements IExoBoolean {
   constructor(...args: Parameters<typeof Boolean>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new Boolean(...args)
@@ -375,7 +378,7 @@ export class ExoPromise {
 }
 
 @tool(z.union([z.string(), z.number(), z.bigint()]))
-export class ExoNumber {
+export class ExoNumber implements IExoNumber {
   constructor(...args: Parameters<typeof Number>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new Number(...args)
@@ -399,3 +402,8 @@ export class ExoNumber {
   @tool(z.any())
   static isInteger(value: unknown) { return Number.isInteger(value) }
 }
+
+// Static-only classes can't use `implements` — check with satisfies instead.
+ExoJSON satisfies IExoJSON
+ExoMath satisfies IExoMath
+ExoPromise satisfies IExoPromise

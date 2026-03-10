@@ -48,7 +48,7 @@
     "release": "bumpp",
     "start": "tsx src/index.ts",
     "test": "vitest --run",
-    "typecheck": "tsc",
+    "typecheck": "tsc && tsc -p src/runtime/exos/tsconfig.json",
     "check:examples": "npm --prefix ./examples run check",
     "check": "npm ci && npm run lint && npm run typecheck && npm run build && npm run test && npm run check:examples"
   },

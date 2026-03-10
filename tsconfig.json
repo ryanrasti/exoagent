@@ -17,5 +17,5 @@
     "skipDefaultLibCheck": true,
     "skipLibCheck": true
   },
-  "exclude": ["packages/capnweb"]
+  "exclude": ["packages/capnweb", "src/runtime/exos"]
 }
