@@ -175,15 +175,15 @@ sandbox = false' \\
     command: z.string(),
     timeout: z.number().optional(),
   }))
-  async exec({ command, timeout }: { command: string, timeout?: number }): Promise<{ stdout: string, stderr: string, exitCode: number }> {
+  async exec({ command, timeout, env, signal }: { command: string, timeout?: number, env?: Record<string, string>, signal?: AbortSignal }): Promise<{ stdout: string, stderr: string, exitCode: number }> {
     const { nix } = this.config
     const scriptPath = await this.ensureScript()
 
     return new Promise((resolve, reject) => {
       const proc = spawn(
         `${nix.pasta}/bin/pasta`,
-        ['--config-net', '--', `${nix.bash}/bin/bash`, scriptPath, command],
-        { stdio: ['ignore', 'pipe', 'pipe'] },
+        ['--quiet', '--config-net', '--', `${nix.bash}/bin/bash`, scriptPath, command],
+        { stdio: ['ignore', 'pipe', 'pipe'], env: env ? { ...process.env, ...env } : undefined },
       )
 
       let stdout = ''
@@ -198,6 +198,19 @@ sandbox = false' \\
           proc.kill('SIGKILL')
           reject(new Error(`Command timed out after ${timeout}ms`))
         }, timeout)
+      }
+
+      if (signal) {
+        const onAbort = () => {
+          proc.kill('SIGKILL')
+          reject(new Error('Command aborted'))
+        }
+        if (signal.aborted) {
+          onAbort()
+          return
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+        proc.on('close', () => signal.removeEventListener('abort', onAbort))
       }
 
       proc.on('close', (code) => {

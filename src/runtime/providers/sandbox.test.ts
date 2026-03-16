@@ -124,11 +124,9 @@ describe('SandboxCap', () => {
     })
 
     it('host closure paths are readable, /nix/store is writable for new packages', async () => {
-      // Host closure paths are ro-bound — can read existing packages
       const read = await sandbox.exec({ command: 'ls /nix/store | head -1' })
       expect(read.exitCode).toBe(0)
       expect(read.stdout.trim().length).toBeGreaterThan(0)
-      // /nix/store is writable (tmpfs) — nix can add new store paths
       const write = await sandbox.exec({ command: 'touch /nix/store/test-write && echo ok' })
       expect(write.stdout.trim()).toBe('ok')
     })
@@ -144,8 +142,6 @@ describe('SandboxCap', () => {
     })
 
     it('can build and run a trivial derivation', async () => {
-      // Use nix store bash path as builder (nix builds run in their own sandbox
-      // where /bin/bash doesn't exist — only declared inputs are available)
       const bashPath = NIX.bash
       const result = await sandbox.exec({
         command: `set -euo pipefail; OUT=$(nix build --no-link --print-out-paths --impure --expr '
