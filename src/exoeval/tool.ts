@@ -62,6 +62,11 @@ export const registerToolField = (obj: unknown, key: string) => {
  * Fields:  adds field name to toolFieldsSymbol Set on instance.
  *          If value is a function with schemas, wraps with asTool.
  * Classes: returns replacement class with constructor validation + toolSymbol.
+ *
+ * NOTE: @tool() on a class means `new MyClass(...)` is callable by sandboxed code
+ * that has a reference to it. This is intended for builtins (e.g. `new Date`, `new Map`)
+ * where construction is part of the API. For capability classes where you want to expose
+ * only methods (not construction), don't decorate the class — just decorate the methods.
  */
 export function tool<Schemas extends StandardSchemaV1[]>(
   ...argSchemas: Schemas
