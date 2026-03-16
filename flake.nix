@@ -16,7 +16,19 @@
           packages = with pkgs; [
             nodejs
             deno
+            bubblewrap
+            passt
+            nftables
+            nix
           ];
+
+          EXOAGENT_NIX_BASH = "${pkgs.bashNonInteractive}";
+          EXOAGENT_NIX_COREUTILS = "${pkgs.coreutils}";
+          EXOAGENT_NIX_BWRAP = "${pkgs.bubblewrap}";
+          EXOAGENT_NIX_PASTA = "${pkgs.passt}";
+          EXOAGENT_NIX_NFT = "${pkgs.nftables}";
+          EXOAGENT_NIX_NIX = "${pkgs.nix}";
+          EXOAGENT_NIX_CACERT = "${pkgs.cacert}";
         };
       }
     );
