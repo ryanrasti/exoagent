@@ -1,8 +1,12 @@
 import { execFileSync } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+import { generateCapDts } from './dts'
 import { SandboxCap, nixPathsFromEnv } from './providers/sandbox'
 import { StorageCap } from './providers/storage'
 import { Secrets } from './providers/secrets'
@@ -35,7 +39,8 @@ export class Daemon {
   readonly review: ReviewCap
   readonly cloneDir: string
 
-  private server: ForgejoServer
+  /** @internal — exposed for testing */
+  readonly server: ForgejoServer
 
   private constructor(
     pi: PiCap,
@@ -100,10 +105,18 @@ export class Daemon {
       git: gitPath,
     })
 
+    // Generate .d.ts for caps so codemode gets proper types
+    const reviewDts = generateCapDts(
+      join(__dirname, 'providers', 'review.ts'),
+      'ReviewCap',
+    )
+    const capsDts = `declare const review: ${reviewDts}`
+
     // Pi (coding agent with sandbox + review cap)
     const pi = new PiCap({
       sandbox,
       caps: { review },
+      capsDts,
     })
 
     return new Daemon(pi, review, server, cloneDir)

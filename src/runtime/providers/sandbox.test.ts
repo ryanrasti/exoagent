@@ -60,15 +60,15 @@ describe('SandboxCap', () => {
       expect(result.stdout.trim().length).toBeGreaterThan(0)
     })
 
-    it('workspace is mounted at /workspace', async () => {
+    it('workspace is mounted at its host path', async () => {
       await writeFile(join(workspaceDir, 'test.txt'), 'from host')
-      const result = await sandbox.exec({ command: 'cat /workspace/test.txt' })
+      const result = await sandbox.exec({ command: `cat ${workspaceDir}/test.txt` })
       expect(result.stdout.trim()).toBe('from host')
     })
 
-    it('cwd is /workspace', async () => {
+    it('cwd is the workspace path', async () => {
       const result = await sandbox.exec({ command: 'pwd' })
-      expect(result.stdout.trim()).toBe('/workspace')
+      expect(result.stdout.trim()).toBe(workspaceDir)
     })
 
     it('blocks loopback access', async () => {

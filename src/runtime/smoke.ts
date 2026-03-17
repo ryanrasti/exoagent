@@ -6,8 +6,6 @@ async function main() {
   console.log('Starting daemon...')
   const daemon = await Daemon.start({ repoDir, agentId: 'smoke-test' })
   console.log('Daemon started')
-  // Forgejo starts lazily on first review.propose()
-  // console.log('Review URL:', await daemon.reviewUrl)
 
   console.log('Initializing session...')
   try {

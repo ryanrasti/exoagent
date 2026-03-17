@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from 'node:child_process'
+import { openSync, closeSync, readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tool } from '../../exoeval/tool'
@@ -94,19 +95,24 @@ LEVEL = warn
       execFileSync(forgejo, [...args, '-w', dataDir, '-c', join(confDir, 'app.ini')], {
         encoding: 'utf-8',
         timeout: 30000,
+        stdio: 'pipe',
       })
 
     fg(['migrate'])
 
     const createUser = (username: string, admin: boolean) => {
       try {
-        fg(['admin', 'user', 'create',
+        execFileSync(forgejo, [
+          'admin', 'user', 'create',
           ...(admin ? ['--admin'] : []),
           '--username', username, '--password', username, '--email', `${username}@localhost`,
-          '--must-change-password=false'])
+          '--must-change-password=false',
+          '-w', dataDir, '-c', join(confDir, 'app.ini'),
+        ], { encoding: 'utf-8', timeout: 30000, stdio: 'pipe' })
       }
       catch (err: any) {
-        if (!String(err?.stderr ?? err).includes('already exists'))
+        const msg = `${err?.stdout ?? ''}${err?.stderr ?? ''}${err?.message ?? ''}`
+        if (!msg.includes('already exists'))
           throw err
       }
     }
@@ -119,13 +125,26 @@ LEVEL = warn
     const reviewerToken = extractToken(fg(['admin', 'user', 'generate-access-token',
       '--username', 'reviewer', '--token-name', `api-${Date.now()}`, '--scopes', 'all']))
 
+    const logPath = join(dataDir, 'forgejo.log')
+    const logFd = openSync(logPath, 'a')
     const proc = spawn(forgejo, ['web', '-w', dataDir, '-c', join(confDir, 'app.ini')], {
-      stdio: ['ignore', 'ignore', 'inherit'],
+      stdio: ['ignore', logFd, logFd],
     })
+    proc.on('close', () => { try { closeSync(logFd) } catch {} })
 
     // Detect early exit (config error, port conflict, etc.)
     let earlyExit: string | null = null
-    proc.on('exit', (code) => { earlyExit = `Forgejo exited with code ${code}` })
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        try {
+          const log = readFileSync(logPath, 'utf-8').slice(-500)
+          earlyExit = `Forgejo exited with code ${code}. Log tail:\n${log}`
+        }
+        catch {
+          earlyExit = `Forgejo exited with code ${code}`
+        }
+      }
+    })
 
     const baseUrl = `http://localhost:${port}`
     await waitForReady(baseUrl, 30000, () => earlyExit)
@@ -157,7 +176,7 @@ LEVEL = warn
       execFileSync(git, ['remote', 'add', 'forgejo', remoteUrl], { cwd: repoDir })
 
     try {
-      execFileSync(git, ['push', 'forgejo', 'main', '--force'], { cwd: repoDir, timeout: 30000 })
+      execFileSync(git, ['push', 'forgejo', 'main', '--force'], { cwd: repoDir, timeout: 30000, stdio: 'ignore' })
     }
     catch {
       // No main branch yet — fine
@@ -230,25 +249,29 @@ export class ReviewCap {
   }
 
   /**
-   * Push a branch to Forgejo, open/update a PR, and wait for human review.
-   *
-   * Pi should have already committed on the branch. This just syncs the
-   * branch's sha to Forgejo and manages the PR lifecycle.
+   * Push a branch to Forgejo and open/update a PR.
+   * Returns immediately with the PR URL — does NOT wait for review.
    */
   @tool(z.object({
     branch: z.string().describe('Branch name to propose (must exist in clone with commits)'),
     title: z.string().describe('PR title'),
     body: z.string().optional().describe('PR description'),
   }))
-  async propose({ branch, title, body }: { branch: string, title: string, body?: string }): Promise<ReviewResult> {
+  async openPR({ branch, title, body }: { branch: string, title: string, body?: string }): Promise<{ pr: number, url: string, sha: string }> {
     const { baseUrl, token } = await this.ensureRemote()
     const git = join(this.config.git, 'bin', 'git')
 
-    // Push branch to Forgejo
-    execFileSync(git, ['push', 'forgejo', `${branch}:${branch}`, '--force'], {
+    // Get HEAD sha before pushing
+    const sha = execFileSync(git, ['rev-parse', branch], {
       cwd: this.config.cloneDir,
       encoding: 'utf-8',
+    }).trim()
+
+    // Push branch to Forgejo (normal push, not force — preserves review history)
+    execFileSync(git, ['push', 'forgejo', `${branch}:${branch}`], {
+      cwd: this.config.cloneDir,
       timeout: 30000,
+      stdio: 'ignore',
     })
 
     // Find or create PR — filter by head branch
@@ -270,8 +293,21 @@ export class ReviewCap {
       prNumber = pr.number
     }
 
-    const prUrl = `${baseUrl}/agent/workspace/pulls/${prNumber}`
-    return this.pollForReview(baseUrl, token, prNumber, prUrl)
+    return { pr: prNumber, url: `${baseUrl}/agent/workspace/pulls/${prNumber}`, sha }
+  }
+
+  /**
+   * Wait for a human review on a PR. Blocks until a review is submitted
+   * on the given sha (or any commit after it), or the PR is closed.
+   */
+  @tool(z.object({
+    pr: z.number().describe('PR number to wait for review on'),
+    sha: z.string().describe('Commit SHA to wait for review on (from openPR)'),
+  }))
+  async waitForReview({ pr, sha }: { pr: number, sha: string }): Promise<ReviewResult> {
+    const { baseUrl, token } = await this.ensureRemote()
+    const prUrl = `${baseUrl}/agent/workspace/pulls/${pr}`
+    return this.pollForReview(baseUrl, token, pr, prUrl, sha)
   }
 
   /** List open PRs on Forgejo */
@@ -296,28 +332,37 @@ export class ReviewCap {
 
   // -- Internal -------------------------------------------------------------
 
-  private async pollForReview(baseUrl: string, token: string, prNumber: number, prUrl: string): Promise<ReviewResult> {
+  private async pollForReview(baseUrl: string, token: string, prNumber: number, prUrl: string, sha: string): Promise<ReviewResult> {
     const interval = this.config.pollInterval ?? 2000
-
-    // Snapshot existing reviews as "id:state" — detects both new reviews
-    // and state changes (Forgejo reuses IDs when same user re-reviews)
-    const seen = new Set<string>()
-    const existing = await forgejoApi<any[]>(baseUrl, token, 'GET',
-      `/api/v1/repos/agent/workspace/pulls/${prNumber}/reviews`)
-    for (const r of existing)
-      seen.add(`${r.id}:${r.state}`)
+    const git = join(this.config.git, 'bin', 'git')
 
     while (true) {
-      await sleep(interval)
-
       const reviews = await forgejoApi<any[]>(baseUrl, token, 'GET',
         `/api/v1/repos/agent/workspace/pulls/${prNumber}/reviews`)
 
+      // Find a non-pending review on the given sha or any descendant
       for (const review of reviews) {
         if (review.state === 'PENDING')
           continue
-        if (seen.has(`${review.id}:${review.state}`))
-          continue
+
+        // Check if review's commit is the target sha or a descendant of it
+        // git merge-base --is-ancestor <sha> <review.commit_id> returns 0 if sha is ancestor
+        if (review.commit_id) {
+          try {
+            // Fetch latest from forgejo so we have the commits locally
+            execFileSync(git, ['fetch', 'forgejo', '--quiet'], {
+              cwd: this.config.cloneDir, timeout: 10000, stdio: 'ignore',
+            })
+            execFileSync(git, ['merge-base', '--is-ancestor', sha, review.commit_id], {
+              cwd: this.config.cloneDir, stdio: 'ignore',
+            })
+            // merge-base succeeded — review is on sha or after it
+          }
+          catch {
+            // Not an ancestor — review is on an older commit, skip
+            continue
+          }
+        }
 
         const comments: ReviewResult['comments'] = []
         if (review.comments_count > 0) {
@@ -336,11 +381,13 @@ export class ReviewCap {
         }
       }
 
-      // PR closed = rejection
+      // Check if PR was closed
       const pr = await forgejoApi<any>(baseUrl, token, 'GET',
         `/api/v1/repos/agent/workspace/pulls/${prNumber}`)
       if (pr.state === 'closed')
         return { approved: false, body: 'PR was closed', comments: [], pr: prNumber, url: prUrl }
+
+      await sleep(interval)
     }
   }
 }

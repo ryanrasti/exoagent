@@ -194,10 +194,9 @@ export class PiCap {
 
     // Custom tools (codemode for caps)
     const customTools: ToolDefinition[] = []
-    // TODO: codemode triggers json-schema-ref-parser EISDIR bug
-    // const codemodeTool = await this.buildCodemodeTool()
-    // if (codemodeTool)
-    //   customTools.push(codemodeTool)
+    const codemodeTool = await this.buildCodemodeTool()
+    if (codemodeTool)
+      customTools.push(codemodeTool)
 
     // Base tools with scoped operations — only difference from stock pi
     const baseTools: Record<string, any> = {

@@ -23,6 +23,7 @@ export interface NixPaths {
   nft: string
   nix: string
   cacert: string
+  git: string
 }
 
 /** Read nix paths from EXOAGENT_NIX_* env vars set by flake.nix devShell */
@@ -41,6 +42,7 @@ export function nixPathsFromEnv(): NixPaths {
     nft: get('nft'),
     nix: get('nix'),
     cacert: get('cacert'),
+    git: get('git'),
   }
 }
 
@@ -70,7 +72,7 @@ export class SandboxCap {
   /** Compute the transitive closure of nix store paths needed in the sandbox */
   private nixClosure(): string[] {
     const { nix } = this.config
-    const roots = [nix.bash, nix.coreutils, nix.nix, nix.cacert]
+    const roots = [nix.bash, nix.coreutils, nix.nix, nix.cacert, nix.git]
     const output = execFileSync('nix-store', ['-qR', ...roots], { encoding: 'utf-8' })
     return output.trim().split('\n').filter(Boolean).sort()
   }
@@ -102,6 +104,17 @@ export class SandboxCap {
     for (const p of closure)
       SandboxCap.assertSafePath(p, 'nix closure')
     const closureBinds = closure.map(p => `  --ro-bind ${p} ${p} \\`).join('\n')
+
+    // Create parent directories for the workspace bind mount
+    // (bwrap won't create intermediate dirs — e.g. /home/ryan/src needs to exist for /home/ryan/src/proj)
+    const wsDirs: string[] = []
+    let dir = ws
+    while (dir !== '/' && dir !== '.') {
+      dir = resolve(dir, '..')
+      if (dir !== '/')
+        wsDirs.unshift(dir)
+    }
+    const wsDirEntries = wsDirs.map(d => `  --dir ${d} \\`).join('\n')
 
     const script = `#!${nix.bash}/bin/bash
 set -euo pipefail
@@ -142,18 +155,19 @@ ${closureBinds}
   --symlink ${nix.coreutils}/bin/env /usr/bin/env \\
   --ro-bind ${root}/etc/resolv.conf /etc/resolv.conf \\
   --bind ${root}/home /home \\
-  --bind ${ws} /workspace \\
   --tmpfs /tmp \\
+${wsDirEntries}
+  --bind ${ws} ${ws} \\
   --proc /proc \\
   --dev /dev \\
   --setenv HOME /home/agent \\
-  --setenv PATH ${nix.nix}/bin:${nix.coreutils}/bin:${nix.bash}/bin:/home/agent/.nix-profile/bin \\
+  --setenv PATH ${nix.git}/bin:${nix.nix}/bin:${nix.coreutils}/bin:${nix.bash}/bin:/home/agent/.nix-profile/bin \\
   --setenv NIX_SSL_CERT_FILE ${nix.cacert}/etc/ssl/certs/ca-bundle.crt \\
   --setenv NIX_CONFIG 'experimental-features = nix-command flakes
 build-users-group =
 require-drop-supplementary-groups = false
 sandbox = false' \\
-  --chdir /workspace \\
+  --chdir ${ws} \\
   -- /bin/bash -c "$1"
 `
     await writeFile(scriptPath, script, { mode: 0o755 })
