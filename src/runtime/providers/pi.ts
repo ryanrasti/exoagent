@@ -14,6 +14,7 @@ import {
   createWriteTool,
   type WriteOperations,
   DefaultResourceLoader,
+  InteractiveMode,
   ModelRegistry,
   SessionManager,
   SettingsManager,
@@ -63,6 +64,7 @@ export interface PiCapConfig {
 export class PiCap {
   private config: PiCapConfig
   private _session: AgentSession | null = null
+  private _modelFallbackMessage?: string
 
   constructor(config: PiCapConfig) {
     this.config = config
@@ -155,7 +157,8 @@ export class PiCap {
     const settingsManager = this.config.settingsManager ?? SettingsManager.create(workspace, agentDir)
     const sessionManager = this.config.sessionManager ?? SessionManager.create(workspace)
 
-    // Resolve model — same logic as pi: check config, then settings default, then first available
+    // Resolve model — check config, then settings default, then first available
+    // Model may be undefined — interactive mode handles /login + /model
     let model = this.config.model
     if (!model) {
       const defaultProvider = settingsManager.getDefaultProvider()
@@ -170,9 +173,9 @@ export class PiCap {
           if (await modelRegistry.getApiKey(m)) { model = m; break }
         }
       }
-      if (!model)
-        throw new Error('No model available. Configure an API key via pi /login or set ANTHROPIC_API_KEY.')
     }
+    if (!model)
+      this._modelFallbackMessage = 'No model available. Use /login to authenticate, then /model to select.'
 
     // Resource loader — loads extensions, skills, prompts, themes from standard locations
     let resourceLoader = this.config.resourceLoader
@@ -181,15 +184,20 @@ export class PiCap {
         cwd: workspace,
         agentDir,
         settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
       })
       await resourceLoader.reload()
     }
 
     // Custom tools (codemode for caps)
     const customTools: ToolDefinition[] = []
-    const codemodeTool = await this.buildCodemodeTool()
-    if (codemodeTool)
-      customTools.push(codemodeTool)
+    // TODO: codemode triggers json-schema-ref-parser EISDIR bug
+    // const codemodeTool = await this.buildCodemodeTool()
+    // if (codemodeTool)
+    //   customTools.push(codemodeTool)
 
     // Base tools with scoped operations — only difference from stock pi
     const baseTools: Record<string, any> = {
@@ -200,12 +208,12 @@ export class PiCap {
     }
 
     const thinkingLevel = settingsManager.getDefaultThinkingLevel()
-      ?? (model.reasoning ? 'medium' : 'off')
+      ?? (model?.reasoning ? 'medium' : 'off')
 
     const agent = new Agent({
       initialState: {
         systemPrompt: '',
-        model,
+        model: model as any,
         thinkingLevel,
         tools: [],
       },
@@ -234,7 +242,7 @@ export class PiCap {
         }
       }
     }
-    else {
+    else if (model) {
       sessionManager.appendModelChange(model.provider, model.id)
       sessionManager.appendThinkingLevelChange(thinkingLevel)
     }
@@ -281,6 +289,16 @@ export class PiCap {
   /** Initialize session without prompting (for interactive mode) */
   async init(): Promise<AgentSession> {
     return this.ensureSession()
+  }
+
+  /** Run pi's interactive TUI (handles /login, /model, etc.) */
+  async runInteractive(options?: { initialMessage?: string }): Promise<void> {
+    const session = await this.ensureSession()
+    const interactive = new InteractiveMode(session, {
+      modelFallbackMessage: this._modelFallbackMessage,
+      initialMessage: options?.initialMessage,
+    })
+    await interactive.run()
   }
 
   /** Dispose the session */

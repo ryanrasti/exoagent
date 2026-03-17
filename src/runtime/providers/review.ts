@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tool } from '../../exoeval/tool'
 import { z } from 'zod'
 
@@ -60,7 +60,9 @@ export class ForgejoServer {
   }
 
   private async doStart(): Promise<void> {
-    const { dataDir, repoDir, nix } = this.config
+    const { nix } = this.config
+    const dataDir = resolve(this.config.dataDir)
+    const repoDir = resolve(this.config.repoDir)
     const forgejo = join(nix.forgejo, 'bin', 'forgejo')
     const git = join(nix.git, 'bin', 'git')
     const port = this.config.port ?? await findFreePort()
@@ -118,11 +120,15 @@ LEVEL = warn
       '--username', 'reviewer', '--token-name', `api-${Date.now()}`, '--scopes', 'all']))
 
     const proc = spawn(forgejo, ['web', '-w', dataDir, '-c', join(confDir, 'app.ini')], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'ignore', 'inherit'],
     })
 
+    // Detect early exit (config error, port conflict, etc.)
+    let earlyExit: string | null = null
+    proc.on('exit', (code) => { earlyExit = `Forgejo exited with code ${code}` })
+
     const baseUrl = `http://localhost:${port}`
-    await waitForReady(baseUrl, 15000)
+    await waitForReady(baseUrl, 30000, () => earlyExit)
 
     const remoteUrl = `http://agent:agent@localhost:${port}/agent/workspace.git`
     this.state = { port, proc, agentToken, reviewerToken, remoteUrl }
@@ -164,7 +170,10 @@ LEVEL = warn
     this.state.proc.kill('SIGTERM')
     await new Promise<void>((resolve) => {
       this.state!.proc.on('close', () => resolve())
-      setTimeout(resolve, 5000)
+      setTimeout(() => {
+        this.state?.proc.kill('SIGKILL')
+        resolve()
+      }, 5000)
     })
     this.state = null
     this.startPromise = null
@@ -357,9 +366,12 @@ async function findFreePort(): Promise<number> {
   })
 }
 
-async function waitForReady(baseUrl: string, timeoutMs: number): Promise<void> {
+async function waitForReady(baseUrl: string, timeoutMs: number, getEarlyExit?: () => string | null): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    const earlyExit = getEarlyExit?.()
+    if (earlyExit)
+      throw new Error(earlyExit)
     try {
       const resp = await fetch(`${baseUrl}/api/v1/version`)
       if (resp.ok)
@@ -368,7 +380,7 @@ async function waitForReady(baseUrl: string, timeoutMs: number): Promise<void> {
     catch { /* not ready */ }
     await sleep(300)
   }
-  throw new Error(`Forgejo did not become ready within ${timeoutMs}ms`)
+  throw new Error(`Forgejo did not become ready at ${baseUrl} within ${timeoutMs}ms`)
 }
 
 async function forgejoApi<T = any>(baseUrl: string, token: string, method: string, path: string, body?: unknown): Promise<T> {
