@@ -20,6 +20,8 @@
             passt
             nftables
             nix
+            forgejo
+            git
           ];
 
           EXOAGENT_NIX_BASH = "${pkgs.bashNonInteractive}";
@@ -29,6 +31,8 @@
           EXOAGENT_NIX_NFT = "${pkgs.nftables}";
           EXOAGENT_NIX_NIX = "${pkgs.nix}";
           EXOAGENT_NIX_CACERT = "${pkgs.cacert}";
+          EXOAGENT_NIX_FORGEJO = "${pkgs.forgejo}";
+          EXOAGENT_NIX_GIT = "${pkgs.git}";
         };
       }
     );
