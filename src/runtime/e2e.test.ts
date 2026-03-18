@@ -46,7 +46,8 @@ describe('e2e: spawnAgent', () => {
 
   it('agent has pi, review, and clone', () => {
     expect(agent.pi).toBeDefined()
-    expect(agent.review).toBeDefined()
+    // review is undefined for non-GitHub repos (test uses local bare repo)
+    expect(agent.review).toBeUndefined()
     expect(agent.cloneDir).toContain('e2e-test')
   })
 

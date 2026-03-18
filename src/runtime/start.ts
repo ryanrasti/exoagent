@@ -91,8 +91,8 @@ async function main() {
       console.error('Usage: --secret-set provider/name=value')
       process.exit(1)
     }
-    const { mkdirSync } = await import('node:fs')
     const dataDir = join(repoDir, '.exoagent')
+    const { mkdirSync } = await import('node:fs')
     mkdirSync(dataDir, { recursive: true })
     const { Secrets } = await import('./providers/secrets')
     const secrets = Secrets.create(dataDir)

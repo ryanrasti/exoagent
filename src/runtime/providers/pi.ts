@@ -1,7 +1,8 @@
-import type { SandboxCap } from './sandbox'
+import { SandboxCap, nixPathsFromEnv } from './sandbox'
 import type { StorageCap } from './storage'
 import type { Secrets } from './secrets'
-import type { ReviewCap } from './review'
+import { ReviewCap } from './review'
+import { generateCapDts } from '../dts'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -362,7 +363,7 @@ export interface SpawnAgentConfig {
 export interface Agent {
   readonly id: string
   readonly pi: PiCap
-  readonly review: ReviewCap
+  readonly review: ReviewCap | undefined
   readonly cloneDir: string
 }
 
@@ -373,9 +374,7 @@ export interface Agent {
  */
 export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
   const { id, repoDir, dataDir, storage, secrets } = config
-  const { SandboxCap: SandboxCapImpl, nixPathsFromEnv } = await import('./sandbox')
-  const { ReviewCap: ReviewCapImpl } = await import('./review')
-  const { generateCapDts } = await import('../dts')
+
 
   const nix = nixPathsFromEnv()
   const gitPath = process.env.EXOAGENT_NIX_GIT!
@@ -407,44 +406,54 @@ export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
   execFileSync(git, ['-C', cloneDir, 'config', 'user.name', 'agent'])
   execFileSync(git, ['-C', cloneDir, 'config', 'user.email', 'agent@localhost'])
 
-  // Resolve repo from origin
-  const originUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
-    cwd: cloneDir, encoding: 'utf-8',
-  }).trim()
-  const repoMatch = originUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/)
-  if (!repoMatch) {
-    throw new Error(`Cannot parse GitHub repo from origin URL: ${originUrl}`)
+  // Resolve repo from origin (if GitHub)
+  let repo: string | null = null
+  try {
+    const originUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
+      cwd: cloneDir, encoding: 'utf-8',
+    }).trim()
+    const repoMatch = originUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/)
+    if (repoMatch) {
+      repo = repoMatch[1]
+    }
   }
-  const repo = repoMatch[1]
+  catch {
+    // No origin remote
+  }
 
   // Sandbox (workspace = the clone)
-  const sandbox = new SandboxCapImpl({
+  const sandbox = new SandboxCap({
     nix,
     storage,
     sessionId: id,
     workspace: cloneDir,
   })
 
-  // Review cap (GitHub-based, token from secrets)
-  const review = new ReviewCapImpl({
-    cloneDir,
-    git: gitPath,
-    secrets,
-    repo,
-    agentName: id,
-  })
+  // Review cap (GitHub-based, only if origin is GitHub)
+  const caps: Record<string, object> = {}
+  let capsDts: string | undefined
 
-  // Generate types for caps
-  const reviewDts = generateCapDts(join(import.meta.dirname!, 'review.ts'), 'ReviewCap')
-  const capsDts = `declare const review: ${reviewDts}`
+  if (repo) {
+    const review = new ReviewCap({
+      cloneDir,
+      git: gitPath,
+      secrets,
+      repo,
+      agentName: id,
+    })
+    caps.review = review
 
-  // Pi (coding agent with sandbox + review)
+    const reviewDts = generateCapDts(join(import.meta.dirname!, 'review.ts'), 'ReviewCap')
+    capsDts = `declare const review: ${reviewDts}`
+  }
+
+  // Pi (coding agent with sandbox + caps)
   const pi = new PiCap({
     sandbox,
-    caps: { review },
-    capsDts,
+    caps,
+    capsDts: capsDts!,
     systemPrompt: AGENT_SYSTEM_PROMPT,
   })
 
-  return { id, pi, review, cloneDir }
+  return { id, pi, review: caps.review as ReviewCap | undefined, cloneDir }
 }

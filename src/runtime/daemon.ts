@@ -171,8 +171,8 @@ export class Daemon {
     const exoPath = join(import.meta.dirname!, 'exos', `${name}.ts`)
     const source = readFileSync(exoPath, 'utf-8')
 
-    const { transformSync } = await import('esbuild')
-    const { code: stripped } = transformSync(source, { loader: 'ts', format: 'esm' })
+    const esbuild = await import('esbuild')
+    const { code: stripped } = esbuild.transformSync(source, { loader: 'ts', format: 'esm' })
     const code = stripped
       .replace(/^var (\w+) = /, 'export default ')
       .replace(/\nexport \{[\s\S]*\};\s*$/, '\n')

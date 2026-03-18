@@ -12,25 +12,14 @@ import { z } from 'zod'
  * Only GitHub API operations use the token (from secrets DB).
  */
 
-export interface ReviewComment {
-  id: number
-  path: string
-  body: string
-  diffHunk: string
-}
-
-export interface PRComment {
-  id: number
-  body: string
-  user: string
-  createdAt: string
-}
-
+/** Review result — uses GitHub API shapes directly (no wrapper types) */
 export interface ReviewResult {
   approved: boolean
   body: string
-  comments: ReviewComment[]
-  issueComments: PRComment[]
+  /** Inline review comments (GitHub PullRequestReviewComment objects) */
+  comments: any[]
+  /** PR-level issue comments (GitHub IssueComment objects) */
+  issueComments: any[]
   pr: number
   url: string
 }
@@ -153,7 +142,7 @@ export class ReviewCap {
     // Find latest non-pending review
     const latest = [...reviews].reverse().find((r: any) => r.state !== 'PENDING')
 
-    const comments: ReviewComment[] = []
+    let comments: any[] = []
     let approved = false
     let reviewBody = ''
 
@@ -161,27 +150,13 @@ export class ReviewCap {
       approved = latest.state === 'APPROVED'
       reviewBody = latest.body ?? ''
 
-      // Fetch review comments
-      const reviewComments = await ghApi<any[]>(token, 'GET',
+      // Fetch review comments — pass through raw API objects
+      comments = await ghApi<any[]>(token, 'GET',
         `/repos/${repoPath}/pulls/${pr}/reviews/${latest.id}/comments`)
-      for (const c of reviewComments) {
-        comments.push({
-          id: c.id,
-          path: c.path ?? '',
-          body: c.body ?? '',
-          diffHunk: c.diff_hunk ?? '',
-        })
-      }
     }
 
-    // Fetch issue comments (PR-level conversation)
-    const allIssueComments = await ghApi<any[]>(token, 'GET', `/repos/${repoPath}/issues/${pr}/comments`)
-    const issueComments: PRComment[] = allIssueComments.map((c: any) => ({
-      id: c.id,
-      body: c.body ?? '',
-      user: c.user?.login ?? '',
-      createdAt: c.created_at ?? '',
-    }))
+    // Fetch issue comments — pass through raw API objects
+    const issueComments = await ghApi<any[]>(token, 'GET', `/repos/${repoPath}/issues/${pr}/comments`)
 
     return {
       approved,
