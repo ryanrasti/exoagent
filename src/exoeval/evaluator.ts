@@ -159,10 +159,12 @@ export class Evaluator<Expr> {
    */
   * toString(obj: Expr, node: acorn.Node): EvalResult<Expr, string> {
     const raw = yield obj
-    if (raw === null)
+    if (raw === null) {
       return 'null'
-    if (raw === undefined)
+    }
+    if (raw === undefined) {
       return 'undefined'
+    }
 
     // Get .toString method from builtin prototype
     const toStringFn = yield* this.getExoProperty(obj, 'toString', node, true)

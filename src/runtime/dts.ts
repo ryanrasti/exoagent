@@ -9,7 +9,6 @@ import { dirname, resolve } from 'node:path'
  * so the output includes full type information.
  *
  * @param filePath - Absolute path to the .ts source file
- * @param filter - Optional filter on which declarations to include (e.g. only exported classes)
  * @returns The generated .d.ts content
  */
 export function generateDts(filePath: string): string {

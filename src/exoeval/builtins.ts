@@ -267,24 +267,27 @@ export class ExoObject {
   @expr()
   static keys(ctx: ExpressionContext, obj: unknown) {
     const seq = ctx.sequence(obj)
-    if (!isPlainObject(seq))
+    if (!isPlainObject(seq)) {
       throw new TypeError('Object.keys requires an object')
+    }
     return ctx.distribute(Object.keys(seq).map(k => ctx.of(k)))
   }
 
   @expr()
   static values(ctx: ExpressionContext, obj: unknown) {
     const seq = ctx.sequence(obj)
-    if (!isPlainObject(seq))
+    if (!isPlainObject(seq)) {
       throw new TypeError('Object.values requires an object')
+    }
     return ctx.distribute(Object.values(seq))
   }
 
   @expr()
   static entries(ctx: ExpressionContext, obj: unknown) {
     const seq = ctx.sequence(obj)
-    if (!isPlainObject(seq))
+    if (!isPlainObject(seq)) {
       throw new TypeError('Object.entries requires an object')
+    }
     return ctx.distribute(
       Object.entries(seq).map(([k, v]) => ctx.distribute([ctx.of(k), v])),
     )
