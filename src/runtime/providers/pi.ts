@@ -47,6 +47,8 @@ export interface PiCapConfig {
   sandbox: SandboxCap
   /** Arbitrary capability objects to expose via codemode */
   caps?: Record<string, object>
+  /** Additional system prompt text */
+  systemPrompt?: string
   /** Pre-generated .d.ts for caps (skips auto-generation from @tool metadata) */
   capsDts?: string
   /** Model override. Default: from settings/auth (normal pi behavior) */
@@ -188,6 +190,7 @@ export class PiCap {
         noSkills: true,
         noPromptTemplates: true,
         noThemes: true,
+        appendSystemPrompt: this.config.systemPrompt,
       })
       await resourceLoader.reload()
     }

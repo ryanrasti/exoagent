@@ -32,6 +32,7 @@
           EXOAGENT_NIX_NIX = "${pkgs.nix}";
           EXOAGENT_NIX_CACERT = "${pkgs.cacert}";
           EXOAGENT_NIX_GIT = "${pkgs.git}";
+          EXOAGENT_NIX_GNUGREP = "${pkgs.gnugrep}";
           EXOAGENT_NIX_DTACH = "${pkgs.dtach}";
         };
       }

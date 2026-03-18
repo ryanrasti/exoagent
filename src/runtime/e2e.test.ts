@@ -23,6 +23,11 @@ describe('e2e: spawnAgent', () => {
     execFileSync(GIT, ['add', '.'], { cwd: repoDir })
     execFileSync(GIT, ['-c', 'user.name=test', '-c', 'user.email=t@t', 'commit', '-m', 'init'], { cwd: repoDir })
 
+    // Create a bare repo as a fake "remote" for clone --reference
+    const bareDir = join(root, 'bare.git')
+    execFileSync(GIT, ['clone', '--bare', repoDir, bareDir])
+    execFileSync(GIT, ['-C', repoDir, 'remote', 'add', 'origin', bareDir])
+
     daemon = await Daemon.start({ repoDir })
     agent = await spawnAgent({
       id: 'e2e-test',

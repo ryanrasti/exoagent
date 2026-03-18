@@ -24,6 +24,7 @@ export interface NixPaths {
   nix: string
   cacert: string
   git: string
+  gnugrep: string
 }
 
 /** Read nix paths from EXOAGENT_NIX_* env vars set by flake.nix devShell */
@@ -43,6 +44,7 @@ export function nixPathsFromEnv(): NixPaths {
     nix: get('nix'),
     cacert: get('cacert'),
     git: get('git'),
+    gnugrep: get('gnugrep'),
   }
 }
 
@@ -72,7 +74,7 @@ export class SandboxCap {
   /** Compute the transitive closure of nix store paths needed in the sandbox */
   private nixClosure(): string[] {
     const { nix } = this.config
-    const roots = [nix.bash, nix.coreutils, nix.nix, nix.cacert, nix.git]
+    const roots = [nix.bash, nix.coreutils, nix.nix, nix.cacert, nix.git, nix.gnugrep]
     const output = execFileSync('nix-store', ['-qR', ...roots], { encoding: 'utf-8' })
     return output.trim().split('\n').filter(Boolean).sort()
   }
@@ -161,7 +163,7 @@ ${wsDirEntries}
   --proc /proc \\
   --dev /dev \\
   --setenv HOME /home/agent \\
-  --setenv PATH ${nix.git}/bin:${nix.nix}/bin:${nix.coreutils}/bin:${nix.bash}/bin:/home/agent/.nix-profile/bin \\
+  --setenv PATH ${nix.gnugrep}/bin:${nix.git}/bin:${nix.nix}/bin:${nix.coreutils}/bin:${nix.bash}/bin:/home/agent/.nix-profile/bin \\
   --setenv NIX_SSL_CERT_FILE ${nix.cacert}/etc/ssl/certs/ca-bundle.crt \\
   --setenv NIX_CONFIG 'experimental-features = nix-command flakes
 build-users-group =

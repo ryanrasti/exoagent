@@ -108,8 +108,8 @@ export class ReviewCap {
     throw new Error('No GitHub token. Set GITHUB_TOKEN env var or run `gh auth login`.')
   }
 
-  /** Ensure the clone can push to GitHub */
-  private ensureRemote(): void {
+  /** Ensure origin has authenticated push URL */
+  private ensureAuth(): void {
     if (this.remoteSet)
       return
 
@@ -117,13 +117,9 @@ export class ReviewCap {
     const repo = this.getRepo()
     const token = this.getToken()
 
-    // Set up authenticated push URL as 'github' remote
+    // Set origin push URL to authenticated version
     const pushUrl = `https://x-access-token:${token}@github.com/${repo}.git`
-    const remotes = execFileSync(git, ['remote'], { cwd: this.config.cloneDir, encoding: 'utf-8' })
-    if (remotes.split('\n').includes('github'))
-      execFileSync(git, ['remote', 'set-url', 'github', pushUrl], { cwd: this.config.cloneDir })
-    else
-      execFileSync(git, ['remote', 'add', 'github', pushUrl], { cwd: this.config.cloneDir })
+    execFileSync(git, ['remote', 'set-url', '--push', 'origin', pushUrl], { cwd: this.config.cloneDir })
 
     this.remoteSet = true
   }
@@ -138,7 +134,7 @@ export class ReviewCap {
     body: z.string().optional().describe('PR description'),
   }))
   async openPR({ branch, title, body }: { branch: string, title: string, body?: string }): Promise<{ pr: number, url: string, sha: string }> {
-    this.ensureRemote()
+    this.ensureAuth()
     const git = join(this.config.git, 'bin', 'git')
     const repo = this.getRepo()
     const token = this.getToken()
@@ -151,7 +147,7 @@ export class ReviewCap {
     }).trim()
 
     // Push to GitHub
-    execFileSync(git, ['push', 'github', `${branch}:${branch}`], {
+    execFileSync(git, ['push', 'origin', `${branch}:${branch}`], {
       cwd: this.config.cloneDir,
       timeout: 30000,
       stdio: 'ignore',
@@ -207,7 +203,7 @@ export class ReviewCap {
         // Check if review is on the target SHA or a descendant
         if (review.commit_id) {
           try {
-            execFileSync(git, ['fetch', 'github', '--quiet'], {
+            execFileSync(git, ['fetch', 'origin', '--quiet'], {
               cwd: this.config.cloneDir, timeout: 10000, stdio: 'ignore',
             })
             execFileSync(git, ['merge-base', '--is-ancestor', sha, review.commit_id], {
