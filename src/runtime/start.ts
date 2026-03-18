@@ -1,61 +1,77 @@
 #!/usr/bin/env node
 import { Daemon } from './daemon'
-import { spawnAgent, type Agent } from './spawn'
 import { resolve } from 'node:path'
 
 /**
- * exoagentd CLI — init exo.
- *
- * Starts the daemon, spawns an agent, and attaches the TUI.
+ * exoagentd — run exos.
  *
  * Usage:
- *   exoagentd [repo-dir]                     Spawn + attach default agent
- *   exoagentd [repo-dir] --agent <name>      Spawn/reuse named agent
+ *   exoagentd [repo] [--run <exo>] [-- ...args]
+ *   exoagentd [repo]                          Shorthand for --run spawn
+ *   exoagentd [repo] --run spawn              Spawn default agent + attach
+ *   exoagentd [repo] --run spawn -- --id foo  Spawn named agent + attach
+ *   exoagentd [repo] --list                   List running agents
+ *   exoagentd [repo] --attach <id>            Attach to running agent
+ *   exoagentd [repo] --kill <id>              Kill an agent
  */
 
 async function main() {
-  const args = process.argv.slice(2)
+  const rawArgs = process.argv.slice(2)
 
   let repoDir = '.'
-  let agentId = 'default'
+  let command = 'run'
+  let target = 'spawn' // default exo
+  const exoArgs: string[] = []
 
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--agent' && args[i + 1])
-      agentId = args[++i]
-    else if (!args[i].startsWith('-'))
-      repoDir = args[i]
+  // After --run <exo>, all remaining args go to the exo.
+  // Known CLI flags (--attach, --list, --kill) are handled before that.
+  let i = 0
+  while (i < rawArgs.length) {
+    const arg = rawArgs[i]
+    if (arg === '--run') { command = 'run'; target = rawArgs[++i]; i++; break }
+    else if (arg === '--attach') { command = 'attach'; target = rawArgs[++i] }
+    else if (arg === '--list') { command = 'list' }
+    else if (arg === '--kill') { command = 'kill'; target = rawArgs[++i] }
+    else if (arg === '--') { i++; break }
+    else if (!arg.startsWith('-')) { repoDir = arg }
+    i++
   }
+  // Everything after --run <exo> or -- goes to the exo
+  while (i < rawArgs.length)
+    exoArgs.push(rawArgs[i++])
 
   repoDir = resolve(repoDir)
-  console.log(`exoagentd — repo: ${repoDir}`)
-
-  // Start daemon (shared infra)
   const daemon = await Daemon.start({ repoDir })
 
-  // Spawn agent (wires sandbox + review + pi)
-  const agent = await spawnAgent({
-    id: agentId,
-    repoDir,
-    dataDir: daemon.dataDir,
-    storage: daemon.storage,
-    forgejo: daemon.forgejo,
-  })
-
-  console.log(`  agent: ${agent.id}`)
-  console.log(`  workspace: ${agent.cloneDir}`)
-  console.log()
-
   const cleanup = async () => {
-    agent.pi.dispose()
     await daemon.stop()
     process.exit(0)
   }
   process.on('SIGTERM', cleanup)
+  process.on('SIGINT', cleanup)
 
-  // Run pi's interactive TUI
-  await agent.pi.runInteractive()
-  agent.pi.dispose()
-  await daemon.stop()
+  if (command === 'list') {
+    const agents = daemon.list()
+    if (agents.length === 0)
+      console.log('No agents running.')
+    else
+      agents.forEach(a => console.log(a))
+    return
+  }
+
+  if (command === 'kill') {
+    daemon.kill(target)
+    console.log(`Killed: ${target}`)
+    return
+  }
+
+  if (command === 'attach') {
+    daemon.attach(target)
+    return
+  }
+
+  // Run exo
+  await daemon.runExo(target, exoArgs)
 }
 
 main().catch((err) => {
