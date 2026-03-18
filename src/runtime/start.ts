@@ -1,33 +1,60 @@
 #!/usr/bin/env node
 import { Daemon } from './daemon'
+import { spawnAgent, type Agent } from './spawn'
 import { resolve } from 'node:path'
 
 /**
- * Start exoagentd with pi's interactive TUI.
+ * exoagentd CLI — init exo.
+ *
+ * Starts the daemon, spawns an agent, and attaches the TUI.
  *
  * Usage:
- *   npx tsx src/runtime/start.ts [repo-dir]
+ *   exoagentd [repo-dir]                     Spawn + attach default agent
+ *   exoagentd [repo-dir] --agent <name>      Spawn/reuse named agent
  */
 
 async function main() {
-  const repoDir = resolve(process.argv[2] ?? '.')
+  const args = process.argv.slice(2)
 
-  console.log(`Starting exoagentd...`)
-  console.log(`  repo: ${repoDir}`)
+  let repoDir = '.'
+  let agentId = 'default'
 
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--agent' && args[i + 1])
+      agentId = args[++i]
+    else if (!args[i].startsWith('-'))
+      repoDir = args[i]
+  }
+
+  repoDir = resolve(repoDir)
+  console.log(`exoagentd — repo: ${repoDir}`)
+
+  // Start daemon (shared infra)
   const daemon = await Daemon.start({ repoDir })
-  console.log(`  workspace: ${daemon.cloneDir}`)
+
+  // Spawn agent (wires sandbox + review + pi)
+  const agent = await spawnAgent({
+    id: agentId,
+    repoDir,
+    dataDir: daemon.dataDir,
+    storage: daemon.storage,
+    forgejo: daemon.forgejo,
+  })
+
+  console.log(`  agent: ${agent.id}`)
+  console.log(`  workspace: ${agent.cloneDir}`)
   console.log()
 
-  // Cleanup on exit
   const cleanup = async () => {
+    agent.pi.dispose()
     await daemon.stop()
     process.exit(0)
   }
   process.on('SIGTERM', cleanup)
 
-  // Run pi's interactive TUI — Forgejo starts lazily on first review.propose()
-  await daemon.pi.runInteractive()
+  // Run pi's interactive TUI
+  await agent.pi.runInteractive()
+  agent.pi.dispose()
   await daemon.stop()
 }
 
