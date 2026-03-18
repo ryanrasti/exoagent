@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Daemon } from './daemon'
-import { resolve } from 'node:path'
+import { runSecretsUI } from './secrets-ui'
+import { resolve, join } from 'node:path'
 
 /**
  * exoagentd — run exos.
@@ -28,7 +29,8 @@ async function main() {
   let i = 0
   while (i < rawArgs.length) {
     const arg = rawArgs[i]
-    if (arg === '--run') { command = 'run'; target = rawArgs[++i]; i++; break }
+    if (arg === '--secrets') { command = 'secrets' }
+    else if (arg === '--run') { command = 'run'; target = rawArgs[++i]; i++; break }
     else if (arg === '--attach') { command = 'attach'; target = rawArgs[++i] }
     else if (arg === '--list') { command = 'list' }
     else if (arg === '--kill') { command = 'kill'; target = rawArgs[++i] }
@@ -41,6 +43,12 @@ async function main() {
     exoArgs.push(rawArgs[i++])
 
   repoDir = resolve(repoDir)
+
+  if (command === 'secrets') {
+    await runSecretsUI(join(repoDir, '.exoagent'))
+    return
+  }
+
   const daemon = await Daemon.start({ repoDir })
 
   const cleanup = async () => {

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 import { SandboxCap, nixPathsFromEnv } from './providers/sandbox'
 import { StorageCap } from './providers/storage'
+import { Secrets } from './providers/secrets'
 import { ReviewCap } from './providers/review'
 import { PiCap } from './providers/pi'
 import { generateCapDts } from './dts'
@@ -20,6 +21,7 @@ export interface SpawnConfig {
   repoDir: string
   dataDir: string
   storage: StorageCap
+  secrets?: Secrets
 }
 
 export interface Agent {
@@ -61,6 +63,7 @@ export async function spawnAgent(config: SpawnConfig): Promise<Agent> {
   const review = new ReviewCap({
     cloneDir,
     git: gitPath,
+    secrets: config.secrets,
   })
 
   // Generate types for caps

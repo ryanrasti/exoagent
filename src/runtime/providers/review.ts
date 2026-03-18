@@ -23,9 +23,11 @@ export interface ReviewCapConfig {
   cloneDir: string
   /** Nix git store path */
   git: string
+  /** Secrets DB for reading GITHUB_TOKEN */
+  secrets?: import('./secrets').Secrets
   /** GitHub owner/repo (e.g. "user/repo"). Auto-detected from origin if not provided. */
   repo?: string
-  /** GitHub API token. Falls back to GITHUB_TOKEN env or `gh auth token`. */
+  /** GitHub API token. Falls back to secrets DB, GITHUB_TOKEN env, or `gh auth token`. */
   token?: string
   /** Base branch for PRs. Default: "main" */
   baseBranch?: string
@@ -76,6 +78,15 @@ export class ReviewCap {
     if (this.config.token) {
       this._token = this.config.token
       return this._token
+    }
+
+    // Try secrets DB
+    if (this.config.secrets) {
+      const dbToken = this.config.secrets.get('review', 'GITHUB_TOKEN')
+      if (dbToken) {
+        this._token = dbToken
+        return this._token
+      }
     }
 
     // Try GITHUB_TOKEN env var

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnAgent } from './spawn'
 import { StorageCap } from './providers/storage'
+import { Secrets } from './providers/secrets'
 import { join } from 'node:path'
 
 /**
@@ -21,12 +22,14 @@ async function main() {
   }
 
   const storage = new StorageCap(join(dataDir, 'storage.db'))
+  const secrets = new Secrets(join(dataDir, 'secrets.db'))
 
   const agent = await spawnAgent({
     id: agentId,
     repoDir,
     dataDir,
     storage,
+    secrets,
   })
 
   await agent.pi.runInteractive()
