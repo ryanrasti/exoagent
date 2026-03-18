@@ -217,10 +217,11 @@ sandbox = false' \\
       proc.stderr!.on('data', (d: Buffer) => { stderr += d.toString() })
 
       if (timeout) {
+        const timeoutMs = timeout * 1000
         timer = setTimeout(() => {
           proc.kill('SIGKILL')
-          reject(new Error(`Command timed out after ${timeout}ms`))
-        }, timeout)
+          reject(new Error(`Command timed out after ${timeout}s`))
+        }, timeoutMs)
       }
 
       if (signal) {
