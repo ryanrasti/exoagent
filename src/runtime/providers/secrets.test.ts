@@ -10,7 +10,7 @@ describe('Secrets', () => {
   let secrets: Secrets
 
   beforeEach(() => {
-    secrets = new Secrets(testRoot)
+    secrets = Secrets.create(testRoot)
   })
 
   afterEach(async () => {
@@ -50,7 +50,7 @@ describe('Secrets', () => {
     secrets.set('pi', 'api_key', 'sk-ant-test')
     secrets.close()
 
-    const secrets2 = new Secrets(testRoot)
+    const secrets2 = Secrets.create(testRoot)
     expect(secrets2.get('pi', 'api_key')).toBe('sk-ant-test')
     secrets2.close()
   })

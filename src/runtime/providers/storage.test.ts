@@ -10,7 +10,7 @@ describe('StorageCap', () => {
   let storage: StorageCap
 
   beforeEach(() => {
-    storage = new StorageCap(testRoot)
+    storage = StorageCap.create(testRoot)
   })
 
   afterEach(async () => {
@@ -49,7 +49,7 @@ describe('StorageCap', () => {
       await storage.set('persist', 'yes')
       storage.close()
 
-      const storage2 = new StorageCap(testRoot)
+      const storage2 = StorageCap.create(testRoot)
       expect(await storage2.get('persist')).toBe('yes')
       storage2.close()
     })
@@ -73,8 +73,8 @@ describe('StorageCap', () => {
 
   describe('provider scoping', () => {
     it('different providers see different keys', async () => {
-      const capA = new StorageCap(testRoot, 'providerA')
-      const capB = new StorageCap(testRoot, 'providerB')
+      const capA = StorageCap.create(testRoot, 'providerA')
+      const capB = StorageCap.create(testRoot, 'providerB')
 
       await capA.set('key', 'fromA')
       await capB.set('key', 'fromB')
@@ -87,8 +87,8 @@ describe('StorageCap', () => {
     })
 
     it('delete only affects own provider', async () => {
-      const capA = new StorageCap(testRoot, 'providerA')
-      const capB = new StorageCap(testRoot, 'providerB')
+      const capA = StorageCap.create(testRoot, 'providerA')
+      const capB = StorageCap.create(testRoot, 'providerB')
 
       await capA.set('key', 'fromA')
       await capB.set('key', 'fromB')

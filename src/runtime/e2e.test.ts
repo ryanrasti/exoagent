@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { Daemon } from './daemon'
-import { spawnAgent, type Agent } from './spawn'
-import { execFileSync } from 'node:child_process'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { Daemon } from './daemon'
+import { spawnAgent, type Agent } from './providers/pi'
 
 const GIT = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
 
@@ -34,13 +34,13 @@ describe('e2e: spawnAgent', () => {
       repoDir,
       dataDir: daemon.dataDir,
       storage: daemon.storage,
+      secrets: daemon.secrets,
     })
   }, 30000)
 
   afterAll(async () => {
     agent.pi.dispose()
     await daemon.stop()
-    const { rm } = await import('node:fs/promises')
     await rm(root, { recursive: true, force: true })
   })
 
@@ -51,13 +51,12 @@ describe('e2e: spawnAgent', () => {
   })
 
   it('clone has repo contents', async () => {
-    const { readFile } = await import('node:fs/promises')
     const readme = await readFile(join(agent.cloneDir, 'README.md'), 'utf-8')
     expect(readme).toBe('# Test Project\n')
   })
 
   // GitHub PR tests require GITHUB_TOKEN and a real repo — skip in CI
-  it.skip('full flow: edit → commit → openPR → review → waitForReview', async () => {
+  it.skip('full flow: edit → commit → openPR → review → getReviews', async () => {
     // To run: GITHUB_TOKEN=xxx npx vitest --run src/runtime/e2e.test.ts
   })
 })

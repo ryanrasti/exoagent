@@ -1,79 +1,86 @@
 import { describe, it, expect } from 'vitest'
 import { ReviewCap } from './review'
+import { Secrets } from './secrets'
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const GIT = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
 
+/** Create a mock Secrets instance backed by a temp directory */
+function createTestSecrets(token?: string): { secrets: Secrets, cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'review-secrets-'))
+  const secrets = Secrets.create(dir)
+  if (token) {
+    secrets.set('review', 'GITHUB_TOKEN', token)
+  }
+  return {
+    secrets,
+    cleanup: () => {
+      secrets.close()
+      rmSync(dir, { recursive: true, force: true })
+    },
+  }
+}
+
 describe('ReviewCap', () => {
-  it('parses GitHub repo from HTTPS origin', () => {
+  it('throws if no GITHUB_TOKEN in secrets', () => {
     const dir = mkdtempSync(join(tmpdir(), 'review-'))
-    execFileSync(GIT, ['init', dir])
-    execFileSync(GIT, ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/user/repo.git'])
-
-    const review = new ReviewCap({ cloneDir: dir, git: process.env.EXOAGENT_NIX_GIT! })
-    // Access private method via any
-    const repo = (review as any).getRepo()
-    expect(repo).toBe('user/repo')
-  })
-
-  it('parses GitHub repo from SSH origin', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'review-'))
-    execFileSync(GIT, ['init', dir])
-    execFileSync(GIT, ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:org/project.git'])
-
-    const review = new ReviewCap({ cloneDir: dir, git: process.env.EXOAGENT_NIX_GIT! })
-    const repo = (review as any).getRepo()
-    expect(repo).toBe('org/project')
-  })
-
-  it('throws if no GitHub token available', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'review-'))
-    execFileSync(GIT, ['init', dir])
-    execFileSync(GIT, ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/user/repo.git'])
-
-    const oldToken = process.env.GITHUB_TOKEN
-    delete process.env.GITHUB_TOKEN
-
-    const review = new ReviewCap({ cloneDir: dir, git: process.env.EXOAGENT_NIX_GIT! })
+    const { secrets, cleanup } = createTestSecrets()
     try {
-      expect(() => (review as any).getToken()).toThrow('No GitHub token')
+      execFileSync(GIT, ['init', dir])
+      const review = new ReviewCap({
+        cloneDir: dir,
+        git: process.env.EXOAGENT_NIX_GIT!,
+        secrets,
+        repo: 'user/repo',
+      })
+      expect(() => (review as any).token).toThrow('No GITHUB_TOKEN')
     }
     finally {
-      if (oldToken)
-        process.env.GITHUB_TOKEN = oldToken
+      cleanup()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('uses GITHUB_TOKEN env var', () => {
+  it('reads token from secrets DB', () => {
     const dir = mkdtempSync(join(tmpdir(), 'review-'))
-    execFileSync(GIT, ['init', dir])
-
-    const oldToken = process.env.GITHUB_TOKEN
-    process.env.GITHUB_TOKEN = 'test-token-123'
-
+    const { secrets, cleanup } = createTestSecrets('test-token-123')
     try {
-      const review = new ReviewCap({ cloneDir: dir, git: process.env.EXOAGENT_NIX_GIT! })
-      const token = (review as any).getToken()
-      expect(token).toBe('test-token-123')
+      execFileSync(GIT, ['init', dir])
+      const review = new ReviewCap({
+        cloneDir: dir,
+        git: process.env.EXOAGENT_NIX_GIT!,
+        secrets,
+        repo: 'user/repo',
+      })
+      expect((review as any).token).toBe('test-token-123')
     }
     finally {
-      if (oldToken)
-        process.env.GITHUB_TOKEN = oldToken
-      else
-        delete process.env.GITHUB_TOKEN
+      cleanup()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('uses explicit token from config', () => {
+  it('qualifies branch names with agent prefix', () => {
     const dir = mkdtempSync(join(tmpdir(), 'review-'))
-    execFileSync(GIT, ['init', dir])
-
-    const review = new ReviewCap({ cloneDir: dir, git: process.env.EXOAGENT_NIX_GIT!, token: 'explicit-token' })
-    const token = (review as any).getToken()
-    expect(token).toBe('explicit-token')
+    const { secrets, cleanup } = createTestSecrets('token')
+    try {
+      execFileSync(GIT, ['init', dir])
+      const review = new ReviewCap({
+        cloneDir: dir,
+        git: process.env.EXOAGENT_NIX_GIT!,
+        secrets,
+        repo: 'user/repo',
+        agentName: 'test-agent',
+      })
+      expect((review as any).qualifyBranch('my-branch')).toBe('exoagent-test-agent/my-branch')
+      expect((review as any).qualifyBranch('exoagent-test-agent/my-branch')).toBe('exoagent-test-agent/my-branch')
+    }
+    finally {
+      cleanup()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

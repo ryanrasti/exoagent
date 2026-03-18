@@ -16,7 +16,7 @@ describe('SandboxCap', () => {
 
   beforeEach(async () => {
     await mkdir(workspaceDir, { recursive: true })
-    storage = new StorageCap(testRoot)
+    storage = StorageCap.create(testRoot)
     sandbox = new SandboxCap({
       nix: NIX,
       storage,

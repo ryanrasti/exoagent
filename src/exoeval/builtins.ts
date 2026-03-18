@@ -253,7 +253,7 @@ export class ExoDate implements IExoDate {
   get valueOf() { return Date.prototype.valueOf }
 
   @tool()
-  get toString() { return Date.prototype.toISOString }
+  get toString() { return Date.prototype.toString }
 
   // Statics
   @tool()

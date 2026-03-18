@@ -43,8 +43,9 @@ export function generateDts(filePath: string): string {
 
   const program = ts.createProgram([absPath], compilerOptions)
   const sourceFile = program.getSourceFile(absPath)
-  if (!sourceFile)
+  if (!sourceFile) {
     throw new Error(`Could not load source file: ${absPath}`)
+  }
 
   // Check for fatal diagnostics
   const diagnostics = ts.getPreEmitDiagnostics(program, sourceFile)
@@ -56,8 +57,9 @@ export function generateDts(filePath: string): string {
 
   let dts = ''
   const result = program.emit(sourceFile, (fileName, text) => {
-    if (fileName.endsWith('.d.ts'))
+    if (fileName.endsWith('.d.ts')) {
       dts += text
+    }
   }, undefined, true /* emitOnlyDtsFiles */)
 
   if (result.diagnostics.length > 0) {
@@ -65,8 +67,9 @@ export function generateDts(filePath: string): string {
     throw new Error(`Emit errors for ${absPath}:\n${msgs.join('\n')}`)
   }
 
-  if (!dts)
+  if (!dts) {
     throw new Error(`No declarations generated for: ${absPath}`)
+  }
 
   return dts
 }
@@ -92,24 +95,28 @@ export function generateCapDts(filePath: string, className: string): string {
   function visit(node: ts.Node) {
     if (ts.isClassDeclaration(node) && node.name?.text === className) {
       for (const member of node.members) {
-        if (!ts.isMethodDeclaration(member))
+        if (!ts.isMethodDeclaration(member)) {
           continue
+        }
         // Skip private/protected
         if (member.modifiers?.some(m =>
-          m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword))
+          m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword)) {
           continue
+        }
         // Get the method text from the .d.ts
         const methodText = fullDts.slice(member.pos, member.end).trim()
-        if (methodText)
+        if (methodText) {
           methods.push(`  ${methodText}`)
+        }
       }
     }
     ts.forEachChild(node, visit)
   }
   visit(sourceFile)
 
-  if (methods.length === 0)
+  if (methods.length === 0) {
     throw new Error(`No public methods found for class ${className} in ${filePath}`)
+  }
 
   return `{\n${methods.join('\n')}\n}`
 }

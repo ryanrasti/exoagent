@@ -32,8 +32,9 @@ const rule: Rule.RuleModule = {
       // Check all expression nodes
       ':expression': function (node: any) {
         // Skip TypeScript type nodes — erased at runtime
-        if (node.type.startsWith('TS'))
+        if (node.type.startsWith('TS')) {
           return
+        }
         if (!allowedExpressionsSet.has(node.type)) {
           context.report({
             node,
@@ -49,13 +50,16 @@ const rule: Rule.RuleModule = {
       // Check all statement nodes
       ':statement': function (node: any) {
         // Skip TypeScript type nodes — erased at runtime
-        if (node.type.startsWith('TS'))
+        if (node.type.startsWith('TS')) {
           return
+        }
         // Skip module declarations — handled separately
-        if (node.type.endsWith('Declaration') && node.type.startsWith('Export'))
+        if (node.type.endsWith('Declaration') && node.type.startsWith('Export')) {
           return
-        if (node.type === 'ImportDeclaration')
+        }
+        if (node.type === 'ImportDeclaration') {
           return
+        }
         if (!allowedStatementsSet.has(node.type)) {
           context.report({
             node,
@@ -71,8 +75,9 @@ const rule: Rule.RuleModule = {
       // Check module declarations (import/export)
       ImportDeclaration(node: any) {
         // Allow `import type` — it's erased at runtime
-        if (node.importKind === 'type')
+        if (node.importKind === 'type') {
           return
+        }
         context.report({
           node,
           messageId: 'disallowedModuleDeclaration',

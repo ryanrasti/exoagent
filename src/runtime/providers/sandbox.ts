@@ -31,8 +31,9 @@ export interface NixPaths {
 export function nixPathsFromEnv(): NixPaths {
   const get = (name: string): string => {
     const val = process.env[`EXOAGENT_NIX_${name.toUpperCase()}`]
-    if (!val)
+    if (!val) {
       throw new Error(`Missing env var EXOAGENT_NIX_${name.toUpperCase()} — are you in the devShell?`)
+    }
     return val
   }
   return {
@@ -65,8 +66,9 @@ export class SandboxCap {
   }
 
   private async getRoot(): Promise<string> {
-    if (this.rootDir)
+    if (this.rootDir) {
       return this.rootDir
+    }
     this.rootDir = await this.config.storage.dir(`sandbox/${this.config.sessionId}`)
     return this.rootDir
   }
@@ -81,16 +83,18 @@ export class SandboxCap {
 
   /** Validate a path is safe to interpolate into a shell script (no special chars) */
   private static assertSafePath(p: string, label: string): void {
-    if (!/^[a-zA-Z0-9/_+.-]+$/.test(p))
+    if (!/^[a-zA-Z0-9/_+.-]+$/.test(p)) {
       throw new Error(`Unsafe ${label} path for shell interpolation: ${p}`)
+    }
   }
 
   /** Write the wrapper script once, reuse for every exec */
   private async ensureScript(): Promise<string> {
     const root = await this.getRoot()
     const scriptPath = join(root, 'sandbox.sh')
-    if (this.scriptWritten)
+    if (this.scriptWritten) {
       return scriptPath
+    }
 
     const { nix } = this.config
     const ws = this.config.workspace
@@ -98,13 +102,15 @@ export class SandboxCap {
     // Validate all paths interpolated into the shell script
     SandboxCap.assertSafePath(root, 'session root')
     SandboxCap.assertSafePath(ws, 'workspace')
-    for (const [k, v] of Object.entries(nix))
+    for (const [k, v] of Object.entries(nix)) {
       SandboxCap.assertSafePath(v, `nix.${k}`)
+    }
 
     // Compute closure of all nix packages needed in sandbox
     const closure = this.nixClosure()
-    for (const p of closure)
+    for (const p of closure) {
       SandboxCap.assertSafePath(p, 'nix closure')
+    }
     const closureBinds = closure.map(p => `  --ro-bind ${p} ${p} \\`).join('\n')
 
     // Create parent directories for the workspace bind mount
@@ -113,8 +119,9 @@ export class SandboxCap {
     let dir = ws
     while (dir !== '/' && dir !== '.') {
       dir = resolve(dir, '..')
-      if (dir !== '/')
+      if (dir !== '/') {
         wsDirs.unshift(dir)
+      }
     }
     const wsDirEntries = wsDirs.map(d => `  --dir ${d} \\`).join('\n')
 
@@ -230,14 +237,16 @@ sandbox = false' \\
       }
 
       proc.on('close', (code) => {
-        if (timer)
+        if (timer) {
           clearTimeout(timer)
+        }
         resolve({ stdout, stderr, exitCode: code ?? 1 })
       })
 
       proc.on('error', (err) => {
-        if (timer)
+        if (timer) {
           clearTimeout(timer)
+        }
         reject(err)
       })
     })
