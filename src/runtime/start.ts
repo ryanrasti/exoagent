@@ -32,6 +32,14 @@ async function main() {
     if (arg === '--secrets') {
       command = 'secrets'
     }
+    else if (arg === '--eval') {
+      command = 'eval'
+      // Everything after --eval is the code
+      i++
+      target = rawArgs.slice(i).join(' ')
+      i = rawArgs.length
+      break
+    }
     else if (arg === '--run') {
       command = 'run'
       target = rawArgs[++i]
@@ -70,6 +78,29 @@ async function main() {
     return
   }
 
+  if (command === 'secret-set') {
+    // target = "provider/name=value"
+    if (!target || !target.includes('=')) {
+      console.error('Usage: --secret-set provider/name=value')
+      process.exit(1)
+    }
+    const [key, ...rest] = target.split('=')
+    const value = rest.join('=')
+    const [provider, name] = key.split('/')
+    if (!provider || !name) {
+      console.error('Usage: --secret-set provider/name=value')
+      process.exit(1)
+    }
+    const { mkdirSync } = await import('node:fs')
+    const dataDir = join(repoDir, '.exoagent')
+    mkdirSync(dataDir, { recursive: true })
+    const { Secrets } = await import('./providers/secrets')
+    const secrets = Secrets.create(dataDir)
+    secrets.set(provider, name, value)
+    console.log(`Set ${provider}/${name}`)
+    return
+  }
+
   const daemon = await Daemon.start({ repoDir })
 
   const cleanup = async () => {
@@ -98,6 +129,14 @@ async function main() {
 
   if (command === 'attach') {
     daemon.attach(target)
+    return
+  }
+
+  if (command === 'eval') {
+    if (!target) { console.error('Usage: --eval <code>'); process.exit(1) }
+    const result = await daemon.evalCode(target)
+    if (result !== undefined)
+      console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2))
     return
   }
 

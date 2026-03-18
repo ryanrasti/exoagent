@@ -25,7 +25,7 @@ import {
   SettingsManager,
   type ToolDefinition,
 } from '@mariozechner/pi-coding-agent'
-import { Agent } from '@mariozechner/pi-agent-core'
+import { Agent as PiAgent } from "@mariozechner/pi-agent-core"
 import type { Model } from '@mariozechner/pi-ai'
 import { Type } from '@sinclair/typebox'
 import { codemode } from '../../code-mode'
@@ -226,7 +226,7 @@ export class PiCap {
     const thinkingLevel = settingsManager.getDefaultThinkingLevel()
       ?? (model?.reasoning ? 'medium' : 'off')
 
-    const agent = new Agent({
+    const agent = new PiAgent({
       initialState: {
         systemPrompt: '',
         model: model as any,

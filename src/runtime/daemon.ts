@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { StorageCap } from './providers/storage'
 import { Secrets } from './providers/secrets'
+import { ReviewCap } from './providers/review'
 import { ArgsCap } from './providers/args'
 import { tool } from '../exoeval/tool'
 import { z } from 'zod'
@@ -186,6 +187,50 @@ export class Daemon {
     }
 
     return exo.run(caps)
+  }
+
+  /** Eval arbitrary code with daemon caps (like an inline exo) */
+  async evalCode(code: string): Promise<unknown> {
+    // Wrap bare code as an exported default function if needed
+    const wrapped = code.includes('export default')
+      ? code
+      : `export default async ({ spawn, args, attach, storage, review }) => {\n${code}\n}`
+
+    const exo = await loadExo('eval', wrapped)
+
+    const caps: Record<string, object> = {
+      spawn: new SpawnCap((id: string) => this.spawn(id)),
+      args: new ArgsCap([]),
+      attach: new AttachCap((id: string) => this.attach(id)),
+      storage: this.storage,
+    }
+    const review = this.getReviewCap()
+    if (review) caps.review = review
+
+    return exo.run(caps)
+  }
+
+  /** Get a ReviewCap for the default clone (if exists) */
+  private getReviewCap(): ReviewCap | undefined {
+    const cloneDir = join(this.dataDir, 'clones', 'default')
+    if (!existsSync(cloneDir))
+      return undefined
+    const git = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
+    // Detect repo from origin
+    let repo = ''
+    try {
+      const url = execFileSync(git, ['remote', 'get-url', 'origin'], { cwd: cloneDir, encoding: 'utf-8' }).trim()
+      const match = url.match(/github\.com[:/]([^/]+\/[^/.]+)/)
+      if (match) repo = match[1]
+    }
+    catch {}
+    if (!repo) return undefined
+    return new ReviewCap({
+      cloneDir,
+      git: process.env.EXOAGENT_NIX_GIT!,
+      secrets: this.secrets,
+      repo,
+    })
   }
 
   async stop(): Promise<void> {
