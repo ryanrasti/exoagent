@@ -5,7 +5,6 @@ import { join } from 'node:path'
 
 import { StorageCap } from './providers/storage'
 import { Secrets } from './providers/secrets'
-import { ForgejoServer } from './providers/review'
 import { ArgsCap } from './providers/args'
 import { SpawnCap } from './providers/spawn-cap'
 import { AttachCap } from './providers/attach-cap'
@@ -14,13 +13,8 @@ import { loadExo } from './exo'
 /**
  * exoagentd — runtime daemon.
  *
- * Owns shared infrastructure (storage, secrets, forgejo) and manages
+ * Owns shared infrastructure (storage, secrets) and manages
  * agent processes via dtach (terminal session manager).
- *
- * Each agent runs in a dtach session with a unix socket at:
- *   .exoagent/agents/<id>.sock
- *
- * Attach with: dtach -a .exoagent/agents/<id>.sock
  */
 
 export interface DaemonConfig {
@@ -33,20 +27,17 @@ export class Daemon {
   readonly dataDir: string
   readonly storage: StorageCap
   readonly secrets: Secrets
-  readonly forgejo: ForgejoServer
 
   private constructor(
     repoDir: string,
     dataDir: string,
     storage: StorageCap,
     secrets: Secrets,
-    forgejo: ForgejoServer,
   ) {
     this.repoDir = repoDir
     this.dataDir = dataDir
     this.storage = storage
     this.secrets = secrets
-    this.forgejo = forgejo
   }
 
   static async start(config: DaemonConfig): Promise<Daemon> {
@@ -58,13 +49,7 @@ export class Daemon {
     const storage = new StorageCap(join(dataDir, 'storage.db'))
     const secrets = new Secrets(join(dataDir, 'secrets.db'))
 
-    const forgejo = ForgejoServer.create({
-      repoDir,
-      dataDir: join(dataDir, 'forgejo'),
-      nix: { forgejo: process.env.EXOAGENT_NIX_FORGEJO!, git: process.env.EXOAGENT_NIX_GIT! },
-    })
-
-    return new Daemon(repoDir, dataDir, storage, secrets, forgejo)
+    return new Daemon(repoDir, dataDir, storage, secrets)
   }
 
   /** Spawn an agent in a dtach session */
@@ -79,7 +64,6 @@ export class Daemon {
     const dtach = join(process.env.EXOAGENT_NIX_DTACH!, 'bin', 'dtach')
     const agentScript = join(import.meta.dirname!, 'start-agent.ts')
 
-    // dtach -n creates a new session without attaching
     const proc = spawn(dtach, ['-n', sockPath, 'npx', 'tsx', agentScript], {
       cwd: this.repoDir,
       stdio: 'ignore',
@@ -93,7 +77,6 @@ export class Daemon {
     })
     proc.unref()
 
-    // Store PID for kill
     const pidPath = join(agentsDir, `${agentId}.pid`)
     writeFileSync(pidPath, String(proc.pid))
 
@@ -113,7 +96,6 @@ export class Daemon {
       throw new Error(`Agent "${agentId}" not found (no socket at ${sockPath})`)
 
     const dtach = join(process.env.EXOAGENT_NIX_DTACH!, 'bin', 'dtach')
-    // execFileSync replaces the process — dtach takes over the terminal
     execFileSync(dtach, ['-a', sockPath], { stdio: 'inherit' })
   }
 
@@ -133,15 +115,12 @@ export class Daemon {
     const pidPath = join(agentsDir, `${agentId}.pid`)
     const sockPath = join(agentsDir, `${agentId}.sock`)
 
-    // Kill the process group
     try {
       const pid = parseInt(readFileSync(pidPath, 'utf-8').trim())
       if (pid)
-        process.kill(-pid, 'SIGTERM') // negative PID = process group
+        process.kill(-pid, 'SIGTERM')
     }
-    catch {
-      // PID file missing or process already dead
-    }
+    catch {}
 
     try { unlinkSync(pidPath) } catch {}
     try { unlinkSync(sockPath) } catch {}
@@ -152,36 +131,26 @@ export class Daemon {
     const exoPath = join(import.meta.dirname!, 'exos', `${name}.ts`)
     const source = readFileSync(exoPath, 'utf-8')
 
-    // Strip TypeScript types for exoeval — keep ESM structure intact
     const { transformSync } = await import('esbuild')
     const { code: stripped } = transformSync(source, { loader: 'ts', format: 'esm' })
-    // esbuild wraps default export as `var stdin_default = ...; export { stdin_default as default }`
-    // Convert back to `export default` for exoeval
     const code = stripped
       .replace(/^var (\w+) = /, 'export default ')
       .replace(/\nexport \{[\s\S]*\};\s*$/, '\n')
 
     const exo = await loadExo(name, code)
 
-    // Build caps available to the exo
     const caps = {
       spawn: new SpawnCap((id: string) => this.spawn(id)),
       args: new ArgsCap(exoArgs),
       attach: new AttachCap((id: string) => this.attach(id)),
       storage: this.storage,
-      forgejo: this.forgejo,
     }
 
     return exo.run(caps)
   }
 
   async stop(): Promise<void> {
-    // Kill all agents
     for (const id of this.list())
       this.kill(id)
-    await this.forgejo.stop()
-    ForgejoServer.reset()
   }
 }
-
-

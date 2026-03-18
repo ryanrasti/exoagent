@@ -1,18 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Daemon } from './daemon'
-import { ForgejoServer } from './providers/review'
 import { execFileSync } from 'node:child_process'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-function nixGit() {
-  const git = process.env.EXOAGENT_NIX_GIT
-  if (!git) throw new Error('Missing EXOAGENT_NIX_GIT')
-  return join(git, 'bin', 'git')
-}
-
-const GIT = nixGit()
+const GIT = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
 
 describe('Daemon', () => {
   let daemon: Daemon
@@ -29,13 +22,11 @@ describe('Daemon', () => {
     execFileSync(GIT, ['add', '.'], { cwd: repoDir })
     execFileSync(GIT, ['-c', 'user.name=test', '-c', 'user.email=t@t', 'commit', '-m', 'init'], { cwd: repoDir })
 
-    ForgejoServer.reset()
     daemon = await Daemon.start({ repoDir })
   }, 30000)
 
   afterAll(async () => {
     await daemon.stop()
-    ForgejoServer.reset()
     const { rm } = await import('node:fs/promises')
     await rm(root, { recursive: true, force: true })
   })
@@ -43,7 +34,6 @@ describe('Daemon', () => {
   it('exposes shared caps', () => {
     expect(daemon.storage).toBeDefined()
     expect(daemon.secrets).toBeDefined()
-    expect(daemon.forgejo).toBeDefined()
   })
 
   it('starts with no agents', () => {
@@ -64,10 +54,4 @@ describe('Daemon', () => {
     daemon.kill('test-agent')
     expect(daemon.list()).not.toContain('test-agent')
   })
-
-  it('forgejo starts lazily', async () => {
-    const { url } = await daemon.forgejo.ensureRunning()
-    const resp = await fetch(`${url}/api/v1/version`)
-    expect(resp.ok).toBe(true)
-  }, 30000)
 })

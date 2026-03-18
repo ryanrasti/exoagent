@@ -1,3 +1,5 @@
+import type { ArgsCap } from '../providers/args'
+import type { AttachCap } from '../providers/attach-cap'
 /**
  * Spawn exo — creates a coding agent and optionally attaches.
  *
@@ -6,8 +8,6 @@
  *   --no-attach     Don't attach after spawning
  */
 import type { SpawnCap } from '../providers/spawn-cap'
-import type { ArgsCap } from '../providers/args'
-import type { AttachCap } from '../providers/attach-cap'
 
 export default async ({ spawn, args, attach }: {
   spawn: SpawnCap

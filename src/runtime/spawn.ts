@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 import { SandboxCap, nixPathsFromEnv } from './providers/sandbox'
 import { StorageCap } from './providers/storage'
-import { ForgejoServer, ReviewCap } from './providers/review'
+import { ReviewCap } from './providers/review'
 import { PiCap } from './providers/pi'
 import { generateCapDts } from './dts'
 
@@ -13,22 +13,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
  * Spawn a coding agent — wires sandbox + review + pi together.
- *
- * This is the "coding agent" composition: given shared infra (storage,
- * forgejo), creates a sandboxed pi session with review capabilities.
  */
 
 export interface SpawnConfig {
-  /** Agent session ID */
   id: string
-  /** Path to the main project repo */
   repoDir: string
-  /** Base data directory (e.g. .exoagent) */
   dataDir: string
-  /** Shared storage cap */
   storage: StorageCap
-  /** Shared forgejo server */
-  forgejo: ForgejoServer
 }
 
 export interface Agent {
@@ -39,7 +30,7 @@ export interface Agent {
 }
 
 export async function spawnAgent(config: SpawnConfig): Promise<Agent> {
-  const { id, repoDir, dataDir, storage, forgejo } = config
+  const { id, repoDir, dataDir, storage } = config
   const nix = nixPathsFromEnv()
   const gitPath = process.env.EXOAGENT_NIX_GIT!
   const git = join(gitPath, 'bin', 'git')
@@ -66,9 +57,8 @@ export async function spawnAgent(config: SpawnConfig): Promise<Agent> {
     workspace: cloneDir,
   })
 
-  // Review cap
+  // Review cap (GitHub-based)
   const review = new ReviewCap({
-    server: forgejo,
     cloneDir,
     git: gitPath,
   })

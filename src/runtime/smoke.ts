@@ -13,7 +13,6 @@ async function main() {
     repoDir,
     dataDir: daemon.dataDir,
     storage: daemon.storage,
-    forgejo: daemon.forgejo,
   })
   console.log('Agent spawned:', agent.id)
 
@@ -27,7 +26,6 @@ async function main() {
   }
   catch (err: any) {
     console.error('Error:', err.message)
-    console.error('Stack:', err.stack?.split('\n').slice(0, 5).join('\n'))
   }
 
   agent.pi.dispose()
