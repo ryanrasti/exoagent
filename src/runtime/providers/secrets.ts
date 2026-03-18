@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
+import { chmodSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const DB_FILE = 'secrets.db'
@@ -18,8 +18,11 @@ export class Secrets {
 
   private ensure(): Database.Database {
     if (this.db) return this.db
-    mkdirSync(this.root, { recursive: true })
-    this.db = new Database(resolve(this.root, DB_FILE))
+    mkdirSync(this.root, { recursive: true, mode: 0o700 })
+    const dbPath = resolve(this.root, DB_FILE)
+    this.db = new Database(dbPath)
+    // Ensure owner-only access (SQLite creates with umask default, usually 0644)
+    chmodSync(dbPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS secrets (
