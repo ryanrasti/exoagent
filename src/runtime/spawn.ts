@@ -32,6 +32,13 @@ Important:
 - The PR URL is a real GitHub URL — tell the user so they can review in their browser
 - You can open multiple PRs for different changes (use different branch names)
 - After calling waitForReview, it will block until the user submits a review on GitHub
+- Branch names are auto-prefixed with \`exoagent-<agent>/\` — just use descriptive names
+
+Responding to feedback:
+- Use \`review.replyToComment({ pr, commentId, body })\` to reply to specific review comments
+- Use \`review.commentOnPR({ pr, body })\` to post general comments on the PR
+- waitForReview returns both formal review comments AND PR-level conversation comments
+- Always acknowledge feedback before pushing new changes
 `.trim()
 
 /**
@@ -93,11 +100,24 @@ export async function spawnAgent(config: SpawnConfig): Promise<Agent> {
     workspace: cloneDir,
   })
 
+  // Resolve the real remote URL from the main repo for fully-qualified push
+  let pushRemoteUrl: string | undefined
+  try {
+    pushRemoteUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
+      cwd: repoDir, encoding: 'utf-8',
+    }).trim()
+  }
+  catch {
+    // No remote — review cap will auto-detect from clone
+  }
+
   // Review cap (GitHub-based)
   const review = new ReviewCap({
     cloneDir,
     git: gitPath,
     secrets: config.secrets,
+    agentName: id,
+    pushRemoteUrl,
   })
 
   // Generate types for caps

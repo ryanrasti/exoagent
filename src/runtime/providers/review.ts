@@ -10,10 +10,25 @@ import { z } from 'zod'
  * Auth via GITHUB_TOKEN env var or `gh auth token`.
  */
 
+export interface ReviewComment {
+  id: number
+  path: string
+  body: string
+  diffHunk: string
+}
+
+export interface PRComment {
+  id: number
+  body: string
+  user: string
+  createdAt: string
+}
+
 export interface ReviewResult {
   approved: boolean
   body: string
-  comments: Array<{ path: string, body: string, diffHunk: string }>
+  comments: ReviewComment[]
+  issueComments: PRComment[]
   pr: number
   url: string
 }
@@ -33,6 +48,10 @@ export interface ReviewCapConfig {
   baseBranch?: string
   /** Poll interval in ms. Default: 5000 */
   pollInterval?: number
+  /** Agent name for branch prefixing. Default: "default" */
+  agentName?: string
+  /** Fully qualified SSH remote URL for push (e.g. ssh://git@github.com/user/repo.git). Auto-detected if not provided. */
+  pushRemoteUrl?: string
 }
 
 export class ReviewCap {
@@ -108,6 +127,27 @@ export class ReviewCap {
     throw new Error('No GitHub token. Set GITHUB_TOKEN env var or run `gh auth login`.')
   }
 
+  /** Get fully qualified SSH remote URL for push */
+  private getPushRemoteUrl(): string {
+    if (this.config.pushRemoteUrl)
+      return this.config.pushRemoteUrl
+
+    const git = join(this.config.git, 'bin', 'git')
+    const url = execFileSync(git, ['remote', 'get-url', 'origin'], {
+      cwd: this.config.cloneDir,
+      encoding: 'utf-8',
+    }).trim()
+
+    // Normalize to ssh:// form
+    // git@github.com:owner/repo.git → ssh://git@github.com/owner/repo.git
+    const sshColonMatch = url.match(/^git@([^:]+):(.+)$/)
+    if (sshColonMatch)
+      return `ssh://git@${sshColonMatch[1]}/${sshColonMatch[2]}`
+
+    // Already ssh:// or https:// — return as-is
+    return url
+  }
+
   /** Ensure origin has authenticated push URL */
   private ensureAuth(): void {
     if (this.remoteSet)
@@ -117,19 +157,24 @@ export class ReviewCap {
     const repo = this.getRepo()
     const token = this.getToken()
 
-    // Set origin push URL to authenticated version
-    const pushUrl = `https://x-access-token:${token}@github.com/${repo}.git`
+    // Set origin push URL to authenticated HTTPS version
+    const pushUrl = `https://x-access-token:${encodeURIComponent(token)}@github.com/${repo}.git`
     execFileSync(git, ['remote', 'set-url', '--push', 'origin', pushUrl], { cwd: this.config.cloneDir })
 
     this.remoteSet = true
   }
 
-  /**
-   * Push a branch to GitHub and open/update a PR.
-   * Returns immediately with the PR URL.
-   */
+  /** Prefix branch name with agent namespace */
+  private qualifyBranch(branch: string): string {
+    const agentName = this.config.agentName ?? 'default'
+    const prefix = `exoagent-${agentName}/`
+    if (branch.startsWith(prefix))
+      return branch
+    return `${prefix}${branch}`
+  }
+
   @tool(z.object({
-    branch: z.string().describe('Branch name to propose (must exist with commits)'),
+    branch: z.string().describe('Branch name to propose (must exist with commits). Will be auto-prefixed with exoagent-<agent>/'),
     title: z.string().describe('PR title'),
     body: z.string().optional().describe('PR description'),
   }))
@@ -139,6 +184,7 @@ export class ReviewCap {
     const repo = this.getRepo()
     const token = this.getToken()
     const base = this.config.baseBranch ?? 'main'
+    const remoteBranch = this.qualifyBranch(branch)
 
     // Get HEAD sha
     const sha = execFileSync(git, ['rev-parse', branch], {
@@ -146,29 +192,32 @@ export class ReviewCap {
       encoding: 'utf-8',
     }).trim()
 
-    // Push to GitHub
-    execFileSync(git, ['push', 'origin', `${branch}:${branch}`], {
+    // Push using fully qualified remote URL (in case agent changed remotes)
+    const pushUrl = this.getPushRemoteUrl()
+    execFileSync(git, ['push', pushUrl, `${branch}:${remoteBranch}`, '--force'], {
       cwd: this.config.cloneDir,
       timeout: 30000,
       stdio: 'ignore',
     })
 
     // Check for existing open PR for this branch
+    const owner = repo.split('/')[0]
+    const searchParams = new URLSearchParams({ state: 'open', head: `${owner}:${remoteBranch}` })
     const existing = await ghApi<any[]>(token, 'GET',
-      `/repos/${repo}/pulls?state=open&head=${repo.split('/')[0]}:${branch}`)
+      `/repos/${encodeURI(repo)}/pulls?${searchParams}`)
 
     let prNumber: number
     let prUrl: string
     if (existing.length > 0) {
       prNumber = existing[0].number
       prUrl = existing[0].html_url
-      await ghApi(token, 'PATCH', `/repos/${repo}/pulls/${prNumber}`, { title, body: body ?? '' })
+      await ghApi(token, 'PATCH', `/repos/${encodeURI(repo)}/pulls/${prNumber}`, { title, body: body ?? '' })
     }
     else {
-      const pr = await ghApi<any>(token, 'POST', `/repos/${repo}/pulls`, {
+      const pr = await ghApi<any>(token, 'POST', `/repos/${encodeURI(repo)}/pulls`, {
         title,
         body: body ?? '',
-        head: branch,
+        head: remoteBranch,
         base,
       })
       prNumber = pr.number
@@ -188,15 +237,31 @@ export class ReviewCap {
   }))
   async waitForReview({ pr, sha }: { pr: number, sha: string }): Promise<ReviewResult> {
     const repo = this.getRepo()
+    const repoPath = encodeURI(repo)
     const token = this.getToken()
     const git = join(this.config.git, 'bin', 'git')
     const interval = this.config.pollInterval ?? 5000
 
+    // Track what we've already seen so we only return new activity
+    const seenReviewIds = new Set<number>()
+    const seenCommentIds = new Set<number>()
+
+    // Seed with existing reviews/comments so we only surface new ones
+    const initialReviews = await ghApi<any[]>(token, 'GET', `/repos/${repoPath}/pulls/${pr}/reviews`)
+    for (const r of initialReviews)
+      seenReviewIds.add(r.id)
+
+    const initialComments = await ghApi<any[]>(token, 'GET', `/repos/${repoPath}/issues/${pr}/comments`)
+    for (const c of initialComments)
+      seenCommentIds.add(c.id)
+
     while (true) {
-      const reviews = await ghApi<any[]>(token, 'GET',
-        `/repos/${repo}/pulls/${pr}/reviews`)
+      // Check formal reviews
+      const reviews = await ghApi<any[]>(token, 'GET', `/repos/${repoPath}/pulls/${pr}/reviews`)
 
       for (const review of reviews) {
+        if (seenReviewIds.has(review.id))
+          continue
         if (review.state === 'PENDING')
           continue
 
@@ -211,45 +276,118 @@ export class ReviewCap {
             })
           }
           catch {
+            seenReviewIds.add(review.id)
             continue // review on older commit
           }
         }
 
         // Fetch review comments
-        const comments: ReviewResult['comments'] = []
+        const comments: ReviewComment[] = []
         const reviewComments = await ghApi<any[]>(token, 'GET',
-          `/repos/${repo}/pulls/${pr}/reviews/${review.id}/comments`)
+          `/repos/${repoPath}/pulls/${pr}/reviews/${review.id}/comments`)
         for (const c of reviewComments) {
           comments.push({
+            id: c.id,
             path: c.path ?? '',
             body: c.body ?? '',
             diffHunk: c.diff_hunk ?? '',
           })
         }
 
+        // Also fetch any new issue comments (PR-level conversation)
+        const issueComments = await this.fetchNewIssueComments(pr, seenCommentIds)
+
         return {
           approved: review.state === 'APPROVED',
           body: review.body ?? '',
           comments,
+          issueComments,
           pr,
-          url: `https://github.com/${repo}/pull/${pr}`,
+          url: `https://github.com/${encodeURI(repo)}/pull/${pr}`,
+        }
+      }
+
+      // Even without a formal review, check for new PR-level comments
+      const newIssueComments = await this.fetchNewIssueComments(pr, seenCommentIds)
+      if (newIssueComments.length > 0) {
+        return {
+          approved: false,
+          body: '',
+          comments: [],
+          issueComments: newIssueComments,
+          pr,
+          url: `https://github.com/${encodeURI(repo)}/pull/${pr}`,
         }
       }
 
       // Check if PR was closed/merged
-      const prData = await ghApi<any>(token, 'GET', `/repos/${repo}/pulls/${pr}`)
+      const prData = await ghApi<any>(token, 'GET', `/repos/${repoPath}/pulls/${pr}`)
       if (prData.state === 'closed')
-        return { approved: false, body: 'PR was closed', comments: [], pr, url: prData.html_url }
+        return { approved: false, body: 'PR was closed', comments: [], issueComments: [], pr, url: prData.html_url }
 
       await sleep(interval)
     }
+  }
+
+  /** Fetch issue comments newer than what we've seen */
+  private async fetchNewIssueComments(pr: number, seenIds: Set<number>): Promise<PRComment[]> {
+    const repo = this.getRepo()
+    const token = this.getToken()
+    const allComments = await ghApi<any[]>(token, 'GET', `/repos/${encodeURI(repo)}/issues/${pr}/comments`)
+
+    const newComments: PRComment[] = []
+    for (const c of allComments) {
+      if (seenIds.has(c.id))
+        continue
+      seenIds.add(c.id)
+      newComments.push({
+        id: c.id,
+        body: c.body ?? '',
+        user: c.user?.login ?? '',
+        createdAt: c.created_at ?? '',
+      })
+    }
+    return newComments
+  }
+
+  /**
+   * Reply to a specific review comment on a PR.
+   */
+  @tool(z.object({
+    pr: z.number().describe('PR number'),
+    commentId: z.number().describe('Review comment ID to reply to'),
+    body: z.string().describe('Reply text'),
+  }))
+  async replyToComment({ pr, commentId, body }: { pr: number, commentId: number, body: string }): Promise<{ id: number }> {
+    const repo = this.getRepo()
+    const token = this.getToken()
+    const result = await ghApi<any>(token, 'POST',
+      `/repos/${encodeURI(repo)}/pulls/${pr}/comments/${commentId}/replies`,
+      { body })
+    return { id: result.id }
+  }
+
+  /**
+   * Post a general comment on a PR (issue-level comment).
+   */
+  @tool(z.object({
+    pr: z.number().describe('PR number'),
+    body: z.string().describe('Comment text'),
+  }))
+  async commentOnPR({ pr, body }: { pr: number, body: string }): Promise<{ id: number }> {
+    const repo = this.getRepo()
+    const token = this.getToken()
+    const result = await ghApi<any>(token, 'POST',
+      `/repos/${encodeURI(repo)}/issues/${pr}/comments`,
+      { body })
+    return { id: result.id }
   }
 
   /** List open PRs on the repo */
   async listOpenPRs(): Promise<Array<{ number: number, title: string, branch: string, url: string }>> {
     const repo = this.getRepo()
     const token = this.getToken()
-    const prs = await ghApi<any[]>(token, 'GET', `/repos/${repo}/pulls?state=open`)
+    const prs = await ghApi<any[]>(token, 'GET', `/repos/${encodeURI(repo)}/pulls?state=open`)
     return prs.map((pr: any) => ({
       number: pr.number,
       title: pr.title,
