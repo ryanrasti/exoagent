@@ -10,21 +10,25 @@ const DB_FILE = 'secrets.db'
  */
 export class Secrets {
   private readonly root: string
-  private db: Database.Database | null = null
+  private readonly db: Database.Database
 
-  constructor(root: string) {
-    this.root = resolve(root)
+  private constructor(root: string, db: Database.Database) {
+    this.root = root
+    this.db = db
   }
 
-  private ensure(): Database.Database {
-    if (this.db) return this.db
-    mkdirSync(this.root, { recursive: true, mode: 0o700 })
-    const dbPath = resolve(this.root, DB_FILE)
-    this.db = new Database(dbPath)
-    // Ensure owner-only access (SQLite creates with umask default, usually 0644)
+  /**
+   * Create a Secrets store backed by a SQLite DB in the given directory.
+   * Initializes the directory (mode 0700) and DB schema on first call.
+   */
+  static create(root: string): Secrets {
+    const resolvedRoot = resolve(root)
+    mkdirSync(resolvedRoot, { recursive: true, mode: 0o700 })
+    const dbPath = resolve(resolvedRoot, DB_FILE)
+    const db = new Database(dbPath)
     chmodSync(dbPath, 0o600)
-    this.db.pragma('journal_mode = WAL')
-    this.db.exec(`
+    db.pragma('journal_mode = WAL')
+    db.exec(`
       CREATE TABLE IF NOT EXISTS secrets (
         provider TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -32,27 +36,23 @@ export class Secrets {
         PRIMARY KEY (provider, name)
       )
     `)
-    return this.db
+    return new Secrets(resolvedRoot, db)
   }
 
   get(provider: string, name: string): string | null {
-    const db = this.ensure()
-    const row = db.prepare('SELECT value FROM secrets WHERE provider = ? AND name = ?').get(provider, name) as { value: string } | undefined
+    const row = this.db.prepare('SELECT value FROM secrets WHERE provider = ? AND name = ?').get(provider, name) as { value: string } | undefined
     return row?.value ?? null
   }
 
   set(provider: string, name: string, value: string): void {
-    const db = this.ensure()
-    db.prepare('INSERT OR REPLACE INTO secrets (provider, name, value) VALUES (?, ?, ?)').run(provider, name, value)
+    this.db.prepare('INSERT OR REPLACE INTO secrets (provider, name, value) VALUES (?, ?, ?)').run(provider, name, value)
   }
 
   delete(provider: string, name: string): void {
-    const db = this.ensure()
-    db.prepare('DELETE FROM secrets WHERE provider = ? AND name = ?').run(provider, name)
+    this.db.prepare('DELETE FROM secrets WHERE provider = ? AND name = ?').run(provider, name)
   }
 
   close(): void {
-    this.db?.close()
-    this.db = null
+    this.db.close()
   }
 }

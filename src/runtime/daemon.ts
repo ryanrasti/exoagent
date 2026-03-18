@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { StorageCap } from './providers/storage'
 import { Secrets } from './providers/secrets'
 import { ArgsCap } from './providers/args'
-import { SpawnCap } from './providers/spawn-cap'
-import { AttachCap } from './providers/attach-cap'
+import { tool } from '../exoeval/tool'
+import { z } from 'zod'
 import { loadExo } from './exo'
 
 /**
@@ -20,6 +20,40 @@ import { loadExo } from './exo'
 export interface DaemonConfig {
   repoDir: string
   dataDir?: string
+}
+
+/**
+ * Spawn cap — creates agent sessions in dtach.
+ * Defined inline per convention (no separate wrapper file).
+ */
+class SpawnCap {
+  private doSpawn: (id: string) => Promise<string>
+
+  constructor(spawnFn: (id: string) => Promise<string>) {
+    this.doSpawn = spawnFn
+  }
+
+  @tool(z.object({ id: z.string() }))
+  async create({ id }: { id: string }): Promise<string> {
+    return this.doSpawn(id)
+  }
+}
+
+/**
+ * Attach cap — attaches the current terminal to an agent's dtach session.
+ * Defined inline per convention (no separate wrapper file).
+ */
+class AttachCap {
+  private doAttach: (id: string) => void
+
+  constructor(attachFn: (id: string) => void) {
+    this.doAttach = attachFn
+  }
+
+  @tool(z.object({ id: z.string() }))
+  async connect({ id }: { id: string }): Promise<void> {
+    this.doAttach(id)
+  }
 }
 
 export class Daemon {
@@ -46,8 +80,8 @@ export class Daemon {
 
     await mkdir(dataDir, { recursive: true })
 
-    const storage = new StorageCap(join(dataDir, 'storage.db'))
-    const secrets = new Secrets(join(dataDir, 'secrets.db'))
+    const storage = StorageCap.create(join(dataDir, 'storage'))
+    const secrets = Secrets.create(join(dataDir, 'secrets'))
 
     return new Daemon(repoDir, dataDir, storage, secrets)
   }
@@ -58,8 +92,9 @@ export class Daemon {
     await mkdir(agentsDir, { recursive: true })
 
     const sockPath = join(agentsDir, `${agentId}.sock`)
-    if (existsSync(sockPath))
+    if (existsSync(sockPath)) {
       throw new Error(`Agent "${agentId}" already running (socket exists: ${sockPath})`)
+    }
 
     const dtach = join(process.env.EXOAGENT_NIX_DTACH!, 'bin', 'dtach')
     const agentScript = join(import.meta.dirname!, 'start-agent.ts')
@@ -82,8 +117,9 @@ export class Daemon {
 
     // Wait for socket to appear
     for (let i = 0; i < 50; i++) {
-      if (existsSync(sockPath))
+      if (existsSync(sockPath)) {
         return agentId
+      }
       await new Promise(r => setTimeout(r, 100))
     }
     throw new Error(`Agent "${agentId}" failed to start (socket not created)`)
@@ -92,8 +128,9 @@ export class Daemon {
   /** Attach to an agent — replaces current process with dtach */
   attach(agentId: string): void {
     const sockPath = join(this.dataDir, 'agents', `${agentId}.sock`)
-    if (!existsSync(sockPath))
+    if (!existsSync(sockPath)) {
       throw new Error(`Agent "${agentId}" not found (no socket at ${sockPath})`)
+    }
 
     const dtach = join(process.env.EXOAGENT_NIX_DTACH!, 'bin', 'dtach')
     execFileSync(dtach, ['-a', sockPath], { stdio: 'inherit' })
@@ -102,8 +139,9 @@ export class Daemon {
   /** List running agents (by socket files) */
   list(): string[] {
     const agentsDir = join(this.dataDir, 'agents')
-    if (!existsSync(agentsDir))
+    if (!existsSync(agentsDir)) {
       return []
+    }
     return readdirSync(agentsDir)
       .filter(f => f.endsWith('.sock'))
       .map(f => f.replace('.sock', ''))
@@ -117,8 +155,9 @@ export class Daemon {
 
     try {
       const pid = parseInt(readFileSync(pidPath, 'utf-8').trim())
-      if (pid)
+      if (pid) {
         process.kill(-pid, 'SIGTERM')
+      }
     }
     catch {}
 
@@ -150,7 +189,8 @@ export class Daemon {
   }
 
   async stop(): Promise<void> {
-    for (const id of this.list())
+    for (const id of this.list()) {
       this.kill(id)
+    }
   }
 }

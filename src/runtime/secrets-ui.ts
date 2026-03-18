@@ -33,7 +33,7 @@ export const PROVIDER_SECRETS: ProviderSecrets[] = [
  */
 export async function runSecretsUI(dataDir: string): Promise<void> {
   mkdirSync(dataDir, { recursive: true })
-  const db = new Secrets(join(dataDir, 'secrets.db'))
+  const db = Secrets.create(join(dataDir, 'secrets'))
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal, true)
 
@@ -76,13 +76,16 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
     // -- Views ---------------------------------------------------------------
 
     const showProviders = () => {
-      for (const c of [...tui.children]) tui.removeChild(c)
+      for (const c of [...tui.children]) {
+        tui.removeChild(c)
+      }
       tui.addChild(header)
       const list = new SelectList(buildProviderItems(), 15, theme)
       list.onSelect = (item) => {
         selectedProvider = PROVIDER_SECRETS.find(p => p.provider === item.value) ?? null
-        if (selectedProvider)
+        if (selectedProvider) {
           showSecrets(selectedProvider)
+        }
       }
       list.onCancel = done
       tui.addChild(list)
@@ -90,7 +93,9 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
     }
 
     const showSecrets = (provider: ProviderSecrets) => {
-      for (const c of [...tui.children]) tui.removeChild(c)
+      for (const c of [...tui.children]) {
+        tui.removeChild(c)
+      }
       const secretHeader: Component = {
         render: () => ['', `\x1b[1mSecrets\x1b[0m — ${provider.provider} (Enter to set, Esc to go back, Del to clear)`, ''],
         invalidate: () => {},
@@ -99,8 +104,9 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
       const list = new SelectList(buildSecretItems(provider), 15, theme)
       list.onSelect = (item) => {
         selectedSecret = provider.secrets.find(s => s.name === item.value) ?? null
-        if (selectedSecret)
+        if (selectedSecret) {
           showInput(provider, selectedSecret)
+        }
       }
       list.onCancel = showProviders
       tui.addChild(list)
@@ -108,7 +114,9 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
     }
 
     const showInput = (provider: ProviderSecrets, secret: SecretDecl) => {
-      for (const c of [...tui.children]) tui.removeChild(c)
+      for (const c of [...tui.children]) {
+        tui.removeChild(c)
+      }
       const inputHeader: Component = {
         render: () => [
           '',
@@ -123,10 +131,12 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
       const input = new Input()
       input.setValue(db.get(provider.provider, secret.name) ?? '')
       input.onSubmit = (value) => {
-        if (value.trim())
+        if (value.trim()) {
           db.set(provider.provider, secret.name, value.trim())
-        else
+        }
+        else {
           db.delete(provider.provider, secret.name)
+        }
         showSecrets(provider)
       }
       input.onEscape = () => showSecrets(provider)

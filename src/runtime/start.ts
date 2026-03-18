@@ -29,18 +29,39 @@ async function main() {
   let i = 0
   while (i < rawArgs.length) {
     const arg = rawArgs[i]
-    if (arg === '--secrets') { command = 'secrets' }
-    else if (arg === '--run') { command = 'run'; target = rawArgs[++i]; i++; break }
-    else if (arg === '--attach') { command = 'attach'; target = rawArgs[++i] }
-    else if (arg === '--list') { command = 'list' }
-    else if (arg === '--kill') { command = 'kill'; target = rawArgs[++i] }
-    else if (arg === '--') { i++; break }
-    else if (!arg.startsWith('-')) { repoDir = arg }
+    if (arg === '--secrets') {
+      command = 'secrets'
+    }
+    else if (arg === '--run') {
+      command = 'run'
+      target = rawArgs[++i]
+      i++
+      break
+    }
+    else if (arg === '--attach') {
+      command = 'attach'
+      target = rawArgs[++i]
+    }
+    else if (arg === '--list') {
+      command = 'list'
+    }
+    else if (arg === '--kill') {
+      command = 'kill'
+      target = rawArgs[++i]
+    }
+    else if (arg === '--') {
+      i++
+      break
+    }
+    else if (!arg.startsWith('-')) {
+      repoDir = arg
+    }
     i++
   }
   // Everything after --run <exo> or -- goes to the exo
-  while (i < rawArgs.length)
+  while (i < rawArgs.length) {
     exoArgs.push(rawArgs[i++])
+  }
 
   repoDir = resolve(repoDir)
 
@@ -60,10 +81,12 @@ async function main() {
 
   if (command === 'list') {
     const agents = daemon.list()
-    if (agents.length === 0)
+    if (agents.length === 0) {
       console.log('No agents running.')
-    else
+    }
+    else {
       agents.forEach(a => console.log(a))
+    }
     return
   }
 

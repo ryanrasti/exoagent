@@ -1,6 +1,10 @@
 import type { SandboxCap } from './sandbox'
+import type { StorageCap } from './storage'
+import type { Secrets } from './secrets'
+import type { ReviewCap } from './review'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import {
   AgentSession,
   type AgentSessionEvent,
@@ -9,6 +13,7 @@ import {
   createBashTool,
   createEditTool,
   type EditOperations,
+  type ExtensionFactory,
   createReadTool,
   type ReadOperations,
   createWriteTool,
@@ -34,8 +39,8 @@ import { homedir } from 'node:os'
  * - Background: pi.prompt("do something") → returns text
  * - Interactive: pi.session exposes the AgentSession for TUI attach
  *
- * Tools are scoped to the sandbox workspace. Everything else (model,
- * sessions, settings, extensions) works like normal pi.
+ * Tools are scoped to the sandbox workspace. Extensions, skills, prompts,
+ * and themes are disabled by default (locked down).
  */
 
 /** Default pi agent dir (~/.pi/agent) */
@@ -49,12 +54,12 @@ export interface PiCapConfig {
   caps?: Record<string, object>
   /** Additional system prompt text */
   systemPrompt?: string
-  /** Pre-generated .d.ts for caps (skips auto-generation from @tool metadata) */
-  capsDts?: string
+  /** Pre-generated .d.ts for caps (required when caps are provided) */
+  capsDts: string
   /** Model override. Default: from settings/auth (normal pi behavior) */
   model?: Model<any>
-  /** Resource loader override (for testing with mock providers, etc.) */
-  resourceLoader?: InstanceType<typeof DefaultResourceLoader>
+  /** Extension factories for provider registration (e.g. mock providers in tests) */
+  extensionFactories?: ExtensionFactory[]
   /** Model registry override */
   modelRegistry?: ModelRegistry
   /** Settings manager override. Default: disk-backed (normal pi behavior) */
@@ -65,10 +70,13 @@ export interface PiCapConfig {
 
 export class PiCap {
   private config: PiCapConfig
-  private _session: AgentSession | null = null
-  private _modelFallbackMessage?: string
+  private session: AgentSession | null = null
+  private modelFallbackMessage?: string
 
   constructor(config: PiCapConfig) {
+    if (config.caps && Object.keys(config.caps).length > 0 && !config.capsDts) {
+      throw new Error('capsDts is required when caps are provided')
+    }
     this.config = config
   }
 
@@ -84,10 +92,12 @@ export class PiCap {
         env?: NodeJS.ProcessEnv
       }) => {
         const result = await sandbox.exec({ command, timeout: options.timeout, env: options.env as Record<string, string>, signal: options.signal })
-        if (result.stdout)
+        if (result.stdout) {
           options.onData(Buffer.from(result.stdout))
-        if (result.stderr)
+        }
+        if (result.stderr) {
           options.onData(Buffer.from(result.stderr))
+        }
         return { exitCode: result.exitCode }
       },
     }
@@ -122,12 +132,11 @@ export class PiCap {
 
   private async buildCodemodeTool(): Promise<ToolDefinition | null> {
     const { caps, capsDts } = this.config
-    if (!caps || Object.keys(caps).length === 0)
+    if (!caps || Object.keys(caps).length === 0) {
       return null
+    }
 
-    const cm = capsDts
-      ? await codemode(caps, capsDts)
-      : await codemode(caps as any)
+    const cm = await codemode(caps, capsDts)
 
     return {
       name: 'codemode',
@@ -149,8 +158,9 @@ export class PiCap {
   // -- Session setup --------------------------------------------------------
 
   private async ensureSession(): Promise<AgentSession> {
-    if (this._session)
-      return this._session
+    if (this.session) {
+      return this.session
+    }
 
     const workspace = this.config.sandbox.workspace
     const agentDir = getAgentDir()
@@ -167,39 +177,43 @@ export class PiCap {
       const defaultModelId = settingsManager.getDefaultModel()
       if (defaultProvider && defaultModelId) {
         const found = modelRegistry.find(defaultProvider, defaultModelId)
-        if (found && await modelRegistry.getApiKey(found))
+        if (found && await modelRegistry.getApiKey(found)) {
           model = found
+        }
       }
       if (!model) {
         for (const m of modelRegistry.getAvailable()) {
-          if (await modelRegistry.getApiKey(m)) { model = m; break }
+          if (await modelRegistry.getApiKey(m)) {
+            model = m
+            break
+          }
         }
       }
     }
-    if (!model)
-      this._modelFallbackMessage = 'No model available. Use /login to authenticate, then /model to select.'
-
-    // Resource loader — loads extensions, skills, prompts, themes from standard locations
-    let resourceLoader = this.config.resourceLoader
-    if (!resourceLoader) {
-      resourceLoader = new DefaultResourceLoader({
-        cwd: workspace,
-        agentDir,
-        settingsManager,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        appendSystemPrompt: this.config.systemPrompt,
-      })
-      await resourceLoader.reload()
+    if (!model) {
+      this.modelFallbackMessage = 'No model available. Use /login to authenticate, then /model to select.'
     }
+
+    // Resource loader — locked down: no extensions, skills, prompts, or themes
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: workspace,
+      agentDir,
+      settingsManager,
+      extensionFactories: this.config.extensionFactories,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      appendSystemPrompt: this.config.systemPrompt,
+    })
+    await resourceLoader.reload()
 
     // Custom tools (codemode for caps)
     const customTools: ToolDefinition[] = []
     const codemodeTool = await this.buildCodemodeTool()
-    if (codemodeTool)
+    if (codemodeTool) {
       customTools.push(codemodeTool)
+    }
 
     // Base tools with scoped operations — only difference from stock pi
     const baseTools: Record<string, any> = {
@@ -226,8 +240,9 @@ export class PiCap {
       getApiKey: async (provider) => {
         const p = provider ?? model!.provider
         const key = await modelRegistry.getApiKeyForProvider(p)
-        if (!key)
+        if (!key) {
           throw new Error(`No API key for "${p}". Run pi /login or set the API key env var.`)
+        }
         return key
       },
     })
@@ -249,7 +264,7 @@ export class PiCap {
       sessionManager.appendThinkingLevelChange(thinkingLevel)
     }
 
-    this._session = new AgentSession({
+    this.session = new AgentSession({
       agent,
       sessionManager,
       settingsManager,
@@ -261,7 +276,7 @@ export class PiCap {
       baseToolsOverride: baseTools,
     })
 
-    return this._session
+    return this.session
   }
 
   // -- Public API -----------------------------------------------------------
@@ -284,8 +299,8 @@ export class PiCap {
   }
 
   /** Access the underlying session (for interactive TUI attach) */
-  get session(): AgentSession | null {
-    return this._session
+  get currentSession(): AgentSession | null {
+    return this.session
   }
 
   /** Initialize session without prompting (for interactive mode) */
@@ -297,7 +312,7 @@ export class PiCap {
   async runInteractive(options?: { initialMessage?: string }): Promise<void> {
     const session = await this.ensureSession()
     const interactive = new InteractiveMode(session, {
-      modelFallbackMessage: this._modelFallbackMessage,
+      modelFallbackMessage: this.modelFallbackMessage,
       initialMessage: options?.initialMessage,
     })
     await interactive.run()
@@ -305,7 +320,131 @@ export class PiCap {
 
   /** Dispose the session */
   dispose(): void {
-    this._session?.dispose()
-    this._session = null
+    this.session?.dispose()
+    this.session = null
   }
+}
+
+// -- Agent spawning (merged from spawn.ts) ----------------------------------
+
+const AGENT_SYSTEM_PROMPT = `
+## Code Review Workflow
+
+You have a \`codemode\` tool with access to a \`review\` API for GitHub PR-based code review.
+
+When asked to make changes that should be reviewed:
+
+1. Create a branch: \`git checkout -b <descriptive-branch-name>\`
+2. Make your changes (edit files, run tests, etc.)
+3. Commit: \`git add -A && git commit -m "<message>"\`
+4. Open a PR: \`review.openPR({ branch: "<branch>", title: "<title>", body: "<description>" })\`
+5. Tell the user the PR URL so they can review it on GitHub
+6. When the user says they've reviewed, check it: \`review.getReviews({ pr: <number> })\`
+7. If approved, you're done. If changes requested, address the feedback, commit, push, and call openPR again.
+
+Important:
+- The PR URL is a real GitHub URL — tell the user so they can review in their browser
+- Do NOT block waiting for reviews — the user will tell you when they've reviewed
+- getReviews returns the latest review + all comments (both inline and general)
+- You can open multiple PRs for different changes (use different branch names)
+- After addressing feedback: commit, then call openPR again to update the PR (it force-pushes)
+- Remote branch names are auto-prefixed with \`exoagent-<agent>/\` — just use descriptive names
+`.trim()
+
+export interface SpawnAgentConfig {
+  id: string
+  repoDir: string
+  dataDir: string
+  storage: StorageCap
+  secrets: Secrets
+}
+
+export interface Agent {
+  readonly id: string
+  readonly pi: PiCap
+  readonly review: ReviewCap
+  readonly cloneDir: string
+}
+
+/**
+ * Spawn a coding agent — wires sandbox + review + pi together.
+ * Creates a local clone, sets up sandbox and review caps, and returns
+ * a fully configured Agent.
+ */
+export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
+  const { id, repoDir, dataDir, storage, secrets } = config
+  const { SandboxCap: SandboxCapImpl, nixPathsFromEnv } = await import('./sandbox')
+  const { ReviewCap: ReviewCapImpl } = await import('./review')
+  const { generateCapDts } = await import('../dts')
+
+  const nix = nixPathsFromEnv()
+  const gitPath = process.env.EXOAGENT_NIX_GIT!
+  const git = join(gitPath, 'bin', 'git')
+
+  // Create local clone
+  const clonesDir = join(dataDir, 'clones')
+  await mkdir(clonesDir, { recursive: true })
+  const cloneDir = join(clonesDir, id)
+  try {
+    execFileSync(git, ['rev-parse', '--git-dir'], { cwd: cloneDir })
+    execFileSync(git, ['fetch', 'origin'], { cwd: cloneDir, timeout: 30000 })
+  }
+  catch {
+    // Clone from local repo (fast, hardlinks objects)
+    execFileSync(git, ['clone', '--local', repoDir, cloneDir])
+
+    // Point origin to the real remote so push/fetch go to GitHub
+    try {
+      const remoteUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
+        cwd: repoDir, encoding: 'utf-8',
+      }).trim()
+      execFileSync(git, ['-C', cloneDir, 'remote', 'set-url', 'origin', remoteUrl])
+    }
+    catch {
+      // Main repo has no remote — keep local origin
+    }
+  }
+  execFileSync(git, ['-C', cloneDir, 'config', 'user.name', 'agent'])
+  execFileSync(git, ['-C', cloneDir, 'config', 'user.email', 'agent@localhost'])
+
+  // Resolve repo from origin
+  const originUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
+    cwd: cloneDir, encoding: 'utf-8',
+  }).trim()
+  const repoMatch = originUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/)
+  if (!repoMatch) {
+    throw new Error(`Cannot parse GitHub repo from origin URL: ${originUrl}`)
+  }
+  const repo = repoMatch[1]
+
+  // Sandbox (workspace = the clone)
+  const sandbox = new SandboxCapImpl({
+    nix,
+    storage,
+    sessionId: id,
+    workspace: cloneDir,
+  })
+
+  // Review cap (GitHub-based, token from secrets)
+  const review = new ReviewCapImpl({
+    cloneDir,
+    git: gitPath,
+    secrets,
+    repo,
+    agentName: id,
+  })
+
+  // Generate types for caps
+  const reviewDts = generateCapDts(join(import.meta.dirname!, 'review.ts'), 'ReviewCap')
+  const capsDts = `declare const review: ${reviewDts}`
+
+  // Pi (coding agent with sandbox + review)
+  const pi = new PiCap({
+    sandbox,
+    caps: { review },
+    capsDts,
+    systemPrompt: AGENT_SYSTEM_PROMPT,
+  })
+
+  return { id, pi, review, cloneDir }
 }

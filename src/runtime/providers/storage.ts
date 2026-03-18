@@ -10,19 +10,24 @@ const DB_FILE = 'storage.db'
 export class StorageCap {
   private readonly root: string
   private readonly provider: string
-  private db: Database.Database | null = null
+  private readonly db: Database.Database
 
-  constructor(root: string, provider = 'default') {
-    this.root = resolve(root)
+  private constructor(root: string, db: Database.Database, provider: string) {
+    this.root = root
+    this.db = db
     this.provider = provider
   }
 
-  private ensure(): Database.Database {
-    if (this.db) return this.db
-    mkdirSync(this.root, { recursive: true })
-    this.db = new Database(resolve(this.root, DB_FILE))
-    this.db.pragma('journal_mode = WAL')
-    this.db.exec(`
+  /**
+   * Create a StorageCap backed by a SQLite DB in the given directory.
+   * Initializes the directory and DB schema on first call.
+   */
+  static create(root: string, provider = 'default'): StorageCap {
+    const resolvedRoot = resolve(root)
+    mkdirSync(resolvedRoot, { recursive: true })
+    const db = new Database(resolve(resolvedRoot, DB_FILE))
+    db.pragma('journal_mode = WAL')
+    db.exec(`
       CREATE TABLE IF NOT EXISTS kv (
         provider TEXT NOT NULL,
         key TEXT NOT NULL,
@@ -30,31 +35,27 @@ export class StorageCap {
         PRIMARY KEY (provider, key)
       )
     `)
-    return this.db
+    return new StorageCap(resolvedRoot, db, provider)
   }
 
   @tool(z.string())
   async get(key: string): Promise<unknown> {
-    const db = this.ensure()
-    const row = db.prepare('SELECT value FROM kv WHERE provider = ? AND key = ?').get(this.provider, key) as { value: string } | undefined
+    const row = this.db.prepare('SELECT value FROM kv WHERE provider = ? AND key = ?').get(this.provider, key) as { value: string } | undefined
     return row ? JSON.parse(row.value) : null
   }
 
   @tool(z.string(), z.any())
   async set(key: string, value: unknown): Promise<void> {
-    const db = this.ensure()
-    db.prepare('INSERT OR REPLACE INTO kv (provider, key, value) VALUES (?, ?, ?)').run(this.provider, key, JSON.stringify(value))
+    this.db.prepare('INSERT OR REPLACE INTO kv (provider, key, value) VALUES (?, ?, ?)').run(this.provider, key, JSON.stringify(value))
   }
 
   @tool(z.string())
   async delete(key: string): Promise<void> {
-    const db = this.ensure()
-    db.prepare('DELETE FROM kv WHERE provider = ? AND key = ?').run(this.provider, key)
+    this.db.prepare('DELETE FROM kv WHERE provider = ? AND key = ?').run(this.provider, key)
   }
 
   close(): void {
-    this.db?.close()
-    this.db = null
+    this.db.close()
   }
 
   @tool(z.string())
