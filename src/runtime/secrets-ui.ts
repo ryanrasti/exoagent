@@ -1,8 +1,6 @@
 import type { Component } from '@mariozechner/pi-tui'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import type { Secrets } from './providers/secrets'
 import { Input, ProcessTerminal, SelectList, TUI } from '@mariozechner/pi-tui'
-import { Secrets } from './providers/secrets'
 
 /**
  * Secret declaration — providers declare what secrets they need.
@@ -31,9 +29,7 @@ export const PROVIDER_SECRETS: ProviderSecrets[] = [
 /**
  * Interactive TUI for managing secrets.
  */
-export async function runSecretsUI(dataDir: string): Promise<void> {
-  mkdirSync(dataDir, { recursive: true })
-  const db = Secrets.create(join(dataDir, 'secrets'))
+export async function runSecretsUI(db: Secrets): Promise<void> {
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal, true)
 

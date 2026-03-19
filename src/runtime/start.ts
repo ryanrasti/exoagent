@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { Daemon } from './daemon'
+import { Secrets } from './providers/secrets'
 import { runSecretsUI } from './secrets-ui'
 
 /**
@@ -72,7 +74,10 @@ async function main() {
   repoDir = resolve(repoDir)
 
   if (command === 'secrets') {
-    await runSecretsUI(join(repoDir, '.exoagent'))
+    const dataDir = join(repoDir, '.exoagent')
+    mkdirSync(dataDir, { recursive: true })
+    const secrets = Secrets.create(join(dataDir, 'secrets'))
+    await runSecretsUI(secrets)
     return
   }
 

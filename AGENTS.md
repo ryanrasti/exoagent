@@ -151,6 +151,21 @@ import { readFile, rm } from 'node:fs/promises'
 const { rm } = await import('node:fs/promises')
 ```
 
+### Instantiate caps once, pass everywhere
+
+Create cap instances at the top level and pass them down. Don't re-instantiate in multiple places.
+
+```typescript
+// Good — instantiated once, passed to both
+const secrets = Secrets.create(dataDir)
+await runSecretsUI(secrets)
+const daemon = new Daemon({ secrets })
+
+// Bad — each caller creates its own instance
+await runSecretsUI(dataDir) // creates Secrets internally
+const daemon = new Daemon({ dataDir }) // creates Secrets internally
+```
+
 ### No separate wrapper files
 
 Don't create a file for a class that just wraps a single function. Inline small cap classes in the file that uses them.
