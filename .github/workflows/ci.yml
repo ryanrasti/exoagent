@@ -14,18 +14,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command bash -c "npm ci && npm run build"
-      - run: nix develop --command bash -c "cd website && npm ci"
-      - run: nix develop --command bash -c "cd examples && npm ci"
-      - run: nix develop --command bash -c "npm run lint && npm run typecheck"
-      - run: nix develop --command bash -c "cd examples && npm run check"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci && npm run build
+      - run: cd website && npm ci
+      - run: cd examples && npm ci
+      - run: npm run lint && npm run typecheck
+      - run: cd examples && npm run check
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command bash -c "npm ci && npm run build && npm run test:ci"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci && npm run build
+      - run: npm run test:ci

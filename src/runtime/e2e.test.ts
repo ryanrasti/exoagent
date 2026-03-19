@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Daemon } from './daemon'
 import { spawnAgent } from './providers/pi'
 
-const GIT = join(JSON.parse(process.env.EXOAGENT_NIX!).git, 'bin', 'git')
+const GIT = 'git'
 
 describe('e2e: spawnAgent', () => {
   let daemon: Daemon

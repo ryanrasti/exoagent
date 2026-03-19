@@ -5,14 +5,14 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ReviewCap } from './review'
 
-const GIT = join(JSON.parse(process.env.EXOAGENT_NIX!).git, 'bin', 'git')
+const GIT = 'git'
 
 function makeReview(opts: { token?: string, agentName?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'review-'))
   execFileSync(GIT, ['init', dir])
   const review = new ReviewCap({
     cloneDir: dir,
-    git: JSON.parse(process.env.EXOAGENT_NIX!).git,
+    git: '/usr',
     token: opts.token ?? 'test-token',
     repo: 'user/repo',
     agentName: opts.agentName,
