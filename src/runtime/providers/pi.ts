@@ -107,7 +107,7 @@ export class PiCap {
 
   /** Read a file via sandbox exec, returns base64-decoded content */
   private async sandboxRead(p: string): Promise<Buffer> {
-    const result = await this.config.sandbox.exec({ command: `base64 ${shq(p)}` })
+    const result = await this.config.sandbox.exec({ command: `cat ${shq(p)} | base64` })
     if (result.exitCode !== 0) {
       throw new Error(`Failed to read ${p}: ${result.stderr}`)
     }
