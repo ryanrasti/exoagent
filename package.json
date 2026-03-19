@@ -49,7 +49,7 @@
     "start": "tsx src/index.ts",
     "test": "vitest --run",
     "test:ci": "vitest --run --exclude '**/*.local.test.ts'",
-    "typecheck": "tsc && tsc -p src/runtime/exos/tsconfig.json",
+    "typecheck": "tsc",
     "check:examples": "npm --prefix ./examples run check",
     "check": "npm ci && npm run lint && npm run typecheck && npm run build && npm run test && npm run check:examples"
   },
