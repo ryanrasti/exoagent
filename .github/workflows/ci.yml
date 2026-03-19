@@ -16,9 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command bash -c "npm ci && npm run build && npm run lint && npm run typecheck"
+      - run: nix develop --command bash -c "npm ci && npm run build"
       - run: nix develop --command bash -c "cd website && npm ci"
-      - run: nix develop --command bash -c "cd examples && npm ci && npm run check"
+      - run: nix develop --command bash -c "cd examples && npm ci"
+      - run: nix develop --command bash -c "npm run lint && npm run typecheck"
+      - run: nix develop --command bash -c "cd examples && npm run check"
 
   test:
     runs-on: ubuntu-latest
