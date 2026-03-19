@@ -8,13 +8,14 @@ import { runSecretsUI } from './secrets-ui'
  * exoagentd — run exos.
  *
  * Usage:
- *   exoagentd [repo] [--run <exo>] [-- ...args]
- *   exoagentd [repo]                          Shorthand for --run spawn
- *   exoagentd [repo] --run spawn              Spawn default agent + attach
- *   exoagentd [repo] --run spawn -- --id foo  Spawn named agent + attach
- *   exoagentd [repo] --list                   List running agents
- *   exoagentd [repo] --attach <id>            Attach to running agent
- *   exoagentd [repo] --kill <id>              Kill an agent
+ *   exoagentd                                 Spawn default agent + attach (cwd)
+ *   exoagentd --repo /path/to/repo            Use a different repo
+ *   exoagentd --run spawn --id foo            Spawn named agent + attach
+ *   exoagentd --list                          List running agents
+ *   exoagentd --attach <id>                   Attach to running agent
+ *   exoagentd --kill <id>                     Kill an agent
+ *   exoagentd --secrets                       Manage secrets
+ *   exoagentd --eval <code>                   Eval code with daemon caps
  */
 
 async function main() {
@@ -58,12 +59,12 @@ async function main() {
       command = 'kill'
       target = rawArgs[++i]
     }
+    else if (arg === '--repo') {
+      repoDir = rawArgs[++i]
+    }
     else if (arg === '--') {
       i++
       break
-    }
-    else if (!arg.startsWith('-')) {
-      repoDir = arg
     }
     i++
   }
