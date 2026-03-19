@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import type { Agent } from './providers/pi'
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Daemon } from './daemon'
-import { spawnAgent, type Agent } from './providers/pi'
+import { spawnAgent } from './providers/pi'
 
 const GIT = join(JSON.parse(process.env.EXOAGENT_NIX!).git, 'bin', 'git')
 

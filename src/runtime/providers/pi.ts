@@ -1,37 +1,38 @@
-import { SandboxCap, nixPathsFromEnv } from './sandbox'
-import type { StorageCap } from './storage'
+import type { Model } from '@mariozechner/pi-ai'
+import type { AgentSessionEvent, BashOperations, EditOperations, ExtensionFactory, ReadOperations, ToolDefinition, WriteOperations } from '@mariozechner/pi-coding-agent'
 import type { Secrets } from './secrets'
-import { ReviewCap } from './review'
-import { generateCapDts } from '../dts'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { constants } from 'node:fs'
+import type { StorageCap } from './storage'
+import { Buffer } from 'node:buffer'
 import { execFileSync } from 'node:child_process'
+import { constants } from 'node:fs'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { Agent as PiAgent } from '@mariozechner/pi-agent-core'
 import {
   AgentSession,
-  type AgentSessionEvent,
+
   AuthStorage,
-  type BashOperations,
+
   createBashTool,
   createEditTool,
-  type EditOperations,
-  type ExtensionFactory,
+
   createReadTool,
-  type ReadOperations,
+
   createWriteTool,
-  type WriteOperations,
+
   DefaultResourceLoader,
   InteractiveMode,
   ModelRegistry,
   SessionManager,
   SettingsManager,
-  type ToolDefinition,
+
 } from '@mariozechner/pi-coding-agent'
-import { Agent as PiAgent } from "@mariozechner/pi-agent-core"
-import type { Model } from '@mariozechner/pi-ai'
 import { Type } from '@sinclair/typebox'
 import { codemode } from '../../code-mode'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { generateCapDts } from '../dts'
+import { ReviewCap } from './review'
+import { nixPathsFromEnv, SandboxCap } from './sandbox'
 
 /**
  * Pi provider — coding agent backed by pi SDK.
@@ -375,7 +376,6 @@ export interface Agent {
 export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
   const { id, repoDir, dataDir, storage, secrets } = config
 
-
   const nix = nixPathsFromEnv()
   const gitPath = nix.git
   const git = join(gitPath, 'bin', 'git')
@@ -395,7 +395,8 @@ export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
     // Point origin to the real remote so push/fetch go to GitHub
     try {
       const remoteUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
-        cwd: repoDir, encoding: 'utf-8',
+        cwd: repoDir,
+        encoding: 'utf-8',
       }).trim()
       execFileSync(git, ['-C', cloneDir, 'remote', 'set-url', 'origin', remoteUrl])
     }
@@ -410,7 +411,8 @@ export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
   let repo: string | null = null
   try {
     const originUrl = execFileSync(git, ['remote', 'get-url', 'origin'], {
-      cwd: cloneDir, encoding: 'utf-8',
+      cwd: cloneDir,
+      encoding: 'utf-8',
     }).trim()
     const repoMatch = originUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/)
     if (repoMatch) {

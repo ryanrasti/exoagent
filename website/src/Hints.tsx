@@ -137,8 +137,7 @@ export function Hints({ turnCount, messages, onPopulateInput }: HintsProps) {
 
   // Auto-detect intel: check if any assistant message contains "wallets"
   useEffect(() => {
-    if (hintState.intelTurn !== null)
-      return // Already unlocked
+    if (hintState.intelTurn !== null) { return } // Already unlocked
 
     const hasIntel = messages.some(
       m => m.role === 'assistant' && m.content.toLowerCase().includes('wallets'),

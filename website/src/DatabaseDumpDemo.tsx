@@ -143,8 +143,7 @@ export function DatabaseDumpDemo() {
   }, [])
 
   const runDemo = useCallback(async () => {
-    if (isRunning)
-      return
+    if (isRunning) { return }
 
     reset()
     setIsRunning(true)

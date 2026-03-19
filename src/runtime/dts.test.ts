@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { generateDts, generateCapDts } from './dts'
 import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { generateCapDts, generateDts } from './dts'
 
 describe('generateDts', () => {
   it('generates declarations for review provider', () => {

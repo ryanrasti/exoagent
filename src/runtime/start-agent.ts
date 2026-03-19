@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { spawnAgent } from './providers/pi'
-import { StorageCap } from './providers/storage'
-import { Secrets } from './providers/secrets'
 import { join } from 'node:path'
+import process from 'node:process'
+import { spawnAgent } from './providers/pi'
+import { Secrets } from './providers/secrets'
+import { StorageCap } from './providers/storage'
 
 /**
  * Agent process — runs inside a pty managed by the daemon.

@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { ReviewCap } from './review'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { ReviewCap } from './review'
 
 const GIT = join(JSON.parse(process.env.EXOAGENT_NIX!).git, 'bin', 'git')
 

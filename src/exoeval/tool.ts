@@ -138,8 +138,7 @@ const makeFnSchema = (retSchema: StandardSchemaV1, allowOptional = false): Stand
       version: 1,
       vendor: 'exoeval',
       validate: (value: unknown) => {
-        if (value === undefined && allowOptional)
-          return { value: undefined }
+        if (value === undefined && allowOptional) { return { value: undefined } }
         if (typeof value !== 'function') {
           return { issues: [{ message: 'Expected a function' }] }
         }

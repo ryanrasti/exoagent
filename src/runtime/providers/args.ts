@@ -1,5 +1,5 @@
-import { tool } from '../../exoeval/tool'
 import { z } from 'zod'
+import { tool } from '../../exoeval/tool'
 
 /**
  * Args cap — provides CLI arguments to exos.

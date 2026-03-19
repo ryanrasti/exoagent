@@ -90,7 +90,7 @@ export class SandboxCap {
 
   /** Validate a path is safe to interpolate into a shell script (no special chars) */
   private static assertSafePath(p: string, label: string): void {
-    if (!/^[a-zA-Z0-9/_+.-]+$/.test(p)) {
+    if (!/^[\w/+.-]+$/.test(p)) {
       throw new Error(`Unsafe ${label} path for shell interpolation: ${p}`)
     }
   }

@@ -1,23 +1,22 @@
+import type { AssistantMessage, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from '@mariozechner/pi-ai'
+import type { ExtensionFactory } from '@mariozechner/pi-coding-agent'
+import type { SandboxCap } from './sandbox'
+import { execSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { PiCap } from './pi'
-import type { SandboxCap } from './sandbox'
 import {
-  type AssistantMessage,
-  type Context,
+
   createAssistantMessageEventStream,
-  type Model,
-  type SimpleStreamOptions,
-  type AssistantMessageEventStream,
+
 } from '@mariozechner/pi-ai'
 import {
-  type ExtensionFactory,
+
   SessionManager,
   SettingsManager,
 } from '@mariozechner/pi-coding-agent'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { PiCap } from './pi'
 
 // ---------------------------------------------------------------------------
 // Mock LLM provider — returns scripted responses
@@ -30,7 +29,11 @@ type MockResponse = {
 }
 
 const ZERO_USAGE = {
-  input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 }
 

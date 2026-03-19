@@ -1,6 +1,5 @@
-import * as ts from 'typescript'
-import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import * as ts from 'typescript'
 
 /**
  * Generate a .d.ts declaration string from a TypeScript source file.

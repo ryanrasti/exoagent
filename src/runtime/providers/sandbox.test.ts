@@ -98,8 +98,8 @@ describe('SandboxCap', () => {
     }, 15000)
 
     it('timeout kills long-running commands', async () => {
-      await expect(sandbox.exec({ command: 'sleep 60', timeout: 500 })).rejects.toThrow('timed out')
-    })
+      await expect(sandbox.exec({ command: 'sleep 60', timeout: 1 })).rejects.toThrow('timed out')
+    }, 10000)
   })
 
   describe('validatePath', () => {
@@ -155,9 +155,9 @@ describe('SandboxCap', () => {
         timeout: 30000,
       })
       if (!result.stdout.includes('hello-from-nix')) {
-        console.log('stdout:', result.stdout)
-        console.log('stderr:', result.stderr)
-        console.log('exitCode:', result.exitCode)
+        console.error('stdout:', result.stdout)
+        console.error('stderr:', result.stderr)
+        console.error('exitCode:', result.exitCode)
       }
       expect(result.stdout).toContain('hello-from-nix')
     }, 60000)

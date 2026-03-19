@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { join, resolve } from 'node:path'
+import process from 'node:process'
 import { Daemon } from './daemon'
 import { runSecretsUI } from './secrets-ui'
-import { resolve, join } from 'node:path'
 
 /**
  * exoagentd — run exos.
@@ -135,8 +136,7 @@ async function main() {
   if (command === 'eval') {
     if (!target) { console.error('Usage: --eval <code>'); process.exit(1) }
     const result = await daemon.evalCode(target)
-    if (result !== undefined)
-      console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2))
+    if (result !== undefined) { console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2)) }
     return
   }
 

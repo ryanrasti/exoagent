@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+import Database from 'better-sqlite3'
 
 const DB_FILE = 'secrets.db'
 

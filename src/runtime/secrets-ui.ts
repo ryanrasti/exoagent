@@ -1,8 +1,8 @@
-import { TUI, SelectList, Input, type Component } from '@mariozechner/pi-tui'
-import { ProcessTerminal } from '@mariozechner/pi-tui'
-import { Secrets } from './providers/secrets'
-import { join } from 'node:path'
+import type { Component } from '@mariozechner/pi-tui'
 import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { Input, ProcessTerminal, SelectList, TUI } from '@mariozechner/pi-tui'
+import { Secrets } from './providers/secrets'
 
 /**
  * Secret declaration — providers declare what secrets they need.
@@ -42,28 +42,28 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
     let selectedSecret: SecretDecl | null = null
 
     const theme = {
-      selectedPrefix: (t: string) => `\x1b[7m${t}\x1b[0m`,
-      selectedText: (t: string) => `\x1b[1m${t}\x1b[0m`,
-      description: (t: string) => `\x1b[2m${t}\x1b[0m`,
-      scrollInfo: (t: string) => `\x1b[2m${t}\x1b[0m`,
-      noMatch: (t: string) => `\x1b[2m${t}\x1b[0m`,
+      selectedPrefix: (t: string) => `\x1B[7m${t}\x1B[0m`,
+      selectedText: (t: string) => `\x1B[1m${t}\x1B[0m`,
+      description: (t: string) => `\x1B[2m${t}\x1B[0m`,
+      scrollInfo: (t: string) => `\x1B[2m${t}\x1B[0m`,
+      noMatch: (t: string) => `\x1B[2m${t}\x1B[0m`,
     }
 
     const header: Component = {
-      render: () => ['', '\x1b[1mSecrets\x1b[0m — Select a provider (Enter to configure, Esc/q to exit)', ''],
+      render: () => ['', '\x1B[1mSecrets\x1B[0m — Select a provider (Enter to configure, Esc/q to exit)', ''],
       invalidate: () => {},
     }
 
     const buildProviderItems = () => PROVIDER_SECRETS.map((p) => {
       const missing = p.secrets.filter(s => s.required && !db.get(p.provider, s.name))
-      const icon = missing.length > 0 ? '\x1b[31m●\x1b[0m' : '\x1b[32m●\x1b[0m'
+      const icon = missing.length > 0 ? '\x1B[31m●\x1B[0m' : '\x1B[32m●\x1B[0m'
       const status = missing.length > 0 ? `${missing.length} required missing` : 'configured'
       return { value: p.provider, label: `${icon} ${p.provider}`, description: status }
     })
 
     const buildSecretItems = (p: ProviderSecrets) => p.secrets.map((s) => {
       const value = db.get(p.provider, s.name)
-      const icon = value ? '\x1b[32m✓\x1b[0m' : (s.required ? '\x1b[31m✗\x1b[0m' : '\x1b[33m-\x1b[0m')
+      const icon = value ? '\x1B[32m✓\x1B[0m' : (s.required ? '\x1B[31m✗\x1B[0m' : '\x1B[33m-\x1B[0m')
       const display = value ? `${value.slice(0, 8)}${'*'.repeat(Math.min(8, value.length - 8))}` : '(not set)'
       return { value: s.name, label: `${icon} ${s.name}`, description: `${display}  ${s.description}` }
     })
@@ -97,7 +97,7 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
         tui.removeChild(c)
       }
       const secretHeader: Component = {
-        render: () => ['', `\x1b[1mSecrets\x1b[0m — ${provider.provider} (Enter to set, Esc to go back, Del to clear)`, ''],
+        render: () => ['', `\x1B[1mSecrets\x1B[0m — ${provider.provider} (Enter to set, Esc to go back, Del to clear)`, ''],
         invalidate: () => {},
       }
       tui.addChild(secretHeader)
@@ -120,8 +120,8 @@ export async function runSecretsUI(dataDir: string): Promise<void> {
       const inputHeader: Component = {
         render: () => [
           '',
-          `\x1b[1m${secret.name}\x1b[0m — ${secret.description}`,
-          secret.required ? '\x1b[31m(required)\x1b[0m' : '\x1b[2m(optional)\x1b[0m',
+          `\x1B[1m${secret.name}\x1B[0m — ${secret.description}`,
+          secret.required ? '\x1B[31m(required)\x1B[0m' : '\x1B[2m(optional)\x1B[0m',
           '',
           'Enter value (empty to clear):',
         ],

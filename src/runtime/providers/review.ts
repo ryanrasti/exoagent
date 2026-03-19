@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { tool } from '../../exoeval/tool'
-
 import { z } from 'zod'
+
+import { tool } from '../../exoeval/tool'
 
 /**
  * Review provider — GitHub PR-based code review.
@@ -96,8 +96,7 @@ export class ReviewCap {
     // Check for existing open PR for this branch
     const owner = repo.split('/')[0]
     const searchParams = new URLSearchParams({ state: 'open', head: `${owner}:${remoteBranch}` })
-    const existing = await ghApi<any[]>(token, 'GET',
-      `/repos/${encodeURI(repo)}/pulls?${searchParams}`)
+    const existing = await ghApi<any[]>(token, 'GET', `/repos/${encodeURI(repo)}/pulls?${searchParams}`)
 
     let prNumber: number
     let prUrl: string
@@ -147,8 +146,7 @@ export class ReviewCap {
       reviewBody = latest.body ?? ''
 
       // Fetch review comments — pass through raw API objects
-      comments = await ghApi<any[]>(token, 'GET',
-        `/repos/${repoPath}/pulls/${pr}/reviews/${latest.id}/comments`)
+      comments = await ghApi<any[]>(token, 'GET', `/repos/${repoPath}/pulls/${pr}/reviews/${latest.id}/comments`)
     }
 
     // Fetch issue comments — pass through raw API objects
@@ -175,9 +173,7 @@ export class ReviewCap {
   async replyToComment({ pr, commentId, body }: { pr: number, commentId: number, body: string }): Promise<{ id: number }> {
     const repo = this.config.repo
     const token = this.token
-    const result = await ghApi<any>(token, 'POST',
-      `/repos/${encodeURI(repo)}/pulls/${pr}/comments/${commentId}/replies`,
-      { body })
+    const result = await ghApi<any>(token, 'POST', `/repos/${encodeURI(repo)}/pulls/${pr}/comments/${commentId}/replies`, { body })
     return { id: result.id }
   }
 
@@ -191,9 +187,7 @@ export class ReviewCap {
   async commentOnPR({ pr, body }: { pr: number, body: string }): Promise<{ id: number }> {
     const repo = this.config.repo
     const token = this.token
-    const result = await ghApi<any>(token, 'POST',
-      `/repos/${encodeURI(repo)}/issues/${pr}/comments`,
-      { body })
+    const result = await ghApi<any>(token, 'POST', `/repos/${encodeURI(repo)}/issues/${pr}/comments`, { body })
     return { id: result.id }
   }
 

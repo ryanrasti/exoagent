@@ -45,8 +45,7 @@ async function validateTurnstile(token: string, secretKey: string, remoteip?: st
   const formData = new FormData()
   formData.append('secret', secretKey)
   formData.append('response', token)
-  if (remoteip)
-    formData.append('remoteip', remoteip)
+  if (remoteip) { formData.append('remoteip', remoteip) }
 
   const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
     method: 'POST',
@@ -80,8 +79,7 @@ export class Api extends RpcTarget {
   async newSession(input: { turnstileId: string, nonce: string }): Promise<string> {
     // Validate Turnstile token
     const isValid = await validateTurnstile(input.turnstileId, env.TURNSTILE_SECRET_KEY, this.#clientIp)
-    if (!isValid)
-      throw new Error('Invalid Turnstile token')
+    if (!isValid) { throw new Error('Invalid Turnstile token') }
 
     if (env.TURNSTILE_SECRET_KEY === '1x0000000000000000000000000000000AA') {
       // Dev mode -- append the nonce to turnstile ID so we don't get conflicts:
@@ -105,8 +103,7 @@ export class Api extends RpcTarget {
   async currentSession(input: { sessionId: string }): Promise<BountyAgent> {
     // Validate existing session
     const isValid = await validateSession(input.sessionId, this.#db)
-    if (!isValid)
-      throw new Error('Invalid session ID')
+    if (!isValid) { throw new Error('Invalid session ID') }
 
     // Return BountyAgent instance
     return new BountyAgent(this.#db, input.sessionId)

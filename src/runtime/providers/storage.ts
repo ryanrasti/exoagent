@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import Database from 'better-sqlite3'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
 

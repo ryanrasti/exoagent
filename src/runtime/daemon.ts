@@ -1,16 +1,17 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdir, rm } from 'node:fs/promises'
 import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import process from 'node:process'
 
-import { StorageCap } from './providers/storage'
-import { Secrets } from './providers/secrets'
+import { z } from 'zod'
+import { tool } from '../exoeval/tool'
+import { loadExo } from './exo'
+import { ArgsCap } from './providers/args'
 import { ReviewCap } from './providers/review'
 import { nixPathsFromEnv } from './providers/sandbox'
-import { ArgsCap } from './providers/args'
-import { tool } from '../exoeval/tool'
-import { z } from 'zod'
-import { loadExo } from './exo'
+import { Secrets } from './providers/secrets'
+import { StorageCap } from './providers/storage'
 
 /**
  * exoagentd — runtime daemon.
@@ -158,15 +159,17 @@ export class Daemon {
     const sockPath = join(agentsDir, `${agentId}.sock`)
 
     try {
-      const pid = parseInt(readFileSync(pidPath, 'utf-8').trim())
+      const pid = Number.parseInt(readFileSync(pidPath, 'utf-8').trim())
       if (pid) {
         process.kill(-pid, 'SIGTERM')
       }
     }
     catch {}
 
-    try { unlinkSync(pidPath) } catch {}
-    try { unlinkSync(sockPath) } catch {}
+    try { unlinkSync(pidPath) }
+    catch {}
+    try { unlinkSync(sockPath) }
+    catch {}
   }
 
   /** Run an exo with daemon caps */
@@ -208,7 +211,7 @@ export class Daemon {
       storage: this.storage,
     }
     const review = this.getReviewCap()
-    if (review) caps.review = review
+    if (review) { caps.review = review }
 
     return exo.run(caps)
   }
@@ -216,8 +219,7 @@ export class Daemon {
   /** Get a ReviewCap for the default clone (if exists) */
   private getReviewCap(): ReviewCap | undefined {
     const cloneDir = join(this.dataDir, 'clones', 'default')
-    if (!existsSync(cloneDir))
-      return undefined
+    if (!existsSync(cloneDir)) { return undefined }
     const nix = nixPathsFromEnv()
     const git = join(nix.git, 'bin', 'git')
     // Detect repo from origin

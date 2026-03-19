@@ -11,10 +11,8 @@ function esbuildDecorators(): Plugin {
     name: 'esbuild-decorators',
     enforce: 'pre',
     async transform(code, id) {
-      if (!id.endsWith('.ts') && !id.endsWith('.tsx'))
-        return
-      if (!code.includes('@'))
-        return
+      if (!id.endsWith('.ts') && !id.endsWith('.tsx')) { return }
+      if (!code.includes('@')) { return }
       const result = await transform(code, {
         loader: id.endsWith('.tsx') ? 'tsx' : 'ts',
         target: 'es2022',

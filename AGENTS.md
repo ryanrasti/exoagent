@@ -75,14 +75,14 @@ Make required config explicit. Don't chain fallbacks (config → env var → CLI
 ```typescript
 // Good — token comes from one place
 interface ReviewCapConfig {
-  secrets: Secrets  // required
-  repo: string      // required
+  secrets: Secrets // required
+  repo: string // required
 }
 
 // Bad — fallback chain
 interface ReviewCapConfig {
-  secrets?: Secrets  // try this first
-  token?: string     // then this
+  secrets?: Secrets // try this first
+  token?: string // then this
   // then GITHUB_TOKEN env, then `gh auth token`...
 }
 ```
