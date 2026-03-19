@@ -24,16 +24,18 @@
             dtach
           ];
 
-          EXOAGENT_NIX_BASH = "${pkgs.bashNonInteractive}";
-          EXOAGENT_NIX_COREUTILS = "${pkgs.coreutils}";
-          EXOAGENT_NIX_BWRAP = "${pkgs.bubblewrap}";
-          EXOAGENT_NIX_PASTA = "${pkgs.passt}";
-          EXOAGENT_NIX_NFT = "${pkgs.nftables}";
-          EXOAGENT_NIX_NIX = "${pkgs.nix}";
-          EXOAGENT_NIX_CACERT = "${pkgs.cacert}";
-          EXOAGENT_NIX_GIT = "${pkgs.git}";
-          EXOAGENT_NIX_GNUGREP = "${pkgs.gnugrep}";
-          EXOAGENT_NIX_DTACH = "${pkgs.dtach}";
+          EXOAGENT_NIX = builtins.toJSON {
+            bash = "${pkgs.bashNonInteractive}";
+            coreutils = "${pkgs.coreutils}";
+            bwrap = "${pkgs.bubblewrap}";
+            pasta = "${pkgs.passt}";
+            nft = "${pkgs.nftables}";
+            nix = "${pkgs.nix}";
+            cacert = "${pkgs.cacert}";
+            git = "${pkgs.git}";
+            gnugrep = "${pkgs.gnugrep}";
+            dtach = "${pkgs.dtach}";
+          };
         };
       }
     );

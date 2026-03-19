@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { Daemon } from './daemon'
 import { spawnAgent, type Agent } from './providers/pi'
 
-const GIT = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
+const GIT = join(JSON.parse(process.env.EXOAGENT_NIX!).git, 'bin', 'git')
 
 describe('e2e: spawnAgent', () => {
   let daemon: Daemon

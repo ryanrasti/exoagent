@@ -377,7 +377,7 @@ export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
 
 
   const nix = nixPathsFromEnv()
-  const gitPath = process.env.EXOAGENT_NIX_GIT!
+  const gitPath = nix.git
   const git = join(gitPath, 'bin', 'git')
 
   // Create local clone

@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const GIT = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
+const GIT = join(JSON.parse(process.env.EXOAGENT_NIX!).git, 'bin', 'git')
 
 /** Create a mock Secrets instance backed by a temp directory */
 function createTestSecrets(token?: string): { secrets: Secrets, cleanup: () => void } {
@@ -32,7 +32,7 @@ describe('ReviewCap', () => {
       execFileSync(GIT, ['init', dir])
       const review = new ReviewCap({
         cloneDir: dir,
-        git: process.env.EXOAGENT_NIX_GIT!,
+        git: JSON.parse(process.env.EXOAGENT_NIX!).git,
         secrets,
         repo: 'user/repo',
       })
@@ -51,7 +51,7 @@ describe('ReviewCap', () => {
       execFileSync(GIT, ['init', dir])
       const review = new ReviewCap({
         cloneDir: dir,
-        git: process.env.EXOAGENT_NIX_GIT!,
+        git: JSON.parse(process.env.EXOAGENT_NIX!).git,
         secrets,
         repo: 'user/repo',
       })
@@ -70,7 +70,7 @@ describe('ReviewCap', () => {
       execFileSync(GIT, ['init', dir])
       const review = new ReviewCap({
         cloneDir: dir,
-        git: process.env.EXOAGENT_NIX_GIT!,
+        git: JSON.parse(process.env.EXOAGENT_NIX!).git,
         secrets,
         repo: 'user/repo',
         agentName: 'test-agent',

@@ -25,14 +25,20 @@ export interface NixPaths {
   cacert: string
   git: string
   gnugrep: string
+  dtach: string
 }
 
-/** Read nix paths from EXOAGENT_NIX_* env vars set by flake.nix devShell */
+/** Read nix paths from EXOAGENT_NIX env var (JSON) set by flake.nix devShell */
 export function nixPathsFromEnv(): NixPaths {
+  const raw = process.env.EXOAGENT_NIX
+  if (!raw) {
+    throw new Error('Missing env var EXOAGENT_NIX — are you in the devShell?')
+  }
+  const parsed = JSON.parse(raw) as Record<string, string>
   const get = (name: string): string => {
-    const val = process.env[`EXOAGENT_NIX_${name.toUpperCase()}`]
+    const val = parsed[name]
     if (!val) {
-      throw new Error(`Missing env var EXOAGENT_NIX_${name.toUpperCase()} — are you in the devShell?`)
+      throw new Error(`Missing key "${name}" in EXOAGENT_NIX`)
     }
     return val
   }
@@ -46,6 +52,7 @@ export function nixPathsFromEnv(): NixPaths {
     cacert: get('cacert'),
     git: get('git'),
     gnugrep: get('gnugrep'),
+    dtach: get('dtach'),
   }
 }
 

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { StorageCap } from './providers/storage'
 import { Secrets } from './providers/secrets'
 import { ReviewCap } from './providers/review'
+import { nixPathsFromEnv } from './providers/sandbox'
 import { ArgsCap } from './providers/args'
 import { tool } from '../exoeval/tool'
 import { z } from 'zod'
@@ -97,7 +98,8 @@ export class Daemon {
       throw new Error(`Agent "${agentId}" already running (socket exists: ${sockPath})`)
     }
 
-    const dtach = join(process.env.EXOAGENT_NIX_DTACH!, 'bin', 'dtach')
+    const nix = nixPathsFromEnv()
+    const dtach = join(nix.dtach, 'bin', 'dtach')
     const agentScript = join(import.meta.dirname!, 'start-agent.ts')
 
     const proc = spawn(dtach, ['-n', sockPath, 'npx', 'tsx', agentScript], {
@@ -133,7 +135,8 @@ export class Daemon {
       throw new Error(`Agent "${agentId}" not found (no socket at ${sockPath})`)
     }
 
-    const dtach = join(process.env.EXOAGENT_NIX_DTACH!, 'bin', 'dtach')
+    const nix = nixPathsFromEnv()
+    const dtach = join(nix.dtach, 'bin', 'dtach')
     execFileSync(dtach, ['-a', sockPath], { stdio: 'inherit' })
   }
 
@@ -215,19 +218,20 @@ export class Daemon {
     const cloneDir = join(this.dataDir, 'clones', 'default')
     if (!existsSync(cloneDir))
       return undefined
-    const git = join(process.env.EXOAGENT_NIX_GIT!, 'bin', 'git')
+    const nix = nixPathsFromEnv()
+    const git = join(nix.git, 'bin', 'git')
     // Detect repo from origin
     let repo = ''
     try {
       const url = execFileSync(git, ['remote', 'get-url', 'origin'], { cwd: cloneDir, encoding: 'utf-8' }).trim()
       const match = url.match(/github\.com[:/]([^/]+\/[^/.]+)/)
-      if (match) repo = match[1]
+      if (match) { repo = match[1] }
     }
     catch {}
-    if (!repo) return undefined
+    if (!repo) { return undefined }
     return new ReviewCap({
       cloneDir,
-      git: process.env.EXOAGENT_NIX_GIT!,
+      git: nix.git,
       secrets: this.secrets,
       repo,
     })
