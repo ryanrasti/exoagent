@@ -1,6 +1,7 @@
 import type { AssistantMessage, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from '@mariozechner/pi-ai'
 import type { ExtensionFactory } from '@mariozechner/pi-coding-agent'
 import type { SandboxCap } from './sandbox'
+import { Buffer } from 'node:buffer'
 import { execSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -138,21 +139,16 @@ function createMockProvider(responses: MockResponse[]): {
 function createFakeSandbox(workspace: string): SandboxCap {
   return {
     workspace,
-    validatePath(p: string) {
-      if (!p.startsWith(workspace)) {
-        throw new Error(`Path ${p} outside workspace ${workspace}`)
-      }
-    },
-    async exec({ command }: { command: string }) {
+    async exec({ command, stdin }: { command: string, stdin?: string }) {
       try {
-        const stdout = execSync(command, { cwd: workspace, encoding: 'utf-8', timeout: 5000 })
+        const stdout = execSync(command, { cwd: workspace, encoding: 'utf-8', timeout: 5000, input: stdin })
         return { stdout, stderr: '', exitCode: 0 }
       }
       catch (err: any) {
         return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', exitCode: err.status ?? 1 }
       }
     },
-  } as SandboxCap
+  } as unknown as SandboxCap
 }
 
 // ---------------------------------------------------------------------------
@@ -259,5 +255,101 @@ describe('PiCap', () => {
     expect(result).toBe('File written.')
     const content = await readFile(filePath, 'utf-8')
     expect(content).toBe('written by mock')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Sandbox file ops (sandboxRead, sandboxWrite, sandboxAccess, mkdir)
+// These test the actual methods that pi's tools delegate to.
+// ---------------------------------------------------------------------------
+
+describe('sandbox file ops', () => {
+  let tmpDir: string
+  let pi: PiCap
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'pi-fileops-'))
+    const { factory, model } = createMockProvider([{ text: 'ok' }])
+    pi = new PiCap({
+      sandbox: createFakeSandbox(tmpDir),
+      model,
+      capsDts: '',
+      extensionFactories: [factory],
+      sessionManager: SessionManager.inMemory(),
+      settingsManager: SettingsManager.inMemory(),
+    })
+  })
+
+  afterEach(async () => {
+    pi.dispose()
+    await rm(tmpDir, { recursive: true, force: true })
+  })
+
+  it('read returns file content', async () => {
+    await writeFile(join(tmpDir, 'test.txt'), 'hello world')
+    const ops = (pi as any).scopedReadOps()
+    const buf = await ops.readFile(join(tmpDir, 'test.txt'))
+    expect(buf.toString()).toBe('hello world')
+  })
+
+  it('read handles binary content', async () => {
+    const binary = Buffer.from([0x00, 0x01, 0xFF, 0xFE, 0x0A, 0x0D])
+    await writeFile(join(tmpDir, 'bin.dat'), binary)
+    const ops = (pi as any).scopedReadOps()
+    const buf = await ops.readFile(join(tmpDir, 'bin.dat'))
+    expect(Buffer.compare(buf, binary)).toBe(0)
+  })
+
+  it('write creates file with content', async () => {
+    const ops = (pi as any).scopedWriteOps()
+    await ops.writeFile(join(tmpDir, 'out.txt'), 'written content')
+    const content = await readFile(join(tmpDir, 'out.txt'), 'utf-8')
+    expect(content).toBe('written content')
+  })
+
+  it('write handles special characters', async () => {
+    const ops = (pi as any).scopedWriteOps()
+    const special = 'hello $HOME `whoami` $(id) \'single\' "double" \\backslash\nnewline'
+    await ops.writeFile(join(tmpDir, 'special.txt'), special)
+    const content = await readFile(join(tmpDir, 'special.txt'), 'utf-8')
+    expect(content).toBe(special)
+  })
+
+  it('mkdir creates nested directories', async () => {
+    const ops = (pi as any).scopedWriteOps()
+    await ops.mkdir(join(tmpDir, 'a', 'b', 'c'))
+    const result = execSync(`test -d ${join(tmpDir, 'a', 'b', 'c')} && echo ok`, { encoding: 'utf-8' })
+    expect(result.trim()).toBe('ok')
+  })
+
+  it('access succeeds for existing file', async () => {
+    await writeFile(join(tmpDir, 'exists.txt'), 'yes')
+    const ops = (pi as any).scopedReadOps()
+    await expect(ops.access(join(tmpDir, 'exists.txt'))).resolves.toBeUndefined()
+  })
+
+  it('access throws for missing file', async () => {
+    const ops = (pi as any).scopedReadOps()
+    await expect(ops.access(join(tmpDir, 'nope.txt'))).rejects.toThrow()
+  })
+
+  it('handles paths with single quotes', async () => {
+    const ops = (pi as any).scopedWriteOps()
+    const dir = join(tmpDir, 'it\'s')
+    await ops.mkdir(dir)
+    const readOps = (pi as any).scopedReadOps()
+    const writeOps = (pi as any).scopedWriteOps()
+    await writeOps.writeFile(join(dir, 'file.txt'), 'quoted')
+    const buf = await readOps.readFile(join(dir, 'file.txt'))
+    expect(buf.toString()).toBe('quoted')
+  })
+
+  it('handles paths with dollar signs and backticks', async () => {
+    const ops = (pi as any).scopedWriteOps()
+    const file = join(tmpDir, '$HOME`whoami`file.txt')
+    await ops.writeFile(file, 'safe')
+    const readOps = (pi as any).scopedReadOps()
+    const buf = await readOps.readFile(file)
+    expect(buf.toString()).toBe('safe')
   })
 })

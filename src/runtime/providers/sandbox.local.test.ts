@@ -102,20 +102,6 @@ describe('SandboxCap', () => {
     }, 10000)
   })
 
-  describe('validatePath', () => {
-    it('resolves relative paths to workspace', () => {
-      expect(sandbox.validatePath('hello.txt')).toBe(join(workspaceDir, 'hello.txt'))
-    })
-
-    it('rejects path traversal', () => {
-      expect(() => sandbox.validatePath('../escape')).toThrow('escapes workspace')
-    })
-
-    it('rejects absolute paths outside workspace', () => {
-      expect(() => sandbox.validatePath('/etc/passwd')).toThrow('escapes workspace')
-    })
-  })
-
   describe('nix', () => {
     it('nix is available and can run', async () => {
       const result = await sandbox.exec({ command: 'nix --version' })

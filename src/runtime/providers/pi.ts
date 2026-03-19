@@ -4,8 +4,8 @@ import type { Secrets } from './secrets'
 import type { StorageCap } from './storage'
 import { Buffer } from 'node:buffer'
 import { execFileSync } from 'node:child_process'
-import { closeSync, constants, readlinkSync } from 'node:fs'
-import { access, mkdir, open, readFile, writeFile } from 'node:fs/promises'
+
+import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Agent as PiAgent } from '@mariozechner/pi-agent-core'
@@ -33,6 +33,11 @@ import { codemode } from '../../code-mode'
 import { generateCapDts } from '../dts'
 import { ReviewCap } from './review'
 import { nixPathsFromEnv, SandboxCap } from './sandbox'
+
+/** Shell-safe single-quoting: wraps in single quotes, escapes internal single quotes */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, '\'\\\'\'')}'`
+}
 
 /**
  * Pi provider — coding agent backed by pi SDK.
@@ -100,63 +105,51 @@ export class PiCap {
     }
   }
 
-  /**
-   * Assert that an open fd points to a file inside the workspace.
-   * Uses /proc/self/fd/N to resolve the real path after symlinks,
-   * which is TOCTOU-safe because the fd pins the inode.
-   */
-  private assertFdInWorkspace(fd: number, originalPath: string): void {
-    const real = readlinkSync(`/proc/self/fd/${fd}`)
-    const ws = this.config.sandbox.workspace
-    if (real !== ws && !real.startsWith(`${ws}/`)) {
-      closeSync(fd)
-      throw new Error(`Path escapes workspace via symlink: ${originalPath} -> ${real}`)
+  /** Read a file via sandbox exec, returns base64-decoded content */
+  private async sandboxRead(p: string): Promise<Buffer> {
+    const result = await this.config.sandbox.exec({ command: `base64 ${shq(p)}` })
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to read ${p}: ${result.stderr}`)
+    }
+    return Buffer.from(result.stdout, 'base64')
+  }
+
+  /** Write a file via sandbox exec, content passed via stdin */
+  private async sandboxWrite(p: string, content: string): Promise<void> {
+    const result = await this.config.sandbox.exec({ command: `cat > ${shq(p)}`, stdin: content })
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to write ${p}: ${result.stderr}`)
     }
   }
 
-  /** Read a file, verifying via fd that it's inside the workspace */
-  private async safeReadFile(p: string): Promise<Buffer> {
-    this.config.sandbox.validatePath(p)
-    const fh = await open(p, constants.O_RDONLY)
-    try {
-      this.assertFdInWorkspace(fh.fd, p)
-      return await fh.readFile()
-    } finally {
-      await fh.close()
-    }
-  }
-
-  /** Write a file, verifying via fd that it's inside the workspace */
-  private async safeWriteFile(p: string, content: string): Promise<void> {
-    this.config.sandbox.validatePath(p)
-    const fh = await open(p, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, 0o644)
-    try {
-      this.assertFdInWorkspace(fh.fd, p)
-      await fh.writeFile(content)
-    } finally {
-      await fh.close()
+  /** Check file access via sandbox exec */
+  private async sandboxAccess(p: string, mode: 'r' | 'rw'): Promise<void> {
+    const flag = mode === 'rw' ? '-r -w' : '-r'
+    const result = await this.config.sandbox.exec({ command: `test ${flag} ${shq(p)}` })
+    if (result.exitCode !== 0) {
+      throw new Error(`ENOENT: no such file or directory, access '${p}'`)
     }
   }
 
   private scopedReadOps(): ReadOperations {
     return {
-      readFile: (p: string) => this.safeReadFile(p),
-      access: async (p: string) => { this.config.sandbox.validatePath(p); await access(p, constants.R_OK) },
+      readFile: (p: string) => this.sandboxRead(p),
+      access: (p: string) => this.sandboxAccess(p, 'r'),
     }
   }
 
   private scopedWriteOps(): WriteOperations {
     return {
-      writeFile: (p: string, c: string) => this.safeWriteFile(p, c),
-      mkdir: async (p: string) => { this.config.sandbox.validatePath(p); await mkdir(p, { recursive: true }) },
+      writeFile: (p: string, c: string) => this.sandboxWrite(p, c),
+      mkdir: async (p: string) => { await this.config.sandbox.exec({ command: `mkdir -p ${shq(p)}` }) },
     }
   }
 
   private scopedEditOps(): EditOperations {
     return {
-      readFile: (p: string) => this.safeReadFile(p),
-      writeFile: (p: string, c: string) => this.safeWriteFile(p, c),
-      access: async (p: string) => { this.config.sandbox.validatePath(p); await access(p, constants.R_OK | constants.W_OK) },
+      readFile: (p: string) => this.sandboxRead(p),
+      writeFile: (p: string, c: string) => this.sandboxWrite(p, c),
+      access: (p: string) => this.sandboxAccess(p, 'rw'),
     }
   }
 

@@ -192,21 +192,11 @@ sandbox = false' \\
     return scriptPath
   }
 
-  /** Resolve a path relative to workspace, reject escapes */
-  private resolvePath(path: string): string {
-    const ws = this.config.workspace
-    const resolved = resolve(ws, path)
-    if (!resolved.startsWith(`${ws}/`) && resolved !== ws) {
-      throw new Error(`Path escapes workspace: ${path}`)
-    }
-    return resolved
-  }
-
   @tool(z.object({
     command: z.string(),
     timeout: z.number().optional(),
   }))
-  async exec({ command, timeout, signal }: { command: string, timeout?: number, signal?: AbortSignal }): Promise<{ stdout: string, stderr: string, exitCode: number }> {
+  async exec({ command, timeout, signal, stdin }: { command: string, timeout?: number, signal?: AbortSignal, stdin?: string }): Promise<{ stdout: string, stderr: string, exitCode: number }> {
     const { nix } = this.config
     const scriptPath = await this.ensureScript()
 
@@ -214,8 +204,12 @@ sandbox = false' \\
       const proc = spawn(
         `${nix.pasta}/bin/pasta`,
         ['--quiet', '--config-net', '--', `${nix.bash}/bin/bash`, scriptPath, command],
-        { stdio: ['ignore', 'pipe', 'pipe'] },
+        { stdio: [stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] },
       )
+
+      if (stdin !== undefined) {
+        proc.stdin!.end(stdin)
+      }
 
       let stdout = ''
       let stderr = ''
@@ -259,11 +253,6 @@ sandbox = false' \\
         reject(err)
       })
     })
-  }
-
-  /** Validate and resolve a path, ensuring it stays in workspace */
-  validatePath(path: string): string {
-    return this.resolvePath(path)
   }
 
   get workspace(): string {
