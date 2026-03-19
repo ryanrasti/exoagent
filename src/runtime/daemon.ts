@@ -89,8 +89,16 @@ export class Daemon {
     return new Daemon(repoDir, dataDir, storage, secrets)
   }
 
+  /** Validate agentId — alphanumeric, hyphens, underscores only */
+  private validateAgentId(agentId: string): void {
+    if (!/^[\w-]+$/.test(agentId)) {
+      throw new Error(`Invalid agent ID: ${agentId} (alphanumeric, hyphens, underscores only)`)
+    }
+  }
+
   /** Spawn an agent in a dtach session */
   async spawn(agentId: string): Promise<string> {
+    this.validateAgentId(agentId)
     const agentsDir = join(this.dataDir, 'agents')
     await mkdir(agentsDir, { recursive: true })
 
@@ -131,6 +139,7 @@ export class Daemon {
 
   /** Attach to an agent — replaces current process with dtach */
   attach(agentId: string): void {
+    this.validateAgentId(agentId)
     const sockPath = join(this.dataDir, 'agents', `${agentId}.sock`)
     if (!existsSync(sockPath)) {
       throw new Error(`Agent "${agentId}" not found (no socket at ${sockPath})`)
@@ -154,6 +163,7 @@ export class Daemon {
 
   /** Kill an agent — terminates the dtach process tree */
   kill(agentId: string): void {
+    this.validateAgentId(agentId)
     const agentsDir = join(this.dataDir, 'agents')
     const pidPath = join(agentsDir, `${agentId}.pid`)
     const sockPath = join(agentsDir, `${agentId}.sock`)
