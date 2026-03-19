@@ -35,37 +35,6 @@ Only the destructured caps are available. exoeval enforces this at the interpret
 
 ## Coding Conventions
 
-### Brackets
-
-`if`, `for`, `while` statements must always use curly brackets, even for single-line bodies.
-
-```typescript
-// Good
-if (condition) {
-  doSomething()
-}
-
-// Bad
-if (condition)
-  doSomething()
-```
-
-This is enforced by ESLint (`curly: ['error', 'all']`).
-
-### No inline `import()` for types
-
-Use `import type { ... } from '...'` at the top of the file. Inline `import()` types should only appear in `.d.ts` files.
-
-```typescript
-// Good
-import type { Secrets } from './secrets'
-
-// Bad
-secrets?: import('./secrets').Secrets
-```
-
-This is enforced by ESLint (`no-restricted-syntax` on `TSImportType`).
-
 ### Private instance variables
 
 Do not prefix private instance variables with `_`. Use `private` keyword only.
@@ -93,7 +62,7 @@ get token(): string {
 // Bad — redundant cache of a config value
 private cachedRepo: string | null = null
 getRepo() {
-  if (this.cachedRepo) return this.cachedRepo
+  if (this.cachedRepo) { return this.cachedRepo }
   if (this.config.repo) { this.cachedRepo = this.config.repo; return this.cachedRepo }
   // ...auto-detect...
 }
@@ -152,7 +121,7 @@ function toPublic(c: InternalComment): ReviewComment { ... }
 
 ### Use typedoc for descriptions
 
-Put descriptions in JSDoc/typedoc comments (which end up in `.d.ts` files), not in `.describe()` calls on zod schemas.
+Put descriptions in JSDoc/typedoc comments (which end up in `.d.ts` files), not in `.describe()` calls on zod schemas. This is specifically for tools that are passed to agents — the `.d.ts` is what the agent sees.
 
 ```typescript
 // Good — description in JSDoc
@@ -185,7 +154,3 @@ const { rm } = await import('node:fs/promises')
 ### No separate wrapper files
 
 Don't create a file for a class that just wraps a single function. Inline small cap classes in the file that uses them.
-
-### Security: no tokens in git URLs
-
-Never encode access tokens into git remote URLs. Git push should use the host's SSH key or credential helper. Only GitHub API operations (create PR, fetch reviews) use the token, attached directly to HTTP requests from the host.

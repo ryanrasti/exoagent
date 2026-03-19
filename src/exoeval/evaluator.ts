@@ -172,8 +172,9 @@ export class Evaluator<Expr> {
     if (typeof toStringRaw === 'function') {
       const result = this.ctx.call(this.ctx.of(toStringFn), [])
       const resultRaw = yield result
-      if (typeof resultRaw === 'string')
+      if (typeof resultRaw === 'string') {
         return resultRaw
+      }
     }
 
     // Fallback
@@ -181,16 +182,21 @@ export class Evaluator<Expr> {
   }
 
   getBuiltinPrototype(value: unknown): unknown {
-    if (typeof value === 'string')
+    if (typeof value === 'string') {
       return this.builtinPrototypes.String
-    if (typeof value === 'number')
+    }
+    if (typeof value === 'number') {
       return this.builtinPrototypes.Number
-    if (typeof value === 'boolean')
+    }
+    if (typeof value === 'boolean') {
       return this.builtinPrototypes.Boolean
-    if (Array.isArray(value))
+    }
+    if (Array.isArray(value)) {
       return this.builtinPrototypes.Array
-    if (value instanceof Date)
+    }
+    if (value instanceof Date) {
       return this.builtinPrototypes.Date
+    }
     return null
   }
 
