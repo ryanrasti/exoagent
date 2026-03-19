@@ -4,8 +4,8 @@ import type { Secrets } from './secrets'
 import type { StorageCap } from './storage'
 import { Buffer } from 'node:buffer'
 import { execFileSync } from 'node:child_process'
-import { constants } from 'node:fs'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { closeSync, constants, readlinkSync } from 'node:fs'
+import { access, mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Agent as PiAgent } from '@mariozechner/pi-agent-core'
@@ -100,28 +100,63 @@ export class PiCap {
     }
   }
 
+  /**
+   * Assert that an open fd points to a file inside the workspace.
+   * Uses /proc/self/fd/N to resolve the real path after symlinks,
+   * which is TOCTOU-safe because the fd pins the inode.
+   */
+  private assertFdInWorkspace(fd: number, originalPath: string): void {
+    const real = readlinkSync(`/proc/self/fd/${fd}`)
+    const ws = this.config.sandbox.workspace
+    if (real !== ws && !real.startsWith(`${ws}/`)) {
+      closeSync(fd)
+      throw new Error(`Path escapes workspace via symlink: ${originalPath} -> ${real}`)
+    }
+  }
+
+  /** Read a file, verifying via fd that it's inside the workspace */
+  private async safeReadFile(p: string): Promise<Buffer> {
+    this.config.sandbox.validatePath(p)
+    const fh = await open(p, constants.O_RDONLY)
+    try {
+      this.assertFdInWorkspace(fh.fd, p)
+      return await fh.readFile()
+    } finally {
+      await fh.close()
+    }
+  }
+
+  /** Write a file, verifying via fd that it's inside the workspace */
+  private async safeWriteFile(p: string, content: string): Promise<void> {
+    this.config.sandbox.validatePath(p)
+    const fh = await open(p, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, 0o644)
+    try {
+      this.assertFdInWorkspace(fh.fd, p)
+      await fh.writeFile(content)
+    } finally {
+      await fh.close()
+    }
+  }
+
   private scopedReadOps(): ReadOperations {
-    const sandbox = this.config.sandbox
     return {
-      readFile: async (p: string) => { sandbox.validatePath(p); return readFile(p) },
-      access: async (p: string) => { sandbox.validatePath(p); await access(p, constants.R_OK) },
+      readFile: (p: string) => this.safeReadFile(p),
+      access: async (p: string) => { this.config.sandbox.validatePath(p); await access(p, constants.R_OK) },
     }
   }
 
   private scopedWriteOps(): WriteOperations {
-    const sandbox = this.config.sandbox
     return {
-      writeFile: async (p: string, c: string) => { sandbox.validatePath(p); await writeFile(p, c) },
-      mkdir: async (p: string) => { sandbox.validatePath(p); await mkdir(p, { recursive: true }) },
+      writeFile: (p: string, c: string) => this.safeWriteFile(p, c),
+      mkdir: async (p: string) => { this.config.sandbox.validatePath(p); await mkdir(p, { recursive: true }) },
     }
   }
 
   private scopedEditOps(): EditOperations {
-    const sandbox = this.config.sandbox
     return {
-      readFile: async (p: string) => { sandbox.validatePath(p); return readFile(p) },
-      writeFile: async (p: string, c: string) => { sandbox.validatePath(p); await writeFile(p, c) },
-      access: async (p: string) => { sandbox.validatePath(p); await access(p, constants.R_OK | constants.W_OK) },
+      readFile: (p: string) => this.safeReadFile(p),
+      writeFile: (p: string, c: string) => this.safeWriteFile(p, c),
+      access: async (p: string) => { this.config.sandbox.validatePath(p); await access(p, constants.R_OK | constants.W_OK) },
     }
   }
 
