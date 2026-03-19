@@ -76,29 +76,6 @@ async function main() {
     return
   }
 
-  if (command === 'secret-set') {
-    // target = "provider/name=value"
-    if (!target || !target.includes('=')) {
-      console.error('Usage: --secret-set provider/name=value')
-      process.exit(1)
-    }
-    const [key, ...rest] = target.split('=')
-    const value = rest.join('=')
-    const [provider, name] = key.split('/')
-    if (!provider || !name) {
-      console.error('Usage: --secret-set provider/name=value')
-      process.exit(1)
-    }
-    const dataDir = join(repoDir, '.exoagent')
-    const { mkdirSync } = await import('node:fs')
-    mkdirSync(dataDir, { recursive: true })
-    const { Secrets } = await import('./providers/secrets')
-    const secrets = Secrets.create(dataDir)
-    secrets.set(provider, name, value)
-    console.log(`Set ${provider}/${name}`)
-    return
-  }
-
   const daemon = await Daemon.start({ repoDir })
 
   const cleanup = async () => {
