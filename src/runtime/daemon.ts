@@ -197,12 +197,7 @@ export class Daemon {
 
   /** Eval arbitrary code with daemon caps (like an inline exo) */
   async evalCode(code: string): Promise<unknown> {
-    // Wrap bare code as an exported default function if needed
-    const wrapped = code.includes('export default')
-      ? code
-      : `export default async ({ spawn, args, attach, storage, review }) => {\n${code}\n}`
-
-    const exo = await loadExo('eval', wrapped)
+    const exo = await loadExo('eval', `export default async ${code}`)
 
     const caps: Record<string, object> = {
       spawn: new SpawnCap((id: string) => this.spawn(id)),

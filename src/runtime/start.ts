@@ -15,7 +15,7 @@ import { runSecretsUI } from './secrets-ui'
  *   exoagentd --attach <id>                   Attach to running agent
  *   exoagentd --kill <id>                     Kill an agent
  *   exoagentd --secrets                       Manage secrets
- *   exoagentd --eval <code>                   Eval code with daemon caps
+ *   exoagentd --eval '({review}) => review.getReviews({pr:1})'
  */
 
 async function main() {
@@ -36,11 +36,7 @@ async function main() {
     }
     else if (arg === '--eval') {
       command = 'eval'
-      // Everything after --eval is the code
-      i++
-      target = rawArgs.slice(i).join(' ')
-      i = rawArgs.length
-      break
+      target = rawArgs[++i]
     }
     else if (arg === '--run') {
       command = 'run'
