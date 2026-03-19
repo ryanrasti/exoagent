@@ -61,7 +61,10 @@ export class StorageCap {
   @tool(z.string())
   async dir(name: string): Promise<string> {
     const resolved = resolve(this.root, name)
-    if (!resolved.startsWith(`${this.root}/`) && resolved !== this.root) {
+    if (resolved === this.root) {
+      throw new Error('dir name cannot be empty or "."')
+    }
+    if (!resolved.startsWith(`${this.root}/`)) {
       throw new Error(`dir name escapes storage root: ${name}`)
     }
     if (name === DB_FILE) {

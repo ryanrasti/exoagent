@@ -127,5 +127,13 @@ describe('StorageCap', () => {
     it('rejects reserved name', async () => {
       await expect(storage.dir('storage.db')).rejects.toThrow('reserved')
     })
+
+    it('rejects empty name', async () => {
+      await expect(storage.dir('')).rejects.toThrow('cannot be empty')
+    })
+
+    it('rejects "." name', async () => {
+      await expect(storage.dir('.')).rejects.toThrow('cannot be empty')
+    })
   })
 })
