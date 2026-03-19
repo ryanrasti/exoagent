@@ -155,6 +155,10 @@ const { rm } = await import('node:fs/promises')
 
 Don't create a file for a class that just wraps a single function. Inline small cap classes in the file that uses them.
 
+### No unused config fields
+
+Don't add optional config fields "just in case." If nothing passes a value, remove the field. Add it back when there's an actual caller.
+
 ---
 
 ## Known Issues / TODO

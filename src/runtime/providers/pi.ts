@@ -58,16 +58,11 @@ export interface PiCapConfig {
   systemPrompt?: string
   /** Pre-generated .d.ts for caps (required when caps are provided) */
   capsDts: string
-  /** Model override. Default: from settings/auth (normal pi behavior) */
-  model?: Model<any>
-  /** Extension factories for provider registration (e.g. mock providers in tests) */
-  extensionFactories?: ExtensionFactory[]
-  /** Model registry override */
-  modelRegistry?: ModelRegistry
-  /** Settings manager override. Default: disk-backed (normal pi behavior) */
-  settingsManager?: SettingsManager
-  /** Session manager override. Default: disk-backed (normal pi behavior) */
-  sessionManager?: SessionManager
+  // -- Test overrides (used by pi.test.ts for mock LLM) --
+  /** @internal */ model?: Model<any>
+  /** @internal */ extensionFactories?: ExtensionFactory[]
+  /** @internal */ settingsManager?: SettingsManager
+  /** @internal */ sessionManager?: SessionManager
 }
 
 export class PiCap {
@@ -167,7 +162,7 @@ export class PiCap {
     const workspace = this.config.sandbox.workspace
     const agentDir = getAgentDir()
     const authStorage = AuthStorage.create(join(agentDir, 'auth.json'))
-    const modelRegistry = this.config.modelRegistry ?? new ModelRegistry(authStorage, join(agentDir, 'models.json'))
+    const modelRegistry = new ModelRegistry(authStorage, join(agentDir, 'models.json'))
     const settingsManager = this.config.settingsManager ?? SettingsManager.create(workspace, agentDir)
     const sessionManager = this.config.sessionManager ?? SessionManager.create(workspace)
 
