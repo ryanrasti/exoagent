@@ -190,19 +190,6 @@ export class ReviewCap {
     const result = await ghApi<any>(token, 'POST', `/repos/${encodeURI(repo)}/issues/${pr}/comments`, { body })
     return { id: result.id }
   }
-
-  /** List open PRs on the repo. */
-  async listOpenPRs(): Promise<Array<{ number: number, title: string, branch: string, url: string }>> {
-    const repo = this.config.repo
-    const token = this.token
-    const prs = await ghApi<any[]>(token, 'GET', `/repos/${encodeURI(repo)}/pulls?state=open`)
-    return prs.map((pr: any) => ({
-      number: pr.number,
-      title: pr.title,
-      branch: pr.head?.ref ?? '',
-      url: pr.html_url,
-    }))
-  }
 }
 
 // -- GitHub API helper ------------------------------------------------------

@@ -20,7 +20,7 @@ describe('generateCapDts', () => {
   it('extracts ReviewCap public methods', () => {
     const capDts = generateCapDts(resolve(__dirname, 'providers/review.ts'), 'ReviewCap')
     expect(capDts).toContain('openPR')
-    expect(capDts).toContain('listOpenPRs')
+    expect(capDts).toContain('getReviews')
     // Should not contain private methods
     expect(capDts).not.toContain('ensureRemote')
     expect(capDts).not.toContain('pollForReview')
