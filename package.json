@@ -48,6 +48,7 @@
     "release": "bumpp",
     "start": "tsx src/index.ts",
     "test": "vitest --run",
+    "test:ci": "vitest --run --exclude '**/*.local.test.ts'",
     "typecheck": "tsc",
     "check:examples": "npm --prefix ./examples run check",
     "check": "npm ci && npm run lint && npm run typecheck && npm run build && npm run test && npm run check:examples"
@@ -56,6 +57,9 @@
     "ai": "^6.0.0"
   },
   "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.58.4",
+    "@sinclair/typebox": "^0.34.48",
+    "better-sqlite3": "^12.8.0",
     "camelcase": "^9.0.0",
     "json-schema": "^0.4.0",
     "json-schema-to-typescript": "^15.0.0",
@@ -71,6 +75,7 @@
     "@antfu/utils": "9.3.0",
     "@electric-sql/pglite": "^0.3.15",
     "@standard-schema/spec": "^1.1.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "25.0.1",
     "acorn": "^8.16.0",
     "bumpp": "10.3.2",

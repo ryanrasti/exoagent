@@ -109,23 +109,23 @@ export async function* generateToolTypes(
       ? getJsonSchema(tool.outputSchema)
       : null
 
+    const compileOpts = {
+      format: false,
+      bannerComment: ' ',
+      cwd: '/',
+    }
+
     const inputJsonType = await compileJsonSchemaToTs(
       inputSchema,
       `${camelCase(toolName, { pascalCase: true })}Input`,
-      {
-        format: false,
-        bannerComment: ' ',
-      },
+      compileOpts,
     )
 
     const outputJsonType = outputSchema
       ? await compileJsonSchemaToTs(
           outputSchema,
           `${camelCase(toolName, { pascalCase: true })}Output`,
-          {
-            format: false,
-            bannerComment: ' ',
-          },
+          compileOpts,
         )
       : null
 

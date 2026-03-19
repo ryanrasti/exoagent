@@ -1,4 +1,5 @@
 import type { ExpressionContext } from './expr'
+import type { IExoArray, IExoBoolean, IExoDate, IExoJSON, IExoMath, IExoNumber, IExoPromise, IExoString } from './lib'
 import sjson from 'secure-json-parse'
 import z from 'zod'
 import { isPlainObject } from './expr'
@@ -6,11 +7,13 @@ import { expr, fn, tool } from './tool'
 import { disallowedProperties } from './utils'
 
 @tool()
-export class ExoArray<T = unknown> {
+export class ExoArray<T = unknown> implements IExoArray<T> {
   constructor(...args: Parameters<typeof Array>) {
     // eslint-disable-next-line unicorn/no-new-array
     return new Array(...args) as unknown as ExoArray<T>
   }
+
+  [index: number]: T
 
   @tool()
   get length(): number {
@@ -52,6 +55,9 @@ export class ExoArray<T = unknown> {
 
   @tool(fn.returns(z.any()))
   get flatMap() { return Array.prototype.flatMap }
+
+  @tool(fn.returns(z.void()))
+  get forEach() { return Array.prototype.forEach }
 
   @tool(fn.returns(z.any()).optional())
   get toSorted() { return Array.prototype.toSorted }
@@ -98,6 +104,9 @@ export class ExoArray<T = unknown> {
   @tool(z.number(), z.any())
   get with() { return Array.prototype.with }
 
+  @tool()
+  get toString() { return Array.prototype.toString }
+
   // Statics
   @tool(z.array(z.any()))
   static from(arrayLike: ArrayLike<unknown>) { return Array.from(arrayLike) }
@@ -107,7 +116,7 @@ export class ExoArray<T = unknown> {
 }
 
 @tool(z.union([z.string(), z.number(), z.instanceof(Date), z.boolean(), z.null(), z.undefined(), z.bigint()]))
-export class ExoString {
+export class ExoString implements IExoString {
   constructor(...args: Parameters<typeof String>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new String(...args) as unknown as ExoString
@@ -189,10 +198,13 @@ export class ExoString {
 
   @tool()
   get trimStart() { return String.prototype.trimStart }
+
+  @tool()
+  get toString() { return String.prototype.toString }
 }
 
 @tool(z.union([z.string(), z.number(), z.instanceof(Date)]).optional())
-export class ExoDate {
+export class ExoDate implements IExoDate {
   constructor()
   constructor(value: string | number | Date)
   constructor(year: number, month: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number)
@@ -240,6 +252,9 @@ export class ExoDate {
   @tool()
   get valueOf() { return Date.prototype.valueOf }
 
+  @tool()
+  get toString() { return Date.prototype.toString }
+
   // Statics
   @tool()
   static now() { return Date.now() }
@@ -252,24 +267,27 @@ export class ExoObject {
   @expr()
   static keys(ctx: ExpressionContext, obj: unknown) {
     const seq = ctx.sequence(obj)
-    if (!isPlainObject(seq))
+    if (!isPlainObject(seq)) {
       throw new TypeError('Object.keys requires an object')
+    }
     return ctx.distribute(Object.keys(seq).map(k => ctx.of(k)))
   }
 
   @expr()
   static values(ctx: ExpressionContext, obj: unknown) {
     const seq = ctx.sequence(obj)
-    if (!isPlainObject(seq))
+    if (!isPlainObject(seq)) {
       throw new TypeError('Object.values requires an object')
+    }
     return ctx.distribute(Object.values(seq))
   }
 
   @expr()
   static entries(ctx: ExpressionContext, obj: unknown) {
     const seq = ctx.sequence(obj)
-    if (!isPlainObject(seq))
+    if (!isPlainObject(seq)) {
       throw new TypeError('Object.entries requires an object')
+    }
     return ctx.distribute(
       Object.entries(seq).map(([k, v]) => ctx.distribute([ctx.of(k), v])),
     )
@@ -284,7 +302,7 @@ export class ExoObject {
 }
 
 @tool(z.any())
-export class ExoBoolean {
+export class ExoBoolean implements IExoBoolean {
   constructor(...args: Parameters<typeof Boolean>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new Boolean(...args)
@@ -292,6 +310,9 @@ export class ExoBoolean {
 
   @tool()
   get valueOf() { return Boolean.prototype.valueOf }
+
+  @tool()
+  get toString() { return Boolean.prototype.toString }
 }
 
 export class ExoJSON {
@@ -342,12 +363,32 @@ export class ExoMath {
   static trunc(x: number) { return Math.trunc(x) }
 }
 
+export class ExoPromise {
+  @tool(z.array(z.any()))
+  static all(values: unknown[]) { return Promise.all(values as Promise<unknown>[]) }
+
+  @tool(z.array(z.any()))
+  static allSettled(values: unknown[]) { return Promise.allSettled(values as Promise<unknown>[]) }
+
+  @tool(z.array(z.any()))
+  static race(values: unknown[]) { return Promise.race(values as Promise<unknown>[]) }
+
+  @tool(z.any())
+  static resolve(value: unknown) { return Promise.resolve(value) }
+
+  @tool(z.any())
+  static reject(reason: unknown) { return Promise.reject(reason) }
+}
+
 @tool(z.union([z.string(), z.number(), z.bigint()]))
-export class ExoNumber {
+export class ExoNumber implements IExoNumber {
   constructor(...args: Parameters<typeof Number>) {
     // eslint-disable-next-line unicorn/new-for-builtins, no-new-wrappers
     return new Number(...args)
   }
+
+  @tool(z.number().optional())
+  get toString() { return Number.prototype.toString }
 
   @tool(z.string(), z.number().optional())
   static parseInt(s: string, radix?: number) { return Number.parseInt(s, radix) }
@@ -364,3 +405,8 @@ export class ExoNumber {
   @tool(z.any())
   static isInteger(value: unknown) { return Number.isInteger(value) }
 }
+
+// Static-only classes can't use `implements` — check with satisfies instead.
+ExoJSON satisfies IExoJSON
+ExoMath satisfies IExoMath
+ExoPromise satisfies IExoPromise

@@ -1,0 +1,254 @@
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import process from 'node:process'
+
+import { z } from 'zod'
+import { tool } from '../exoeval/tool'
+import { loadExo } from './exo'
+import { ArgsCap } from './providers/args'
+import { ReviewCap } from './providers/review'
+import { nixPathsFromEnv } from './providers/sandbox'
+import { Secrets } from './providers/secrets'
+import { StorageCap } from './providers/storage'
+
+/**
+ * exoagentd — runtime daemon.
+ *
+ * Owns shared infrastructure (storage, secrets) and manages
+ * agent processes via dtach (terminal session manager).
+ */
+
+export interface DaemonConfig {
+  repoDir: string
+  dataDir?: string
+}
+
+/**
+ * Spawn cap — creates agent sessions in dtach.
+ * Defined inline per convention (no separate wrapper file).
+ */
+class SpawnCap {
+  private doSpawn: (id: string) => Promise<string>
+
+  constructor(spawnFn: (id: string) => Promise<string>) {
+    this.doSpawn = spawnFn
+  }
+
+  @tool(z.object({ id: z.string() }))
+  async create({ id }: { id: string }): Promise<string> {
+    return this.doSpawn(id)
+  }
+}
+
+/**
+ * Attach cap — attaches the current terminal to an agent's dtach session.
+ * Defined inline per convention (no separate wrapper file).
+ */
+class AttachCap {
+  private doAttach: (id: string) => void
+
+  constructor(attachFn: (id: string) => void) {
+    this.doAttach = attachFn
+  }
+
+  @tool(z.object({ id: z.string() }))
+  async connect({ id }: { id: string }): Promise<void> {
+    this.doAttach(id)
+  }
+}
+
+export class Daemon {
+  readonly repoDir: string
+  readonly dataDir: string
+  readonly storage: StorageCap
+  readonly secrets: Secrets
+
+  private constructor(
+    repoDir: string,
+    dataDir: string,
+    storage: StorageCap,
+    secrets: Secrets,
+  ) {
+    this.repoDir = repoDir
+    this.dataDir = dataDir
+    this.storage = storage
+    this.secrets = secrets
+  }
+
+  static async start(config: DaemonConfig): Promise<Daemon> {
+    const repoDir = config.repoDir
+    const dataDir = config.dataDir ?? join(repoDir, '.exoagent')
+
+    await mkdir(dataDir, { recursive: true })
+
+    const storage = StorageCap.create(join(dataDir, 'storage'))
+    const secrets = Secrets.create(join(dataDir, 'secrets'))
+
+    return new Daemon(repoDir, dataDir, storage, secrets)
+  }
+
+  /** Validate agentId — alphanumeric, hyphens, underscores only */
+  private validateAgentId(agentId: string): void {
+    if (!/^[\w-]+$/.test(agentId)) {
+      throw new Error(`Invalid agent ID: ${agentId} (alphanumeric, hyphens, underscores only)`)
+    }
+  }
+
+  /** Spawn an agent in a dtach session */
+  async spawn(agentId: string): Promise<string> {
+    this.validateAgentId(agentId)
+    const agentsDir = join(this.dataDir, 'agents')
+    await mkdir(agentsDir, { recursive: true })
+
+    const sockPath = join(agentsDir, `${agentId}.sock`)
+    if (existsSync(sockPath)) {
+      throw new Error(`Agent "${agentId}" already running (socket exists: ${sockPath})`)
+    }
+
+    const nix = nixPathsFromEnv()
+    const dtach = join(nix.dtach, 'bin', 'dtach')
+    const agentScript = join(import.meta.dirname!, 'start-agent.ts')
+
+    const proc = spawn(dtach, ['-n', sockPath, 'npx', 'tsx', agentScript], {
+      cwd: this.repoDir,
+      stdio: 'ignore',
+      detached: true,
+      env: {
+        ...process.env,
+        EXOAGENT_REPO_DIR: this.repoDir,
+        EXOAGENT_DATA_DIR: this.dataDir,
+        EXOAGENT_AGENT_ID: agentId,
+      },
+    })
+    proc.unref()
+
+    const pidPath = join(agentsDir, `${agentId}.pid`)
+    writeFileSync(pidPath, String(proc.pid))
+
+    // Wait for socket to appear
+    for (let i = 0; i < 50; i++) {
+      if (existsSync(sockPath)) {
+        return agentId
+      }
+      await new Promise(r => setTimeout(r, 100))
+    }
+    throw new Error(`Agent "${agentId}" failed to start (socket not created)`)
+  }
+
+  /** Attach to an agent — replaces current process with dtach */
+  attach(agentId: string): void {
+    this.validateAgentId(agentId)
+    const sockPath = join(this.dataDir, 'agents', `${agentId}.sock`)
+    if (!existsSync(sockPath)) {
+      throw new Error(`Agent "${agentId}" not found (no socket at ${sockPath})`)
+    }
+
+    const nix = nixPathsFromEnv()
+    const dtach = join(nix.dtach, 'bin', 'dtach')
+    execFileSync(dtach, ['-a', sockPath], { stdio: 'inherit' })
+  }
+
+  /** List running agents (by socket files) */
+  list(): string[] {
+    const agentsDir = join(this.dataDir, 'agents')
+    if (!existsSync(agentsDir)) {
+      return []
+    }
+    return readdirSync(agentsDir)
+      .filter(f => f.endsWith('.sock'))
+      .map(f => f.replace('.sock', ''))
+  }
+
+  /** Kill an agent — terminates the dtach process tree */
+  kill(agentId: string): void {
+    this.validateAgentId(agentId)
+    const agentsDir = join(this.dataDir, 'agents')
+    const pidPath = join(agentsDir, `${agentId}.pid`)
+    const sockPath = join(agentsDir, `${agentId}.sock`)
+
+    try {
+      const pid = Number.parseInt(readFileSync(pidPath, 'utf-8').trim())
+      if (pid) {
+        process.kill(-pid, 'SIGTERM')
+      }
+    }
+    catch {}
+
+    try { unlinkSync(pidPath) }
+    catch {}
+    try { unlinkSync(sockPath) }
+    catch {}
+  }
+
+  /** Run an exo with daemon caps */
+  async runExo(name: string, exoArgs: string[] = []): Promise<unknown> {
+    const exoPath = join(import.meta.dirname!, 'exos', `${name}.ts`)
+    const source = readFileSync(exoPath, 'utf-8')
+
+    const esbuild = await import('esbuild')
+    const { code: stripped } = esbuild.transformSync(source, { loader: 'ts', format: 'esm' })
+    const code = stripped
+      .replace(/^var (\w+) = /, 'export default ')
+      .replace(/\nexport \{[\s\S]*\};\s*$/, '\n')
+
+    const exo = await loadExo(name, code)
+
+    const caps = {
+      spawn: new SpawnCap((id: string) => this.spawn(id)),
+      args: new ArgsCap(exoArgs),
+      attach: new AttachCap((id: string) => this.attach(id)),
+      storage: this.storage,
+    }
+
+    return exo.run(caps)
+  }
+
+  /** Eval arbitrary code with daemon caps (like an inline exo) */
+  async evalCode(code: string): Promise<unknown> {
+    const exo = await loadExo('eval', `export default async ${code}`)
+
+    const caps: Record<string, object> = {
+      spawn: new SpawnCap((id: string) => this.spawn(id)),
+      args: new ArgsCap([]),
+      attach: new AttachCap((id: string) => this.attach(id)),
+      storage: this.storage,
+    }
+    const review = this.getReviewCap()
+    if (review) { caps.review = review }
+
+    return exo.run(caps)
+  }
+
+  /** Get a ReviewCap for the default clone (if exists) */
+  private getReviewCap(): ReviewCap | undefined {
+    const cloneDir = join(this.dataDir, 'clones', 'default')
+    if (!existsSync(cloneDir)) { return undefined }
+    const nix = nixPathsFromEnv()
+    const git = join(nix.git, 'bin', 'git')
+    // Detect repo from origin
+    let repo = ''
+    try {
+      const url = execFileSync(git, ['remote', 'get-url', 'origin'], { cwd: cloneDir, encoding: 'utf-8' }).trim()
+      const match = url.match(/github\.com[:/]([^/]+\/[^/.]+)/)
+      if (match) { repo = match[1] }
+    }
+    catch {}
+    if (!repo) { return undefined }
+    const ghToken = this.secrets.get('review', 'GITHUB_TOKEN')
+    if (!ghToken) { return undefined }
+    return new ReviewCap({
+      cloneDir,
+      git: nix.git,
+      token: ghToken,
+      repo,
+    })
+  }
+
+  async stop(): Promise<void> {
+    for (const id of this.list()) {
+      this.kill(id)
+    }
+  }
+}

@@ -263,8 +263,7 @@ export function AgentChat({ chat, onHacked, placeholder, emptyState, accentColor
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading)
-      return
+    if (!input.trim() || isLoading) { return }
 
     const userInput = input.trim().slice(0, maxMessageLength)
     const userMessage: Message = {
@@ -427,8 +426,7 @@ async function createRawDb(): Promise<Database> {
 // Execute query and return results
 function executeQuery(db: Database, sql: string): Record<string, unknown>[] {
   const results = db.exec(sql)
-  if (results.length === 0)
-    return []
+  if (results.length === 0) { return [] }
   const { columns, values } = results[0]
   return values.map(row => Object.fromEntries(columns.map((col, i) => [col, row[i]])))
 }

@@ -1,5 +1,6 @@
 import type * as acorn from 'acorn'
 import type { Control, ExpressionContext } from './expr'
+import { allowedExpressions } from './allowed'
 import { getControl, isPlainObject, makeControl } from './expr'
 import { Scope } from './scope'
 import { getTool, isExprFunction, isToolableConstructor, isToolableFunction } from './tool'
@@ -152,17 +153,50 @@ export class Evaluator<Expr> {
     return this.ctx.of(tool)
   }
 
+  /**
+   * Convert a value to string for interpolation/concatenation.
+   * Calls .toString() via getExoProperty if available.
+   */
+  * toString(obj: Expr, node: acorn.Node): EvalResult<Expr, string> {
+    const raw = yield obj
+    if (raw === null) {
+      return 'null'
+    }
+    if (raw === undefined) {
+      return 'undefined'
+    }
+
+    // Get .toString method from builtin prototype
+    const toStringFn = yield* this.getExoProperty(obj, 'toString', node, true)
+    const toStringRaw = yield toStringFn
+    if (typeof toStringRaw === 'function') {
+      const result = this.ctx.call(this.ctx.of(toStringFn), [])
+      const resultRaw = yield result
+      if (typeof resultRaw === 'string') {
+        return resultRaw
+      }
+    }
+
+    // Fallback
+    return '[object]'
+  }
+
   getBuiltinPrototype(value: unknown): unknown {
-    if (typeof value === 'string')
+    if (typeof value === 'string') {
       return this.builtinPrototypes.String
-    if (typeof value === 'number')
+    }
+    if (typeof value === 'number') {
       return this.builtinPrototypes.Number
-    if (typeof value === 'boolean')
+    }
+    if (typeof value === 'boolean') {
       return this.builtinPrototypes.Boolean
-    if (Array.isArray(value))
+    }
+    if (Array.isArray(value)) {
       return this.builtinPrototypes.Array
-    if (value instanceof Date)
+    }
+    if (value instanceof Date) {
       return this.builtinPrototypes.Date
+    }
     return null
   }
 
@@ -192,16 +226,27 @@ export class Evaluator<Expr> {
     return result
   }
 
-  * evalStatements(statements: (acorn.Statement | acorn.ModuleDeclaration)[]): EvalResult<Expr> {
+  * evalStatements(statements: (acorn.Statement | acorn.ModuleDeclaration)[], { module = false } = {}): EvalResult<Expr> {
     let result = this.ctx.of(undefined)
+    const exports: Record<string, Expr> = {}
     for (const statement of statements) {
-      this.inv.parse(
-        statement.type !== 'ImportDeclaration' && statement.type !== 'ExportAllDeclaration' && statement.type !== 'ExportNamedDeclaration' && statement.type !== 'ExportDefaultDeclaration',
-        'statement is not a statement',
-        statement,
-      )
+      if (statement.type === 'ImportDeclaration') {
+        this.inv.parse(false, 'imports are not allowed', statement)
+      }
+      if (statement.type === 'ExportAllDeclaration' || statement.type === 'ExportNamedDeclaration') {
+        this.inv.parse(false, 'only export default is allowed', statement)
+      }
+      if (statement.type === 'ExportDefaultDeclaration') {
+        this.inv.parse(module, 'export is not allowed in script mode', statement)
+        const exported = yield* this.Expression(statement.declaration as acorn.Expression)
+        this.defineProperty(exports, 'default', exported, statement)
+        continue
+      }
 
       result = yield* this.Statement(statement)
+    }
+    if (module) {
+      return this.ctx.distribute(exports)
     }
     return result
   }
@@ -288,8 +333,11 @@ export class Evaluator<Expr> {
 
   * BinaryExpression(node: acorn.BinaryExpression): EvalResult<Expr> {
     this.inv.parse(node.left.type !== 'PrivateIdentifier', 'private identifiers are not allowed', node)
-    const left = yield* this.$(node.left)
-    const right = yield* this.$(node.right)
+    const leftExpr = yield* this.Expression(node.left)
+    const rightExpr = yield* this.Expression(node.right)
+    const left = yield leftExpr
+    const right = yield rightExpr
+
     switch (node.operator) {
       case '===':
         return this.ctx.of(left === right)
@@ -303,6 +351,16 @@ export class Evaluator<Expr> {
         return this.ctx.of(left != right)
     }
 
+    // For +, if both numbers do addition, otherwise string concatenation
+    if (node.operator === '+') {
+      if (typeof left === 'number' && typeof right === 'number') {
+        return this.ctx.of(left + right)
+      }
+      const leftStr = yield* this.toString(leftExpr, node.left)
+      const rightStr = yield* this.toString(rightExpr, node.right)
+      return this.ctx.of(leftStr + rightStr)
+    }
+
     this.inv.eval((typeof left === 'number' || typeof left === 'string') && (typeof right === 'number' || typeof right === 'string'), 'left and right are not numbers or strings', node, { left, right })
 
     switch (node.operator) {
@@ -312,8 +370,6 @@ export class Evaluator<Expr> {
         return this.ctx.of(left > right)
       case '<=':
         return this.ctx.of(left <= right)
-      case '+':
-        return this.ctx.of((left as any) + (right as any))
     }
 
     this.inv.eval((typeof left === 'number') && (typeof right === 'number'), 'left and right are not numbers', node, { left, right })
@@ -364,15 +420,15 @@ export class Evaluator<Expr> {
   }
 
   * TemplateLiteral(node: acorn.TemplateLiteral): EvalResult<Expr> {
-    const result: (string | number | boolean)[] = []
+    const result: string[] = []
     for (const [i, quasi] of node.quasis.entries()) {
       this.inv.eval(quasi.value.cooked != null, 'invalid template literal', quasi, quasi.value.raw)
       result.push(quasi.value.cooked)
       const expr = node.expressions[i]
       if (expr) {
-        const val = yield* this.$(expr)
-        this.inv.eval(typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean', 'template expressions must evaluate to a string, number, or boolean', expr, val)
-        result.push(val)
+        const exprValue = yield* this.Expression(expr)
+        const str = yield* this.toString(exprValue, expr)
+        result.push(str)
       }
     }
     return this.ctx.of(result.join(''))
@@ -399,8 +455,7 @@ export class Evaluator<Expr> {
   }
 
   * Expression(node: acorn.Expression): EvalResult<Expr> {
-    const supportedExpressions = ['ArrayExpression', 'ArrowFunctionExpression', 'AwaitExpression', 'BinaryExpression', 'CallExpression', 'ConditionalExpression', 'Function', 'Identifier', 'Literal', 'LogicalExpression', 'MemberExpression', 'NewExpression', 'ObjectExpression', 'TemplateLiteral', 'UnaryExpression', 'ChainExpression'] as const
-    this.inv.parse(supportedExpressions.includes(node.type as (typeof supportedExpressions)[number]), `unsupported expression type: ${node.type}`, node)
+    this.inv.parse(allowedExpressions.includes(node.type as (typeof allowedExpressions)[number]), `unsupported expression type: ${node.type}`, node)
     return yield* (this as any)[node.type](node) as unknown as EvalResult<Expr>
   }
 
@@ -450,8 +505,8 @@ export class Evaluator<Expr> {
     this.inv.parse(false, 'unsupported statement type', node)
   }
 
-  Program(node: acorn.Program): Expr | Promise<Expr> {
-    const iter = this.ctx.doGen(this.evalStatements(node.body))
+  Program(node: acorn.Program, { module = false } = {}): Expr | Promise<Expr> {
+    const iter = this.ctx.doGen(this.evalStatements(node.body, { module }))
     let step = iter.next()
     if (step.done) {
       return step.value
