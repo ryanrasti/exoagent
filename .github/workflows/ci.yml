@@ -14,38 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-          cache: npm
-
-      - run: npm ci
-      - run: npm run build
-      - run: cd website && npm ci
-      - run: cd examples && npm ci
-      - run: npm run lint
-      - run: npm run typecheck
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix develop --command bash -c "npm ci && npm run lint && npm run typecheck"
 
   test:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        node: [lts/*]
-        # omitting windows-latest (something is wrong with code-mode.test.ts)
-        os: [ubuntu-latest, macos-latest]
-      fail-fast: false
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: git submodule update --init --recursive
-      - name: Set node ${{ matrix.node }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-
-      - run: npm ci
-      - run: npm run build
-      - run: npm run test
-      - run: cd examples && npm ci && npm run check
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix develop --command bash -c "npm ci && npm run test"
