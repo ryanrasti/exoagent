@@ -162,6 +162,7 @@ mkdir -p ${root}/nix ${root}/home/agent
 # /nix is bind-mounted from session storage — persists across exec calls
 # Host closure paths are ro-bound on top so existing packages are available
 exec ${nix.bwrap}/bin/bwrap \\
+  --clearenv \\
   --die-with-parent \\
   --unshare-pid \\
   --bind ${root}/nix /nix \\
@@ -205,7 +206,7 @@ sandbox = false' \\
     command: z.string(),
     timeout: z.number().optional(),
   }))
-  async exec({ command, timeout, env, signal }: { command: string, timeout?: number, env?: Record<string, string>, signal?: AbortSignal }): Promise<{ stdout: string, stderr: string, exitCode: number }> {
+  async exec({ command, timeout, signal }: { command: string, timeout?: number, signal?: AbortSignal }): Promise<{ stdout: string, stderr: string, exitCode: number }> {
     const { nix } = this.config
     const scriptPath = await this.ensureScript()
 
@@ -213,7 +214,7 @@ sandbox = false' \\
       const proc = spawn(
         `${nix.pasta}/bin/pasta`,
         ['--quiet', '--config-net', '--', `${nix.bash}/bin/bash`, scriptPath, command],
-        { stdio: ['ignore', 'pipe', 'pipe'], env: env ? { ...process.env, ...env } : undefined },
+        { stdio: ['ignore', 'pipe', 'pipe'] },
       )
 
       let stdout = ''

@@ -93,7 +93,7 @@ export class PiCap {
         timeout?: number
         env?: NodeJS.ProcessEnv
       }) => {
-        const result = await sandbox.exec({ command, timeout: options.timeout, env: options.env as Record<string, string>, signal: options.signal })
+        const result = await sandbox.exec({ command, timeout: options.timeout, signal: options.signal })
         if (result.stdout) {
           options.onData(Buffer.from(result.stdout))
         }
