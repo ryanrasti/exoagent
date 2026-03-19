@@ -434,10 +434,15 @@ export async function spawnAgent(config: SpawnAgentConfig): Promise<Agent> {
   let capsDts: string | undefined
 
   if (repo) {
+    // Attenuate secrets — only pass the specific token, not the whole secrets DB
+    const ghToken = secrets?.get('review', 'GITHUB_TOKEN')
+    if (!ghToken) {
+      throw new Error('No GITHUB_TOKEN in secrets. Use --secrets to set it.')
+    }
     const review = new ReviewCap({
       cloneDir,
       git: gitPath,
-      secrets,
+      token: ghToken,
       repo,
       agentName: id,
     })

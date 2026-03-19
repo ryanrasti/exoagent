@@ -154,3 +154,11 @@ const { rm } = await import('node:fs/promises')
 ### No separate wrapper files
 
 Don't create a file for a class that just wraps a single function. Inline small cap classes in the file that uses them.
+
+---
+
+## Known Issues / TODO
+
+- **Secret attenuation**: Providers should receive only the specific secrets they need (e.g., `token: string`), not the full `Secrets` object. The caller attenuates by reading the specific secret and passing the value. This prevents providers from accessing secrets belonging to other providers.
+- **Review cap `getReviews`**: Returns latest review overall, not latest from the repo owner. Bot reply reviews can shadow the actual human review.
+- **`openPR` and `pushBranch` should be separate primitives**: Push handles auth/prefix, openPR is API-only.

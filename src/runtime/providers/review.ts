@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tool } from '../../exoeval/tool'
-import type { Secrets } from './secrets'
+
 import { z } from 'zod'
 
 /**
@@ -29,8 +29,8 @@ export interface ReviewCapConfig {
   cloneDir: string
   /** Nix git store path */
   git: string
-  /** Secrets DB for reading GITHUB_TOKEN */
-  secrets: Secrets
+  /** GitHub API token (pre-attenuated from secrets) */
+  token: string
   /** GitHub owner/repo (e.g. "user/repo") */
   repo: string
   /** Base branch for PRs. Default: "main" */
@@ -48,13 +48,9 @@ export class ReviewCap {
     this.config = config
   }
 
-  /** Read GITHUB_TOKEN from the secrets DB. */
+  /** GitHub API token (pre-attenuated, single source of truth) */
   private get token(): string {
-    const t = this.config.secrets.get('review', 'GITHUB_TOKEN')
-    if (!t) {
-      throw new Error('No GITHUB_TOKEN in secrets DB. Use the secrets UI to set it.')
-    }
-    return t
+    return this.config.token
   }
 
   /** Prefix branch name with agent namespace. */

@@ -229,10 +229,12 @@ export class Daemon {
     }
     catch {}
     if (!repo) { return undefined }
+    const ghToken = this.secrets.get('review', 'GITHUB_TOKEN')
+    if (!ghToken) { return undefined }
     return new ReviewCap({
       cloneDir,
       git: nix.git,
-      secrets: this.secrets,
+      token: ghToken,
       repo,
     })
   }
