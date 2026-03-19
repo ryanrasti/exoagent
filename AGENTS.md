@@ -166,4 +166,5 @@ Don't add optional config fields "just in case." If nothing passes a value, remo
 - **Secret attenuation**: Providers should receive only the specific secrets they need (e.g., `token: string`), not the full `Secrets` object. The caller attenuates by reading the specific secret and passing the value. This prevents providers from accessing secrets belonging to other providers.
 - **Review cap `getReviews`**: Returns latest review overall, not latest from the repo owner. Bot reply reviews can shadow the actual human review.
 - **`openPR` and `pushBranch` should be separate primitives**: Push handles auth/prefix, openPR is API-only.
+- **`generateCapDts` is fragile**: Extracts public method signatures from `.d.ts` output via character-position slicing on the AST. Works but brittle — should use the TypeScript printer API for proper serialization.
 - **macOS support**: Sandbox uses bwrap (Linux-only). macOS would need a different sandboxing approach (e.g. `sandbox-exec` / seatbelt profiles). CI is Linux-only for now.
