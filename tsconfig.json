@@ -1,21 +1,23 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "jsx": "react-jsx",
-    "lib": ["ESNext", "DOM"],
-    "module": "ESNext",
+    "target": "es2024",
+    "lib": ["es2024"],
+    "module": "es2022",
     "moduleResolution": "Bundler",
-    "paths": {
-      "capnweb": ["./packages/capnweb/dist"]
-    },
     "resolveJsonModule": true,
     "strict": true,
     "strictNullChecks": true,
     "noEmit": true,
-    "esModuleInterop": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "skipDefaultLibCheck": true,
-    "skipLibCheck": true
+    "types": [
+      "./worker-configuration.d.ts",
+      "@cloudflare/vitest-pool-workers",
+      "node"
+    ]
   },
-  "exclude": ["packages/capnweb", "src/runtime/exos"]
+  "include": ["worker-configuration.d.ts", "src/**/*.ts"]
 }

@@ -1,188 +1,103 @@
-# ExoAgent
+## 3/30 Overhaul
 
-## Architecture
+exoagentd is the kernel, VMs are processes, caps are syscalls.
 
-**exoagentd** is a runtime daemon that manages:
+1. Gutting -- almost everything goes, we're building on a new model. Keep only:
+  a. Minimal flake.nix with nodejs
+  b. LICENSE.md
+  c. eslint.config.js
+  d. tsconfig.json
+  e. gitignore
 
-- **Providers** — capability classes (trusted, unsandboxed). Hold secrets, make API calls. Either builtin or human-reviewed via the review cap.
-- **Exos** — sandboxed programs (untrusted). Run in exoeval. Can only call `@tool()` methods on destructured caps.
+2. New architecture
+  a. control plane:
+    - workerd (via npm package, not nix)
+    - wrangler for dev/build/test, workerd serve for production
+    - container management (podman with krun isolation)
+  b. global storage
+    - workerd durable objects with localDisk storage (sqlite-backed)
+  c. capability providers (providers/plugins)
+    - these are npm packages in their own right
+    - provide .d.ts for types, .js for runtime
+    - providers are dynamic workers loaded via WorkerLoader, same as exos
+    - providers extend RpcTarget (capnweb), exos get stubs to call them
+    - only difference from exos is trust level: providers get more bindings
+      (secrets, network access), exos get fewer
+    - reloading is uniform: change code in runtime repo, control plane
+      re-loads the worker. providers and exos reload the same way.
+    - core capabilities
+      - createAgent / getAgent / ensureAgent
+        - ensureRunning()
+        - createAgent specifies definition for an agent, including:
+          - name
+          - initial capabilities
+          - prompt
+      - vm
+        - create a new vm image rootfs based on a nix derivation
+        - will have rw overlay
+        - vm is meant to be used with agent -- so agent can do arbitrary stuff
+        - krun as the execution primitive -- vm is not persistent, runs command
+          then exits. no image persistence, just rootfs/workdir mounts
+      - secrets (use mainly by providers -- every provider/exo has
+          a secret store scoped to itself)
+  d. "exos"/binaries/agent definitions
+    - this is static code that run scoped tasks
+    - tasks can be one shots or e.g., crons (probably simplest to make cron a provider
+      itself that registers a callback)
+    - one of the "scoped tasks" can be to spawn an agent
+    - agent can have access to a "bash" tool which lets
+      it run its own rootfs (defined by nix derivation) krun container
+      - container itself has a channel to also run the caps -- via
+        an npm package/binary -- e.g., exoeval '(caps) => <code>'
+    - exos are dynamic workers loaded via WorkerLoader.get(name, getCode)
+    - cap attenuation via env: each exo only gets the bindings it needs
+    - globalOutbound: null to block network, or pass a filtering fetcher
+    - workerd's V8 isolate IS the sandbox -- replaces exoeval/bwrap
+  e. capability rpc transport: capnweb (https://github.com/cloudflare/capnweb)
+    - js-native, no schemas, typescript-friendly
+    - RpcTarget for pass-by-reference objects (providers)
+    - promise pipelining for batching calls
+    - works over websocket, http batch, messageport
+    - built-in workers interop (newWorkersRpcResponse)
 
-The **review cap** is the escalation boundary. The agent proposes changes (branch + PR), a human reviews on GitHub, approves or rejects.
+3. Runtime
+  a. `exoagentd` -- bash script that generates capnp config and exec's workerd serve
+  b. control plane worker has WorkerLoader binding, loads providers and exos as
+     dynamic workers
+  c. `init` -- looks at all exos, instantiates them (runs code, saves return value --
+     which can be a raw result or an `info` cap e.g., to get info about a cron run)
+  d. can query exoagentd to figure out:
+    - currently running exos
+    - paused exos 
+    - exited exos
+  e. can kill exoagentd
 
-### Providers
+4. Two-repo structure
+  a. exoagent (this repo): the kernel
+    - control plane worker
+    - provider framework
+    - exo loader
+    - exoagentd script
+    - CLI
+  b. runtime (user's repo): the state of the world
+    - separate git repo, exoagent points to it
+    - exo definitions (JS/TS files)
+    - provider config (which providers, what secrets they need)
+    - agent workdirs as git submodules
+      - agent owns its submodule, free reign to commit/branch/push
+      - exoagentd commits submodule pointer updates as agents progress
+      - runtime repo is the audit trail: git log shows every state change
+      - can roll back agent work by resetting submodule pointer
+    - git status on runtime repo = what every agent has been doing
 
-A provider is a class whose instantiation is a cap. Builtin providers:
-
-- **sandbox** — bwrap-based execution. Provides `exec` inside an isolated namespace with filtered networking (internet yes, LAN/host no).
-- **pi** — coding agent via pi SDK. Replaces pi's builtin tools with sandbox-backed versions.
-- **review** — GitHub PR-based code review. Pushes branches, opens PRs, fetches reviews.
-- **storage** — persistent KV + directory management in `.exoagent/storage/`.
-- **secrets** — daemon-only secret store in `.exoagent/secrets/`. Never exposed to exos.
-
-### Exos
-
-Sandboxed programs. Caps are declared by destructuring:
-
-```javascript
-export default async ({ sandbox, review, storage, pi }) => {
-  await pi.interactive({ stdio: true })
-}
-```
-
-Only the destructured caps are available. exoeval enforces this at the interpreter level.
-
----
-
-## Coding Conventions
-
-### Private instance variables
-
-Do not prefix private instance variables with `_`. Use `private` keyword only.
-
-```typescript
-// Good
-private session: AgentSession | null = null
-private config: ReviewCapConfig
-
-// Bad
-private _session: AgentSession | null = null
-private _config: ReviewCapConfig
-```
-
-### Single source of truth
-
-Do not cache values that are already available from config. Avoid redundant fields.
-
-```typescript
-// Good — read directly from config
-get token(): string {
-  return this.config.secrets.get('review', 'GITHUB_TOKEN')
-}
-
-// Bad — redundant cache of a config value
-private cachedRepo: string | null = null
-getRepo() {
-  if (this.cachedRepo) { return this.cachedRepo }
-  if (this.config.repo) { this.cachedRepo = this.config.repo; return this.cachedRepo }
-  // ...auto-detect...
-}
-```
-
-### No fallbacks
-
-Make required config explicit. Don't chain fallbacks (config → env var → CLI tool → error). If something is required, make it a required config field.
-
-```typescript
-// Good — token comes from one place
-interface ReviewCapConfig {
-  secrets: Secrets // required
-  repo: string // required
-}
-
-// Bad — fallback chain
-interface ReviewCapConfig {
-  secrets?: Secrets // try this first
-  token?: string // then this
-  // then GITHUB_TOKEN env, then `gh auth token`...
-}
-```
-
-### Constructor / `create` pattern
-
-For classes that need initialization (DB setup, directory creation), use:
-1. A `private` constructor that takes a fully-ready dependency (e.g. an open DB handle).
-2. A `static create(...)` method that runs initialization once.
-
-```typescript
-class StorageCap {
-  private constructor(root: string, db: Database.Database, provider: string) { ... }
-
-  static create(root: string, provider = 'default'): StorageCap {
-    // Initialize directory, open DB, create tables
-    return new StorageCap(resolvedRoot, db, provider)
-  }
-}
-```
-
-### No 1-off wrapper types
-
-Normalize internal data structures to be compatible with API results. Don't create intermediate types just for mapping.
-
-```typescript
-// Good — push API-compatible objects directly
-for (const c of apiComments) {
-  comments.push({ id: c.id, path: c.path ?? '', body: c.body ?? '', diffHunk: c.diff_hunk ?? '' })
-}
-
-// Bad — separate wrapper type that just renames fields
-interface InternalComment { ... }
-function toPublic(c: InternalComment): ReviewComment { ... }
-```
-
-### Use typedoc for descriptions
-
-Put descriptions in JSDoc/typedoc comments (which end up in `.d.ts` files), not in `.describe()` calls on zod schemas. This is specifically for tools that are passed to agents — the `.d.ts` is what the agent sees.
-
-```typescript
-// Good — description in JSDoc
-/**
- * Push a branch to GitHub and open/update a PR.
- * Remote branch will be auto-prefixed with `exoagent-<agent>/`.
- */
-@tool(z.object({ branch: z.string(), title: z.string() }))
-async openPR(...) { ... }
-
-// Bad — description in zod .describe()
-@tool(z.object({
-  branch: z.string().describe('Branch name to push'),
-  title: z.string().describe('PR title'),
-}))
-```
-
-### Regular imports preferred
-
-Use regular top-level imports. Only use inline `await import(...)` when there's a real reason (circular dependency, conditional loading for performance).
-
-```typescript
-// Good
-import { readFile, rm } from 'node:fs/promises'
-
-// Bad (unless justified)
-const { rm } = await import('node:fs/promises')
-```
-
-### Instantiate caps once, pass everywhere
-
-Create cap instances at the top level and pass them down. Don't re-instantiate in multiple places.
-
-```typescript
-// Good — instantiated once, passed to both
-const secrets = Secrets.create(dataDir)
-await runSecretsUI(secrets)
-const daemon = new Daemon({ secrets })
-
-// Bad — each caller creates its own instance
-await runSecretsUI(dataDir) // creates Secrets internally
-const daemon = new Daemon({ dataDir }) // creates Secrets internally
-```
-
-### No separate wrapper files
-
-Don't create a file for a class that just wraps a single function. Inline small cap classes in the file that uses them.
-
-### No unused config fields
-
-Don't add optional config fields "just in case." If nothing passes a value, remove the field. Add it back when there's an actual caller.
-
----
-
-## Known Issues / TODO
-
-- **Secret attenuation**: Providers should receive only the specific secrets they need (e.g., `token: string`), not the full `Secrets` object. The caller attenuates by reading the specific secret and passing the value. This prevents providers from accessing secrets belonging to other providers.
-- **Review cap `getReviews`**: Returns latest review overall, not latest from the repo owner. Bot reply reviews can shadow the actual human review.
-- **`openPR` and `pushBranch` should be separate primitives**: Push handles auth/prefix, openPR is API-only.
-- **Sandbox is temporary bwrap, not fully audited**: Current sandbox uses bwrap + pasta + nft (namespace-based). To be replaced with microVM (cloud-hypervisor + virtio-fs). Do not use with untrusted workloads until the microVM migration is complete.
-- **Exos not typechecked against restricted sandbox environment**: Exo files import provider types (e.g., `ArgsCap`), which pulls in their full dependency chains (zod, standard lib). `noLib` can't work when tsc resolves into source files that need the standard lib. Fix: build providers first (emit `.d.ts`), then typecheck exos with `noLib` resolving against the `.d.ts` output instead of source. Requires a `paths` or `declarationDir` mapping in the exos tsconfig.
-- **Secrets DB not encrypted at rest**: `secrets.db` stores secrets in plaintext SQLite. Should use SQLCipher or similar for encryption at rest. File permissions (0600) are the only protection currently.
-- **`generateCapDts` is fragile**: Extracts public method signatures from `.d.ts` output via character-position slicing on the AST. Works but brittle — should use the TypeScript printer API for proper serialization.
-- **macOS support**: Sandbox uses bwrap (Linux-only). macOS would need a different sandboxing approach (e.g. `sandbox-exec` / seatbelt profiles). CI is Linux-only for now.
+5. First use cases: 
+  a. Project Manager agent
+    - Caps
+      - Github: see team/user's activity
+      - Slack: talk with team/user
+      - Linear: manage project tickets
+  b. Engineer agent
+    - Caps
+      - Github: create PR/poll issues mentioned in/make comment in **that** PR/respond to PR comments
+      - VM: work on code locally, test it
+    - Eventual goal: build out new projects/manage old projects with agents
