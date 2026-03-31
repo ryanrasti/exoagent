@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@exoagent/fetch':
+        specifier: workspace:*
+        version: link:packages/@exoagent/fetch
       capnweb:
         specifier: ^0.6.1
         version: 0.6.1

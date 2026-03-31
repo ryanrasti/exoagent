@@ -1,11 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# exoagentd — generate config and exec workerd
-# For now, delegates to wrangler dev which handles config generation + workerd
+# exoagentd — discover providers from runtime repo, start workerd
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Runtime repo path — EXOAGENT_RUNTIME env var or default to examples/team
+RUNTIME_DIR="${EXOAGENT_RUNTIME:-$PROJECT_DIR/examples/team}"
+
+if [ ! -d "$RUNTIME_DIR/providers" ]; then
+  echo "No providers/ directory found in $RUNTIME_DIR" >&2
+  exit 1
+fi
+
+# Discover providers — each is a directory with manifest.js + worker.js
+PROVIDERS_JSON="{"
+first=true
+for provider_dir in "$RUNTIME_DIR/providers"/*/; do
+  name="$(basename "$provider_dir")"
+  manifest="$provider_dir/manifest.js"
+  worker="$provider_dir/worker.js"
+
+  if [ ! -f "$manifest" ] || [ ! -f "$worker" ]; then
+    echo "Skipping $name — missing manifest.js or worker.js" >&2
+    continue
+  fi
+
+  if [ "$first" = true ]; then
+    first=false
+  else
+    PROVIDERS_JSON+=","
+  fi
+
+  manifest_code="$(cat "$manifest" | jq -Rs .)"
+  worker_code="$(cat "$worker" | jq -Rs .)"
+
+  PROVIDERS_JSON+="\"$name\":{\"manifestCode\":$manifest_code,\"workerCode\":$worker_code}"
+done
+PROVIDERS_JSON+="}"
+
 cd "$PROJECT_DIR"
-exec npx wrangler dev "$@"
+
+# Ensure workerd can verify TLS certificates (NixOS)
+export NODE_EXTRA_CA_CERTS="${NODE_EXTRA_CA_CERTS:-/etc/ssl/certs/ca-certificates.crt}"
+
+echo "Discovered providers: $(echo "$PROVIDERS_JSON" | jq -r 'keys | join(", ")')"
+exec npx wrangler dev --var "EXOAGENT_PROVIDERS:$PROVIDERS_JSON" "$@"

@@ -21,11 +21,12 @@ export interface LoadWorkerOptions {
 /**
  * Shim source — mainModule for every dynamic worker.
  *
- * - Control plane calls init(rootCaps) via RPC after loading
- * - Shim static-imports manifest.js, runs with rootCaps
- * - Shim dynamic-imports worker.js, detects class vs object
- * - On fetch, sets env.providers to attenuated caps
- * - rootCaps never in env, consumed via RPC only
+ * Two-phase loading via RPC:
+ * 1. Control plane calls init(rootCaps) on the shim entrypoint
+ * 2. Shim runs manifest with rootCaps, stores attenuated caps
+ * 3. If allowedDomains is set, patches global fetch with domain checker
+ * 4. Shim dynamic-imports worker.js
+ * 5. On fetch, shim sets env.providers and delegates to worker
  */
 const SHIM = `import manifest from "./manifest.js"
 let handler = null
@@ -35,6 +36,17 @@ export default {
     if (providers) throw new Error("already initialized")
     providers = manifest(rootCaps)
     for (const k of Object.keys(rootCaps)) delete rootCaps[k]
+    if (providers.allowedDomains) {
+      const allowed = new Set(providers.allowedDomains)
+      const realFetch = globalThis.fetch
+      globalThis.fetch = (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input.url)
+        if (!allowed.has(url.hostname)) {
+          throw new Error("Fetch blocked: " + url.hostname + " not in allowed domains")
+        }
+        return realFetch(input, init)
+      }
+    }
     const mod = await import("./worker.js")
     const exported = mod.default
     handler = typeof exported === "function" ? new exported() : exported
@@ -48,14 +60,6 @@ export default {
 
 /**
  * Load a provider/exo as a dynamic worker with cap attenuation.
- *
- * Uses WorkerLoader to spin up a worker with three modules:
- * - shim.js (mainModule) — generic two-phase loader
- * - manifest.js — the manifest function
- * - worker.js — the actual provider/exo code
- *
- * After loading, calls init(rootCaps) via RPC to run the manifest.
- * rootCaps never appear in env.
  */
 export async function loadWorker(loader: WorkerLoader, options: LoadWorkerOptions) {
 	const { name, manifestCode, workerCode, rootCaps } = options
@@ -70,7 +74,6 @@ export async function loadWorker(loader: WorkerLoader, options: LoadWorkerOption
 			'worker.js': workerCode,
 		},
 		env: {},
-		globalOutbound: null,
 	}) as any)
 
 	const entrypoint = worker.getEntrypoint()

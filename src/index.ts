@@ -1,36 +1,25 @@
 /**
  * exoagent control plane worker.
  *
- * Manages providers and exos as dynamic workers via WorkerLoader.
- * Routes HTTP to provider UIs by name.
+ * Discovers providers from EXOAGENT_PROVIDERS env var (set by exoagentd).
+ * Loads each as a dynamic worker via the loader.
+ * Routes HTTP: /<provider-name>/... → provider's fetch handler.
  */
 
 import { loadWorker } from './loader'
+import { FetchProvider } from '@exoagent/fetch'
 
-/** Provider definitions — name → manifest + worker code + root caps. */
 interface ProviderDef {
 	manifestCode: string
 	workerCode: string
-	rootCaps: { [key: string]: unknown }
 }
 
-/** Track which providers have been initialized (init() called). */
+/** Track which providers have been initialized. */
 const initialized = new Set<string>()
 
-/** Built-in echo provider — for testing the loader. */
-const PROVIDERS: { [name: string]: ProviderDef } = {
-	echo: {
-		manifestCode: `export default function(rootCaps) {
-	return { prefix: rootCaps.prefix }
-}`,
-		workerCode: `export default {
-	async fetch(request, env) {
-		const url = new URL(request.url)
-		return new Response(env.providers.prefix + ': ' + url.pathname)
-	},
-}`,
-		rootCaps: { prefix: 'echo' },
-	},
+/** Root caps available to all providers via manifest. */
+const rootCaps: { [key: string]: unknown } = {
+	fetch: new FetchProvider(),
 }
 
 export default {
@@ -41,25 +30,33 @@ export default {
 			return Response.json({ status: 'ok' })
 		}
 
+		// Parse provider definitions from env
+		const providers: { [name: string]: ProviderDef } = JSON.parse(env.EXOAGENT_PROVIDERS || '{}')
+
 		// Route /<provider>/... to provider's fetch
 		const match = url.pathname.match(/^\/([^/]+)(.*)$/)
 		if (match) {
 			const [, name, rest] = match
-			const def = PROVIDERS[name]
+			const def = providers[name]
 			if (def) {
-				// loadWorker calls get() which reuses cached workers by name.
-				// Only calls init() on first load.
 				if (!initialized.has(name)) {
-					await loadWorker(env.LOADER, { name, ...def })
+					await loadWorker(env.LOADER, {
+						name,
+						manifestCode: def.manifestCode,
+						workerCode: def.workerCode,
+						rootCaps,
+					})
 					initialized.add(name)
 				}
-				// Get a fresh stub for this request context
 				const worker = env.LOADER.get(name, () => ({}) as any)
 				const providerUrl = new URL(rest || '/', url.origin)
-				return worker.getEntrypoint().fetch(providerUrl.toString())
+				return worker.getEntrypoint().fetch(
+					new Request(providerUrl.toString(), request),
+				)
 			}
 		}
 
+		// TODO: dashboard at /
 		return new Response('Not Found', { status: 404 })
 	},
 } satisfies ExportedHandler<Env>
