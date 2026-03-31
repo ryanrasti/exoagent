@@ -82,7 +82,14 @@ Provider UI:
     valid token for that provider. Prevents cross-provider API calls.
   
 
-## 3/30 Overhaul
+## Implementation Plan (3/30)
+1. Bring back exoeval + storage/secrets from main (single commit)
+2. Rip out workerd/wrangler/CF stack (loader, wrangler.jsonc, CF types, @exoagent/* packages, vitest pool-workers)
+3. Set up single package structure (drop monorepo, subpath exports, esbuild + tsgo + Vite build)
+4. Hono server (subdomain routing, exoeval RPC endpoint, static file serving)
+5. GitHub provider (@tool() class + React UI panel, end-to-end hello world)
+
+## 3/30 Overhaul (historical, superseded by SES+exoeval above)
 
 exoagentd is the kernel, VMs are processes, caps are syscalls.
 
