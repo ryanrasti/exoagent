@@ -40,8 +40,11 @@ Decisions:
   Secrets in a separate DB with 0600 permissions. Both from main branch.
 
 Provider UI:
-- each provider serves a SPA at GET /<provider>/
-- exoeval is the RPC mechanism: POST /<provider>/api
+- React SPAs, one per provider
+- each provider is an npm package that exports:
+  - backend: @tool() class
+  - frontend: React components for its UI panel
+- exoeval is the RPC mechanism: POST /api/<provider>
   - request body: exoeval JS expression string
   - response body: JSON (which is valid JS)
   - the provider's @tool() methods are bound as caps in the eval context
@@ -54,7 +57,17 @@ Provider UI:
   - future: response as exoeval JS (AST -> JS serializer) for non-JSON types
     (dates, undefined, cap references). JSON.stringify is the MVP.
 - backend: Hono (web-standard Request/Response, minimal boilerplate)
-  single Node HTTP server in exoagentd, routes /<provider>/... to provider handlers
+  single Node HTTP server in exoagentd
+- UI isolation via subdomain-per-provider:
+  - dashboard at http://localhost:3000/
+  - each provider UI at http://<provider>.localhost:3000/
+  - browser same-origin policy enforces isolation between providers
+    (separate JS contexts, storage, cookies — no shared globals)
+  - *.localhost resolves to loopback per RFC 6761 (Chrome, Firefox)
+  - Hono routes by Host header, one port, one server
+  - per-provider session tokens: dashboard mints a scoped token when
+    loading a provider UI. RPC endpoint rejects requests without a
+    valid token for that provider. Prevents cross-provider API calls.
   
 
 ## 3/30 Overhaul
