@@ -19,6 +19,20 @@ exoagentd is the kernel, VMs are processes, caps are syscalls.
     - workerd (via npm package, not nix)
     - wrangler for dev/build/test, workerd serve for production
     - container management (podman with krun isolation)
+  a2. security layering:
+    - host (never touched)
+      └── provider krun VM (hard boundary)
+            └── workerd (isolate-per-provider, soft boundary)
+                  ├── github isolate
+                  ├── slack isolate
+                  └── linear isolate
+      └── agent krun VM (hard boundary, one per agent)
+            └── untrusted code runs here
+                  └── calls caps via UDS → workerd
+    - workerd isolates are defense-in-depth for YOUR trusted provider code
+    - workerd's security disclaimer is irrelevant: it runs inside a krun VM
+    - untrusted agent code never runs in workerd — own krun VM
+    - agent VM talks to provider caps via unix domain socket + capnweb
   b. global storage
     - workerd durable objects with localDisk storage (sqlite-backed)
   c. capability providers (providers/plugins)
