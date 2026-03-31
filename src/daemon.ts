@@ -13,4 +13,4 @@ const providers = {
 	github: { instance: new GitHubProvider() },
 }
 
-startServer(providers, port)
+startServer(providers, { port })

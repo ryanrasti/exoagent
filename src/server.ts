@@ -5,9 +5,14 @@
  * - Routes POST /api/<provider> for exoeval RPC
  * - GET /api/providers to list providers
  * - GET /health for health checks
+ * - Subdomain routing: <provider>.localhost:<port> serves provider UI
+ * - localhost:<port> serves dashboard
  */
 
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { exoEval } from './exoeval'
 
@@ -59,14 +64,15 @@ export function createApp(providers: { [name: string]: ProviderRegistration }) {
  */
 export function startServer(
 	providers: { [name: string]: ProviderRegistration },
-	port = 3000,
+	options: { port?: number; uiDir?: string } = {},
 ) {
+	const { port = 3000, uiDir } = options
 	const app = createApp(providers)
 
 	serve({ fetch: app.fetch, port }, (info) => {
 		console.log(`exoagentd listening on http://localhost:${info.port}`)
 		for (const name of Object.keys(providers)) {
-			console.log(`  ${name}: http://localhost:${info.port}/api/${name}`)
+			console.log(`  ${name}: http://${name}.localhost:${info.port}/`)
 		}
 	})
 
