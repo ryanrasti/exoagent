@@ -3,6 +3,62 @@
 - Prefer `for (const x of y) {}` over `.forEach()`. Use `for...of` for all iteration.
 - Prefer `{ [key: string]: T }` over `Record<string, T>`.
 
+## 3/30 Workerd + capnweb -> SES + exoeval
+Rationale:
+1. workerd/isolates/capnweb is RPC-first, but providers are just libraries
+2. what is really needed is isolating providers from external side-effects/each others internal data
+    * SES is sufficient without an entire layer wrapping it -- much simpler
+3. exoeval comes back from main
+    * simpler wire format (just JS)
+    * IFC ready
+    * much smaller, auditable surface area for malicious code (e.g., from the vms) + defense in depth
+      running in own SES realm
+
+What to do:
+1. Rip out workerd/wrangler/CF stack
+2. Bring in SES
+3. exoagentd now:
+  - sets up SES
+  - for each provider:
+    -> loads manifest.js in exoeval (manifests are always .js, no TS build step)
+    -> gets list of providers
+    -> dag sorts them & instantiates (deterministic, break ties alphabetically)
+      -> runs the manifest to pass the attenuated caps
+    -> note that providers will each take a single **exoeval** closure with the manifest caps pre-bound.
+       aside from providers that take native functions (e.g., fs/subprocess), that's the only sharing
+       we'll do via SES
+4. providers are still npm packages that produce .d.ts artifacts
+5. providers are bundled to a single .js file (esbuild, bundle: true) for loading into SES Compartments
+
+Decisions:
+- @tool() decorator serves two purposes:
+  1. SES layer (inter-provider): produces hardened object trees via harden()
+  2. exoeval layer (exo -> provider): marks methods as callable by the interpreter
+  Same decorator, same object, different enforcement depending on caller.
+- inter-provider communication goes through exoeval too, not raw JS calls.
+  Reason: uniformity. Exos use exoeval RPC. Providers might as well use the same
+  mechanism rather than having two different calling conventions.
+- storage: single SQLite database (better-sqlite3) partitioned by provider name.
+  Secrets in a separate DB with 0600 permissions. Both from main branch.
+
+Provider UI:
+- each provider serves a SPA at GET /<provider>/
+- exoeval is the RPC mechanism: POST /<provider>/api
+  - request body: exoeval JS expression string
+  - response body: JSON (which is valid JS)
+  - the provider's @tool() methods are bound as caps in the eval context
+  - errors: 500 with error message
+  - example:
+    request:  github.getUser("octocat")
+    response: {"login":"octocat","id":583231}
+  - the SPA imports provider types from the same npm package, so types
+    are already available at build time. No separate API docs needed.
+  - future: response as exoeval JS (AST -> JS serializer) for non-JSON types
+    (dates, undefined, cap references). JSON.stringify is the MVP.
+- backend: Hono (web-standard Request/Response, minimal boilerplate)
+  single Node HTTP server in exoagentd, routes /<provider>/... to provider handlers
+  
+
 ## 3/30 Overhaul
 
 exoagentd is the kernel, VMs are processes, caps are syscalls.
