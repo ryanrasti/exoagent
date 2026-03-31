@@ -27,8 +27,20 @@ What to do:
     -> note that providers will each take a single **exoeval** closure with the manifest caps pre-bound.
        aside from providers that take native functions (e.g., fs/subprocess), that's the only sharing
        we'll do via SES
-4. providers are still npm packages that produce .d.ts artifacts
-5. providers are bundled to a single .js file (esbuild, bundle: true) for loading into SES Compartments
+4. single package (not monorepo), subpath exports per provider:
+   - `exoagent/providers/github` → `dist/providers/github/index.js` + `.d.ts`
+   - consumers: `import type { GitHubProvider } from 'exoagent/providers/github'`
+5. three build steps:
+   | step       | tool    | input                        | output                              |
+   |------------|---------|------------------------------|-------------------------------------|
+   | BE bundles | esbuild | `src/providers/*/index.ts`   | `dist/providers/*/index.js` (1 file each) |
+   | BE types   | tsgo    | `src/providers/*/index.ts`   | `dist/providers/*/index.d.ts`       |
+   | FE bundles | Vite    | `src/ui/*/index.html`        | `dist/ui/*/` (1 bundle each)        |
+6. SES loading: daemon reads each provider's bundled .js as a string,
+   evaluates in a Compartment. Same in dev and prod (esbuild is ~10ms).
+   Dev uses `tsx --watch` to restart on changes.
+7. FE dev: Vite dev server with HMR, proxies /api/* to Hono backend.
+   FE prod: Vite build → per-provider bundles, served by Hono.
 
 Decisions:
 - @tool() decorator marks methods as callable by the exoeval interpreter.
