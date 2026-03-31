@@ -5,7 +5,7 @@
  * Routes HTTP to provider UIs by name.
  */
 
-import { loadWorker } from '@exoagent/loader'
+import { loadWorker } from './loader'
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
