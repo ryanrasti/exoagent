@@ -31,13 +31,11 @@ What to do:
 5. providers are bundled to a single .js file (esbuild, bundle: true) for loading into SES Compartments
 
 Decisions:
-- @tool() decorator serves two purposes:
-  1. SES layer (inter-provider): produces hardened object trees via harden()
-  2. exoeval layer (exo -> provider): marks methods as callable by the interpreter
-  Same decorator, same object, different enforcement depending on caller.
-- inter-provider communication goes through exoeval too, not raw JS calls.
-  Reason: uniformity. Exos use exoeval RPC. Providers might as well use the same
-  mechanism rather than having two different calling conventions.
+- @tool() decorator marks methods as callable by the exoeval interpreter.
+  All cap invocations (exo -> provider AND provider -> provider) go through exoeval.
+  Single path, single calling convention.
+- Deferred: SES layer where @tool() also produces hardened object trees via harden()
+  for direct inter-provider calls. For now, exoeval is the only invocation path.
 - storage: single SQLite database (better-sqlite3) partitioned by provider name.
   Secrets in a separate DB with 0600 permissions. Both from main branch.
 
