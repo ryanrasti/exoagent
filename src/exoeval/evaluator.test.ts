@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import z from 'zod'
 import { exoEval } from './index'
+import { tool } from './tool'
+
+class MockCalc {
+  @tool(z.number(), z.number())
+  add(a: number, b: number): number { return a + b }
+}
 
 describe('exoEval', () => {
   it('literal (number)', () => {
@@ -828,6 +835,20 @@ describe('exoEval', () => {
     })
     it('regex.exec() cannot be called', () => {
       expect(() => exoEval('/test/.exec("test")')).toThrow(/callee is not a toolable function/)
+    })
+  })
+
+  describe('bindings', () => {
+    it('injects bindings into scope', () => {
+      expect(exoEval('x', { x: 42 })).toBe(42)
+    })
+
+    it('injected @tool() objects are callable', () => {
+      expect(exoEval('calc.add(1, 2)', { calc: new MockCalc() })).toBe(3)
+    })
+
+    it('bindings do not shadow builtins unless explicitly provided', () => {
+      expect(exoEval('JSON.stringify(x)', { x: { a: 1 } })).toBe('{"a":1}')
     })
   })
 })
