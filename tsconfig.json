@@ -13,11 +13,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": [
-      "./worker-configuration.d.ts",
-      "@cloudflare/vitest-pool-workers",
-      "node"
-    ]
+    "types": ["node"]
   },
-  "include": ["worker-configuration.d.ts", "src/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }
