@@ -14,6 +14,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@exoagent/loader": "workspace:*",
     "capnweb": "^0.6.1"
   },
   "devDependencies": {

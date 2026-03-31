@@ -1,6 +1,7 @@
 ## Coding Conventions
 
 - Prefer `for (const x of y) {}` over `.forEach()`. Use `for...of` for all iteration.
+- Prefer `{ [key: string]: T }` over `Record<string, T>`.
 
 ## 3/30 Overhaul
 

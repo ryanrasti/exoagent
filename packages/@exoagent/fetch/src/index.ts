@@ -2,7 +2,7 @@ import { RpcTarget } from 'capnweb'
 
 /** RequestInit with non-serializable fields removed. */
 export type FetchInit = Omit<RequestInit, 'signal' | 'body' | 'headers' | 'fetcher' | 'cf'> & {
-	headers?: Record<string, string>
+	headers?: { [key: string]: string }
 	body?: string | null
 }
 
@@ -10,7 +10,7 @@ export type FetchInit = Omit<RequestInit, 'signal' | 'body' | 'headers' | 'fetch
 export interface FetchResponse {
 	status: number
 	statusText: string
-	headers: Record<string, string>
+	headers: { [key: string]: string }
 	body: string
 }
 
@@ -53,7 +53,7 @@ export class ScopedFetch extends RpcTarget {
 			integrity: init?.integrity,
 		})
 
-		const headers: Record<string, string> = {}
+		const headers: { [key: string]: string } = {}
 		for (const [key, value] of response.headers) {
 			headers[key] = value
 		}

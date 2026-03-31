@@ -5,11 +5,12 @@
  * Routes HTTP to provider UIs by name.
  */
 
+import { loadWorker } from '@exoagent/loader'
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url)
 
-		// Health check
 		if (url.pathname === '/health') {
 			return Response.json({ status: 'ok' })
 		}
