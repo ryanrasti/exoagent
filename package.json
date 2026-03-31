@@ -7,12 +7,20 @@
   "author": "Ryan Rasti <https://github.com/ryanrasti>",
   "license": "MIT",
   "scripts": {
+    "dev": "tsx watch src/daemon.ts",
+    "start": "tsx src/daemon.ts",
     "typecheck": "tsgo",
     "test": "vitest --run"
   },
+  "bin": {
+    "exoagentd": "bin/exoagentd"
+  },
   "dependencies": {
+    "@hono/node-server": "^1.19.12",
     "acorn": "^8.16.0",
     "better-sqlite3": "^12.8.0",
+    "esbuild": "^0.27.4",
+    "hono": "^4.12.9",
     "secure-json-parse": "^4.1.0",
     "zod": "^4.2.1"
   },
@@ -21,6 +29,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.0",
     "@typescript/native-preview": "^7.0.0-dev.20260330.1",
+    "tsx": "^4.21.0",
     "vitest": "~4.1.2"
   },
   "pnpm": {
