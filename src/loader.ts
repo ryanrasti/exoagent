@@ -32,7 +32,9 @@ let handler = null
 let providers = null
 export default {
   async init(rootCaps) {
+    if (providers) throw new Error("already initialized")
     providers = manifest(rootCaps)
+    for (const k of Object.keys(rootCaps)) delete rootCaps[k]
     const mod = await import("./worker.js")
     const exported = mod.default
     handler = typeof exported === "function" ? new exported() : exported
