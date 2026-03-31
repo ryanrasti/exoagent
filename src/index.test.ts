@@ -13,3 +13,6 @@ describe('control plane', () => {
 		expect(response.status).toBe(404)
 	})
 })
+
+// loader tests run against wrangler dev, not vitest pool
+// (WorkerLoader binding not available in vitest-pool-workers)
