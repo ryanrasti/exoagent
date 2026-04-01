@@ -8,7 +8,7 @@
  * .scoped(clientName) → ScopedConfig that filters by scope.
  */
 
-import type { BoundEvalFn } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedSqlite } from '../sqlite'
 import z from 'zod'
@@ -35,13 +35,13 @@ const fieldSchemaZod = z.object({
 })
 
 export class ConfigProviderImpl {
-	private readonly exoEval: BoundEvalFn<ConfigCaps>
+	private readonly exoEval: BoundEval<ConfigCaps>
 	private readonly schemas = new Map<string, { [key: string]: ConfigFieldSchema }>()
 
-	constructor(exoEval: BoundEvalFn<ConfigCaps>) {
+	constructor(exoEval: BoundEval<ConfigCaps>) {
 		this.exoEval = exoEval
 
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) =>
 				sqlite.exec(`
 				CREATE TABLE IF NOT EXISTS config (
@@ -70,7 +70,7 @@ export class ConfigProviderImpl {
 
 	@tool()
 	getAllConfig(): { [scope: string]: { [key: string]: string } } {
-		const rows = this.exoEval(({ sqlite }) =>
+		const rows = this.exoEval.run(({ sqlite }) =>
 			sqlite.query('SELECT scope, key, value FROM config ORDER BY scope, key'),
 		) as { scope: string, key: string, value: string }[]
 
@@ -84,7 +84,7 @@ export class ConfigProviderImpl {
 
 	@tool(z.string(), z.string(), z.string())
 	setGlobal(scope: string, key: string, value: string): { ok: true } {
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) =>
 				sqlite.run(
 					'INSERT OR REPLACE INTO config (scope, key, value) VALUES (?, ?, ?)',
@@ -99,12 +99,12 @@ export class ConfigProviderImpl {
 export default ({ exoEval }: ProviderInit<ConfigCaps>) => new ConfigProviderImpl(exoEval)
 
 export class ScopedConfig {
-	private readonly exoEval: BoundEvalFn<ConfigCaps>
+	private readonly exoEval: BoundEval<ConfigCaps>
 	private readonly scope: string
 	private readonly schemas: Map<string, { [key: string]: ConfigFieldSchema }>
 
 	constructor(
-		exoEval: BoundEvalFn<ConfigCaps>,
+		exoEval: BoundEval<ConfigCaps>,
 		scope: string,
 		schemas: Map<string, { [key: string]: ConfigFieldSchema }>,
 	) {
@@ -127,7 +127,7 @@ export class ScopedConfig {
 	@tool(z.string())
 	get(key: string): string | null {
 		const scope = this.scope
-		const row = this.exoEval(
+		const row = this.exoEval.run(
 			({ sqlite }) =>
 				sqlite.get('SELECT value FROM config WHERE scope = ? AND key = ?', [scope, key]),
 			{ scope, key },
@@ -140,7 +140,7 @@ export class ScopedConfig {
 	@tool(z.string(), z.string())
 	set(key: string, value: string): { ok: true } {
 		const scope = this.scope
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) =>
 				sqlite.run(
 					'INSERT OR REPLACE INTO config (scope, key, value) VALUES (?, ?, ?)',
@@ -154,7 +154,7 @@ export class ScopedConfig {
 	@tool(z.string())
 	delete(key: string): { ok: true } {
 		const scope = this.scope
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) =>
 				sqlite.run('DELETE FROM config WHERE scope = ? AND key = ?', [scope, key]),
 			{ scope, key },
@@ -165,7 +165,7 @@ export class ScopedConfig {
 	@tool()
 	list(): string[] {
 		const scope = this.scope
-		const rows = this.exoEval(
+		const rows = this.exoEval.run(
 			({ sqlite }) => sqlite.query('SELECT key FROM config WHERE scope = ?', [scope]),
 			{ scope },
 		) as { key: string }[]

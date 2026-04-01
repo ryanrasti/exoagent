@@ -6,7 +6,7 @@
  *   - fetch: for making HTTP requests to api.github.com
  */
 
-import type { BoundEvalFn } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
 import type { FetchResponse, ScopedFetch } from '../fetch'
@@ -77,12 +77,12 @@ type PR = {
 export type GitHubProviderImpl = InstanceType<typeof GitHubProvider>
 
 class GitHubProvider {
-	private readonly exoEval: BoundEvalFn<GitHubCaps>
+	private readonly exoEval: BoundEval<GitHubCaps>
 
-	constructor(exoEval: BoundEvalFn<GitHubCaps>) {
+	constructor(exoEval: BoundEval<GitHubCaps>) {
 		this.exoEval = exoEval
 
-		this.exoEval(({ config }) =>
+		this.exoEval.run(({ config }) =>
 			config.setSchema({
 				token: {
 					type: 'string',
@@ -95,7 +95,7 @@ class GitHubProvider {
 	}
 
 	private getToken(): string {
-		const token = this.exoEval(({ config }) => config.get('token')) as string | null
+		const token = this.exoEval.run(({ config }) => config.get('token')) as string | null
 		if (!token) { throw new Error('no token configured') }
 		return token
 	}
@@ -111,7 +111,7 @@ class GitHubProvider {
 		if (body) { headers['Content-Type'] = 'application/json' }
 
 		const fetchBody = body ? JSON.stringify(body) : undefined
-		const res = (await this.exoEval(
+		const res = (await this.exoEval.run(
 			({ fetch }) => fetch.fetch(url, { method, headers, body: fetchBody }),
 			{ url, method, headers, fetchBody },
 		)) as FetchResponse

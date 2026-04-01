@@ -104,14 +104,4 @@ export class BoundEval<Caps = unknown> {
 	}
 }
 
-/** Function-style API used by providers. */
-export type BoundEvalFn<Caps> = <T>(
-	fn: (caps: Caps) => T,
-	capture?: { [key: string]: unknown },
-) => unknown
 
-/** Create a BoundEval and return its .run() as a plain function. */
-export const makeBoundEval = <Caps>(capBindings: { [key: string]: unknown }): BoundEvalFn<Caps> => {
-	const be = new BoundEval<Caps>(capBindings)
-	return (fn, capture) => be.run(fn, capture)
-}

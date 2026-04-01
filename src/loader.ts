@@ -12,7 +12,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { parse } from 'acorn'
 import tsBlankSpace from 'ts-blank-space'
-import { makeBoundEval } from './bound-eval'
+import { BoundEval } from './bound-eval'
 import { exoEval } from './exoeval'
 import { formatCodeMessage } from './exoeval/utils'
 
@@ -166,7 +166,7 @@ export class ProviderLoader {
 				}
 
 				const result = createProvider({
-					exoEval: makeBoundEval(capBindings),
+					exoEval: new BoundEval(capBindings),
 					ring0: ring0Result ?? null,
 					config: this.config,
 				})
@@ -198,8 +198,8 @@ export class ProviderLoader {
 									bindings[name] = inst.clientProvider(client)
 								}
 							}
-							const boundEval = makeBoundEval(bindings)
-							return (code: string) => boundEval(new RealFunction(`return ${code}`)() as any)
+							const boundEval = new BoundEval(bindings)
+							return (code: string) => boundEval.run(new RealFunction(`return ${code}`)() as any)
 						})
 					}
 				}
@@ -468,7 +468,7 @@ export class ProviderLoader {
 			}
 
 			const result = createProvider({
-				exoEval: makeBoundEval(capBindings),
+				exoEval: new BoundEval(capBindings),
 				ring0: ring0Result ?? null,
 				config: this.config,
 			})

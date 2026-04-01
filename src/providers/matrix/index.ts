@@ -14,7 +14,7 @@
  * 4. Set homeserver_url, access_token, and space_id in the config UI
  */
 
-import type { BoundEvalFn } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
 import type { MatrixClient } from 'matrix-js-sdk'
@@ -50,18 +50,18 @@ type MatrixRoom = {
 export type MatrixProviderImpl = InstanceType<typeof MatrixProvider>
 
 class MatrixProvider {
-	private readonly exoEval: BoundEvalFn<MatrixCaps>
+	private readonly exoEval: BoundEval<MatrixCaps>
 	private readonly ring0: MatrixRing0
 	private readonly dataDir: string
 	private client: MatrixClient | null = null
 	private initPromise: Promise<void> | null = null
 
-	constructor(exoEval: BoundEvalFn<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
+	constructor(exoEval: BoundEval<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
 		this.exoEval = exoEval
 		this.ring0 = ring0
 		this.dataDir = dataDir
 
-		this.exoEval(({ config }) =>
+		this.exoEval.run(({ config }) =>
 			config.setSchema({
 				homeserver_url: {
 					type: 'string',
@@ -85,9 +85,9 @@ class MatrixProvider {
 	}
 
 	private getConfig(): { homeserverUrl: string, accessToken: string, spaceId: string } {
-		const homeserverUrl = this.exoEval(({ config }) => config.get('homeserver_url')) as string | null
-		const accessToken = this.exoEval(({ config }) => config.get('access_token')) as string | null
-		const spaceId = this.exoEval(({ config }) => config.get('space_id')) as string | null
+		const homeserverUrl = this.exoEval.run(({ config }) => config.get('homeserver_url')) as string | null
+		const accessToken = this.exoEval.run(({ config }) => config.get('access_token')) as string | null
+		const spaceId = this.exoEval.run(({ config }) => config.get('space_id')) as string | null
 
 		if (!homeserverUrl) { throw new Error('homeserver_url not configured') }
 		if (!accessToken) { throw new Error('access_token not configured') }

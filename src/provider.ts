@@ -3,11 +3,11 @@
  * Every provider factory receives this single object.
  */
 
-import type { BoundEvalFn } from './bound-eval'
+import { BoundEval } from './bound-eval'
 import type { DaemonConfig } from './loader'
 
 export type ProviderInit<Caps = unknown> = {
-	exoEval: BoundEvalFn<Caps>
+	exoEval: BoundEval<Caps>
 	ring0: unknown
 	config: DaemonConfig
 }

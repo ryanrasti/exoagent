@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import z from 'zod'
-import { makeBoundEval } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import { tool } from '../../exoeval/tool'
 
 // Use real SQLite for inbox tests (it's a queue — need real persistence semantics)
@@ -50,7 +50,7 @@ describe('InboxProvider', () => {
 	beforeEach(async () => {
 		sqlite = new RealSqlite()
 		const { default: createInbox } = await import('./index')
-		const exoEval = makeBoundEval<{ sqlite: RealSqlite }>({ sqlite })
+		const exoEval = new BoundEval<{ sqlite: RealSqlite }>({ sqlite })
 		const root = createInbox({ exoEval: exoEval as any, ring0: null, config: { dataDir: '/tmp' } })
 		inbox = root.clientProvider('test-exo')
 	})

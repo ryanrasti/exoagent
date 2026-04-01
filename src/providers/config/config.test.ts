@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { makeBoundEval } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import SqliteProvider from '../sqlite'
 import ConfigProvider from './index'
 
@@ -20,7 +20,7 @@ describe('ConfigProvider', () => {
 	beforeEach(() => {
 		sqliteProvider = SqliteProvider({ exoEval: (() => {}) as any, ring0: ring0Mock, config: daemonConfig })
 		const scopedSqlite = sqliteProvider.clientProvider('config')
-		const exoEval = makeBoundEval<ConfigCaps>({ sqlite: scopedSqlite })
+		const exoEval = new BoundEval<ConfigCaps>({ sqlite: scopedSqlite })
 		configProvider = ConfigProvider({ exoEval, ring0: null, config: daemonConfig })
 	})
 
@@ -85,7 +85,7 @@ describe('ConfigProvider', () => {
 		sqliteProvider.close()
 
 		const sqlite2 = SqliteProvider({ exoEval: (() => {}) as any, ring0: ring0Mock, config: daemonConfig })
-		const exoEval2 = makeBoundEval<ConfigCaps>({ sqlite: sqlite2.clientProvider('config') })
+		const exoEval2 = new BoundEval<ConfigCaps>({ sqlite: sqlite2.clientProvider('config') })
 		const config2 = ConfigProvider({ exoEval: exoEval2, ring0: null, config: daemonConfig })
 		expect(config2.clientProvider('github').get('token')).toBe('ghp_test')
 		sqlite2.close()

@@ -7,7 +7,7 @@
  * Each client (exo) gets its own scoped inbox.
  */
 
-import type { BoundEvalFn } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedSqlite } from '../sqlite'
 import z from 'zod'
@@ -30,12 +30,12 @@ type InboxMessage = {
 export type InboxProviderImpl = InstanceType<typeof ScopedInbox>
 
 class InboxRoot {
-	private readonly exoEval: BoundEvalFn<InboxCaps>
+	private readonly exoEval: BoundEval<InboxCaps>
 
-	constructor(exoEval: BoundEvalFn<InboxCaps>) {
+	constructor(exoEval: BoundEval<InboxCaps>) {
 		this.exoEval = exoEval
 
-		this.exoEval(({ sqlite }) =>
+		this.exoEval.run(({ sqlite }) =>
 			sqlite.exec(`
 				CREATE TABLE IF NOT EXISTS inbox (
 					id TEXT PRIMARY KEY,
@@ -48,7 +48,7 @@ class InboxRoot {
 				)
 			`),
 		)
-		this.exoEval(({ sqlite }) =>
+		this.exoEval.run(({ sqlite }) =>
 			sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_agent ON inbox(agent, acked, snoozed_until)`),
 		)
 	}
@@ -63,10 +63,10 @@ class InboxRoot {
 }
 
 class ScopedInbox {
-	private readonly exoEval: BoundEvalFn<InboxCaps>
+	private readonly exoEval: BoundEval<InboxCaps>
 	private readonly scope: string
 
-	constructor(exoEval: BoundEvalFn<InboxCaps>, scope: string) {
+	constructor(exoEval: BoundEval<InboxCaps>, scope: string) {
 		this.exoEval = exoEval
 		this.scope = scope
 	}
@@ -77,7 +77,7 @@ class ScopedInbox {
 		const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 		const createdAt = Date.now()
 		const agentKey = `${this.scope}/${agent}`
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) => sqlite.run(
 				'INSERT INTO inbox (id, agent, source, body, created_at) VALUES (?, ?, ?, ?, ?)',
 				[id, agentKey, source, body, createdAt],
@@ -92,7 +92,7 @@ class ScopedInbox {
 	peek(agent: string): InboxMessage | null {
 		const now = Date.now()
 		const agentKey = `${this.scope}/${agent}`
-		const row = this.exoEval(
+		const row = this.exoEval.run(
 			({ sqlite }) => sqlite.get(
 				'SELECT * FROM inbox WHERE agent = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?) ORDER BY created_at ASC LIMIT 1',
 				[agentKey, now],
@@ -108,7 +108,7 @@ class ScopedInbox {
 		const now = Date.now()
 		const n = limit ?? 10
 		const agentKey = `${this.scope}/${agent}`
-		return this.exoEval(
+		return this.exoEval.run(
 			({ sqlite }) => sqlite.query(
 				'SELECT * FROM inbox WHERE agent = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?) ORDER BY created_at ASC LIMIT ?',
 				[agentKey, now, n],
@@ -122,7 +122,7 @@ class ScopedInbox {
 	count(agent: string): number {
 		const now = Date.now()
 		const agentKey = `${this.scope}/${agent}`
-		const row = this.exoEval(
+		const row = this.exoEval.run(
 			({ sqlite }) => sqlite.get(
 				'SELECT COUNT(*) as cnt FROM inbox WHERE agent = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?)',
 				[agentKey, now],
@@ -135,7 +135,7 @@ class ScopedInbox {
 	/** Mark a message as handled */
 	@tool(z.string())
 	ack(messageId: string): { ok: true } {
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) => sqlite.run('UPDATE inbox SET acked = 1 WHERE id = ?', [messageId]),
 			{ messageId },
 		)
@@ -146,7 +146,7 @@ class ScopedInbox {
 	@tool(z.string(), z.number())
 	snooze(messageId: string, seconds: number): { ok: true } {
 		const snoozedUntil = Date.now() + (seconds * 1000)
-		this.exoEval(
+		this.exoEval.run(
 			({ sqlite }) => sqlite.run('UPDATE inbox SET snoozed_until = ? WHERE id = ?', [snoozedUntil, messageId]),
 			{ snoozedUntil, messageId },
 		)

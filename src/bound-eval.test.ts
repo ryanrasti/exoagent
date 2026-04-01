@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import z from 'zod'
-import { BoundEval, makeBoundEval } from './bound-eval'
+import { BoundEval } from './bound-eval'
 import { tool } from './exoeval/tool'
 
 class MockConfig {
@@ -30,52 +30,49 @@ class MockGithub {
 	}
 }
 
-describe('BoundEval (legacy makeBoundEval)', () => {
+describe('BoundEval.run()', () => {
 	it('calls @tool() methods via stringified function', () => {
 		const config = new MockConfig()
-		const exoEval = makeBoundEval<{ config: MockConfig }>({ config })
+		const be = new BoundEval<{ config: MockConfig }>({ config })
 
-		exoEval(({ config }) => config.set('key', 'value'))
-		const result = exoEval(({ config }) => config.get('key'))
-		expect(result).toBe('value')
+		be.run(({ config }) => config.set('key', 'value'))
+		expect(be.run(({ config }) => config.get('key'))).toBe('value')
 	})
 
 	it('passes capture variables as free variables in eval scope', () => {
 		const config = new MockConfig()
-		const exoEval = makeBoundEval<{ config: MockConfig }>({ config })
+		const be = new BoundEval<{ config: MockConfig }>({ config })
 
 		const key = 'myKey'
 		const value = 'myValue'
-		exoEval(({ config }) => config.set(key, value), { key, value })
-
-		const result = exoEval(({ config }) => config.get(key), { key })
-		expect(result).toBe('myValue')
+		be.run(({ config }) => config.set(key, value), { key, value })
+		expect(be.run(({ config }) => config.get(key), { key })).toBe('myValue')
 	})
 
 	it('throws on capture key collision with cap name', () => {
 		const config = new MockConfig()
-		const exoEval = makeBoundEval<{ config: MockConfig }>({ config })
+		const be = new BoundEval<{ config: MockConfig }>({ config })
 
 		expect(() => {
-			exoEval(({ config }) => config.get('x'), { config: 'collision' })
+			be.run(({ config }) => config.get('x'), { config: 'collision' })
 		}).toThrow(/collides/)
 	})
 
 	it('handles multiple caps', () => {
 		const a = new MockConfig()
 		const b = new MockConfig()
-		const exoEval = makeBoundEval<{ a: MockConfig, b: MockConfig }>({ a, b })
+		const be = new BoundEval<{ a: MockConfig, b: MockConfig }>({ a, b })
 
-		exoEval(({ a }) => a.set('x', '1'))
-		exoEval(({ b }) => b.set('x', '2'))
+		be.run(({ a }) => a.set('x', '1'))
+		be.run(({ b }) => b.set('x', '2'))
 
-		expect(exoEval(({ a }) => a.get('x'))).toBe('1')
-		expect(exoEval(({ b }) => b.get('x'))).toBe('2')
+		expect(be.run(({ a }) => a.get('x'))).toBe('1')
+		expect(be.run(({ b }) => b.get('x'))).toBe('2')
 	})
 })
 
 describe('BoundEval class', () => {
-	it('.run() works like makeBoundEval', () => {
+	it('.run() evaluates against caps', () => {
 		const config = new MockConfig()
 		const be = new BoundEval<{ config: MockConfig }>({ config })
 

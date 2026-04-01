@@ -10,7 +10,7 @@
  * the provider supports them.
  */
 
-import type { BoundEvalFn } from 'exoagent/bound-eval'
+import { BoundEval } from 'exoagent/bound-eval'
 import type { PiProviderImpl } from 'exoagent/providers/pi'
 import type { InboxProviderImpl } from 'exoagent/providers/inbox'
 
@@ -19,7 +19,7 @@ type PmCaps = {
 	inbox: InboxProviderImpl
 }
 
-export default async ({ exoEval }: { exoEval: BoundEvalFn<PmCaps> }) => {
+export default async ({ exoEval }: { exoEval: BoundEval<PmCaps> }) => {
 	console.log('[pm] creating project manager agent...')
 
 	// Create pi agent with matrix + github cap types available

@@ -17,6 +17,7 @@
     "start": "tsx src/daemon.ts",
     "typecheck": "tsgo",
     "test": "vitest --run",
+    "check": "npm run build && npm run test",
     "exoeval": "tsx src/cli/exoeval.ts"
   },
   "exports": {

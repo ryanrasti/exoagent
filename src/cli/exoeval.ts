@@ -15,7 +15,7 @@ import { mkdirSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { resolve } from 'node:path'
 import { ProviderLoader } from '../loader'
-import { makeBoundEval } from '../bound-eval'
+import { BoundEval } from '../bound-eval'
 
 const usage = () => {
 	console.log(`Usage: exoeval --caps <cap1,cap2,...> [expression]`)
@@ -113,12 +113,12 @@ const main = async () => {
 		}
 	}
 
-	const boundEval = makeBoundEval(bindings)
+	const boundEval = new BoundEval(bindings)
 
 	const evaluate = async (code: string) => {
 		try {
 			const fn = new RealFunction(`return ${code}`)() as (...args: unknown[]) => unknown
-			const result = boundEval(fn as any)
+			const result = boundEval.run(fn as any)
 			const resolved = result instanceof Promise ? await result : result
 			console.log(typeof resolved === 'string' ? resolved : JSON.stringify(resolved, null, 2))
 		}

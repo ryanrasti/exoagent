@@ -3,6 +3,10 @@
 Pre-v1 rapid iteration. No deprecation warnings, no backwards compatibility
 shims. Just fix and keep moving. Remove dead code, rename freely, break APIs.
 
+## Workflow
+
+Before committing or after a milestone, run `npm run check` (build + typecheck + tests).
+
 ## Coding Conventions
 
 - Prefer `for (const x of y) {}` over `.forEach()`. Use `for...of` for all iteration.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import z from 'zod'
-import { makeBoundEval } from '../../bound-eval'
+import { BoundEval } from '../../bound-eval'
 import { tool } from '../../exoeval/tool'
 
 class MockConfig {
@@ -34,7 +34,7 @@ class MockConfig {
 describe('MatrixProvider', () => {
 	const createProvider = async (mockConfig: MockConfig) => {
 		const { default: createMatrix } = await import('./index')
-		const exoEval = makeBoundEval<{ config: MockConfig }>({ config: mockConfig })
+		const exoEval = new BoundEval<{ config: MockConfig }>({ config: mockConfig })
 		return createMatrix({ exoEval: exoEval as any, ring0: null, config: { dataDir: '/tmp' } })
 	}
 
