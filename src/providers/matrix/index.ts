@@ -1,28 +1,37 @@
 /**
- * Matrix provider — messaging via Matrix client-server API.
+ * Matrix provider — E2EE messaging via matrix-js-sdk.
  *
- * Depends on (via manifest.ts):
- *   - config: for homeserver URL, access token, default room ID
- *   - fetch: for making HTTP requests to the Matrix homeserver
+ * Uses a Space as the workspace boundary. All rooms are scoped to the space.
+ * Messages are end-to-end encrypted via the Rust crypto SDK (Megolm/Olm).
+ *
+ * The SDK is loaded via ring0 (outside SES compartment) since it needs
+ * WebAssembly, fetch, and IndexedDB globals.
  *
  * Setup instructions:
  * 1. Create a Matrix account (e.g., on matrix.org via Element)
  * 2. Create an access token: Element → Settings → Help & About → Access Token
- *    Or via API: POST /_matrix/client/v3/login
- * 3. Create a private room for agent communication
- * 4. Set homeserver_url, access_token, and room_id in the config UI
+ * 3. Create a private Space for your workspace
+ * 4. Set homeserver_url, access_token, and space_id in the config UI
  */
 
 import type { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
-import type { FetchResponse, ScopedFetch } from '../fetch'
+import type { MatrixClient } from 'matrix-js-sdk'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
 
 type MatrixCaps = {
 	config: ScopedConfig
-	fetch: ScopedFetch
+}
+
+type MatrixRing0 = {
+	createClient: typeof import('matrix-js-sdk').createClient
+	MemoryStore: typeof import('matrix-js-sdk').MemoryStore
+	readFileSync: (path: string, encoding: string) => string
+	writeFileSync: (path: string, data: string) => void
+	mkdirSync: (path: string, opts?: { recursive?: boolean }) => void
+	resolve: (...paths: string[]) => string
 }
 
 type MatrixMessage = {
@@ -32,21 +41,33 @@ type MatrixMessage = {
 	timestamp: number
 }
 
+type MatrixRoom = {
+	room_id: string
+	name: string
+	topic: string
+}
+
 export type MatrixProviderImpl = InstanceType<typeof MatrixProvider>
 
 class MatrixProvider {
 	private readonly exoEval: BoundEval<MatrixCaps>
-	private syncToken: string | null = null
+	private readonly ring0: MatrixRing0
+	private readonly dataDir: string
+	private client: MatrixClient | null = null
+	private initPromise: Promise<void> | null = null
 
-	constructor(exoEval: BoundEval<MatrixCaps>) {
+	constructor(exoEval: BoundEval<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
 		this.exoEval = exoEval
+		this.ring0 = ring0
+		this.dataDir = dataDir
 
 		this.exoEval(({ config }) =>
 			config.setSchema({
 				homeserver_url: {
 					type: 'string',
 					isRequired: true,
-					description: 'Matrix homeserver URL, e.g., https://matrix.org',
+					description: 'Matrix homeserver URL',
+					default: 'https://matrix.org',
 				},
 				access_token: {
 					type: 'string',
@@ -54,100 +75,182 @@ class MatrixProvider {
 					isSecret: true,
 					description: 'Matrix access token. Get from Element → Settings → Help & About → Access Token',
 				},
-				room_id: {
+				space_id: {
 					type: 'string',
 					isRequired: true,
-					description: 'Room ID for agent messages, e.g., !abc123:matrix.org',
+					description: 'Space ID for the workspace, e.g., !abc123:matrix.org. Create a Space in Element → left sidebar → +',
 				},
 			}),
 		)
 	}
 
-	private getConfig(): { homeserverUrl: string, accessToken: string, roomId: string } {
+	private getConfig(): { homeserverUrl: string, accessToken: string, spaceId: string } {
 		const homeserverUrl = this.exoEval(({ config }) => config.get('homeserver_url')) as string | null
 		const accessToken = this.exoEval(({ config }) => config.get('access_token')) as string | null
-		const roomId = this.exoEval(({ config }) => config.get('room_id')) as string | null
+		const spaceId = this.exoEval(({ config }) => config.get('space_id')) as string | null
 
 		if (!homeserverUrl) { throw new Error('homeserver_url not configured') }
 		if (!accessToken) { throw new Error('access_token not configured') }
-		if (!roomId) { throw new Error('room_id not configured') }
+		if (!spaceId) { throw new Error('space_id not configured') }
 
 		return {
 			homeserverUrl: homeserverUrl.replace(/\/$/, ''),
 			accessToken,
-			roomId,
+			spaceId,
 		}
 	}
 
-	private async matrixFetch(path: string, options?: { method?: string, body?: string }): Promise<unknown> {
+	private async ensureClient(): Promise<MatrixClient> {
+		if (this.client) { return this.client }
+		if (this.initPromise) { await this.initPromise; return this.client! }
+
+		this.initPromise = this.initClient()
+		await this.initPromise
+		return this.client!
+	}
+
+	private get keysPath(): string {
+		const dir = this.ring0.resolve(this.dataDir, 'matrix')
+		this.ring0.mkdirSync(dir, { recursive: true })
+		return this.ring0.resolve(dir, 'room-keys.json')
+	}
+
+	private async initClient(): Promise<void> {
 		const { homeserverUrl, accessToken } = this.getConfig()
-		const url = `${homeserverUrl}${path}`
-		const method = options?.method ?? 'GET'
-		const body = options?.body
-		const headers: { [key: string]: string } = {
-			'Authorization': `Bearer ${accessToken}`,
-			'Content-Type': 'application/json',
+		const { createClient, MemoryStore } = this.ring0
+
+		// Get device ID from server (use a temp SDK client to avoid globalThis.fetch in SES)
+		const tempClient = createClient({ baseUrl: homeserverUrl, accessToken })
+		const whoami = await tempClient.whoami() as { user_id: string, device_id: string }
+
+		const storePrefix = `exoagent-${whoami.user_id}`
+
+		this.client = createClient({
+			baseUrl: homeserverUrl,
+			userId: whoami.user_id,
+			accessToken,
+			deviceId: whoami.device_id,
+			store: new MemoryStore(),
+		})
+
+		await this.client.initRustCrypto({ cryptoDatabasePrefix: storePrefix })
+
+		// Restore room keys from previous session
+		try {
+			const keysJson = this.ring0.readFileSync(this.keysPath, 'utf-8')
+			const crypto = this.client.getCrypto()
+			if (crypto) {
+				await crypto.importRoomKeysAsJson(keysJson)
+			}
 		}
+		catch { /* no saved keys yet */ }
 
-		const res = (await this.exoEval(
-			({ fetch }) => fetch.fetch(url, { method, headers, body }),
-			{ url, method, headers, body },
-		)) as FetchResponse
+		await this.client.startClient({ initialSyncLimit: 1 })
 
-		if (res.status >= 400) {
-			throw new Error(`Matrix API error ${res.status}: ${res.body}`)
-		}
+		// Wait for first sync
+		await new Promise<void>((resolve) => {
+			this.client!.once('sync' as any, () => resolve())
+		})
 
-		return JSON.parse(res.body)
+		// Export room keys after initial sync
+		await this.exportKeys()
 	}
 
-	@tool(z.string(), z.string().optional())
-	async sendMessage(body: string, roomId?: string): Promise<{ event_id: string }> {
-		const config = this.getConfig()
-		const room = roomId ?? config.roomId
-		const txnId = `exo_${Date.now()}_${Math.random().toString(36).slice(2)}`
+	/** List rooms in the workspace space. */
+	@tool()
+	async listRooms(): Promise<MatrixRoom[]> {
+		const client = await this.ensureClient()
+		const { spaceId } = this.getConfig()
 
-		const result = await this.matrixFetch(
-			`/_matrix/client/v3/rooms/${encodeURIComponent(room)}/send/m.room.message/${txnId}`,
-			{
-				method: 'PUT',
-				body: JSON.stringify({ msgtype: 'm.text', body }),
-			},
-		) as { event_id: string }
+		const data = await client.getRoomHierarchy(spaceId, 50) as { rooms: { room_id: string, name?: string, topic?: string, room_type?: string }[] }
 
-		return { event_id: result.event_id }
-	}
-
-	@tool(z.number().optional(), z.string().optional())
-	async getMessages(limit?: number, roomId?: string): Promise<MatrixMessage[]> {
-		const config = this.getConfig()
-		const room = roomId ?? config.roomId
-		const n = limit ?? 10
-
-		const data = await this.matrixFetch(
-			`/_matrix/client/v3/rooms/${encodeURIComponent(room)}/messages?dir=b&limit=${n}`,
-		) as { chunk: { event_id: string, sender: string, content: { body?: string, msgtype?: string }, origin_server_ts: number }[] }
-
-		return data.chunk
-			.filter(e => e.content?.msgtype === 'm.text')
-			.map(e => ({
-				event_id: e.event_id,
-				sender: e.sender,
-				body: e.content.body ?? '',
-				timestamp: e.origin_server_ts,
+		return data.rooms
+			.filter(r => r.room_id !== spaceId && r.room_type !== 'm.space')
+			.map(r => ({
+				room_id: r.room_id,
+				name: r.name ?? '',
+				topic: r.topic ?? '',
 			}))
 	}
 
-	@tool()
-	async whoami(): Promise<{ user_id: string }> {
-		const result = await this.matrixFetch('/_matrix/client/v3/account/whoami') as { user_id: string }
-		return { user_id: result.user_id }
+	/** Create a room inside the workspace space. */
+	@tool(z.string(), z.string().optional())
+	async createRoom(name: string, topic?: string): Promise<{ room_id: string }> {
+		const client = await this.ensureClient()
+		const { spaceId } = this.getConfig()
+		const via = [spaceId.split(':')[1]]
+
+		const createOpts: { [key: string]: unknown } = {
+			name,
+			visibility: 'private' as const,
+			preset: 'private_chat' as const,
+			initial_state: [
+				{
+					type: 'm.space.parent',
+					state_key: spaceId,
+					content: { canonical: true, via },
+				},
+			],
+		}
+		if (topic) { createOpts.topic = topic }
+
+		const result = await client.createRoom(createOpts as any)
+
+		// Add room as child of space
+		await client.sendStateEvent(spaceId, 'm.space.child' as any, { via }, result.room_id)
+
+		return { room_id: result.room_id }
 	}
 
+	/** Send an encrypted message to a room in the workspace. */
+	@tool(z.string(), z.string())
+	async sendMessage(roomId: string, body: string): Promise<{ event_id: string }> {
+		const client = await this.ensureClient()
+		const res = await client.sendTextMessage(roomId, body)
+		// Persist room keys after sending (new Megolm session may have been created)
+		await this.exportKeys()
+		return { event_id: res.event_id }
+	}
+
+	private async exportKeys(): Promise<void> {
+		try {
+			const crypto = this.client?.getCrypto()
+			if (crypto) {
+				const keys = await crypto.exportRoomKeysAsJson()
+				this.ring0.writeFileSync(this.keysPath, keys)
+			}
+		}
+		catch { /* best effort */ }
+	}
+
+	/** Get recent messages from a room (decrypted). */
+	@tool(z.string(), z.number().optional())
+	async getMessages(roomId: string, limit?: number): Promise<MatrixMessage[]> {
+		const client = await this.ensureClient()
+		const n = limit ?? 10
+
+		const room = client.getRoom(roomId)
+		if (!room) { throw new Error(`Room ${roomId} not found — bot may not have joined`) }
+
+		const timeline = room.getLiveTimeline()
+		const events = timeline.getEvents().slice(-n)
+
+		return events
+			.filter(e => e.getType() === 'm.room.message' && e.getContent().msgtype === 'm.text')
+			.map(e => ({
+				event_id: e.getId()!,
+				sender: e.getSender()!,
+				body: e.getContent().body ?? '',
+				timestamp: e.getTs(),
+			}))
+	}
+
+	/** Get the bot's user ID. */
 	@tool()
-	async listJoinedRooms(): Promise<{ room_id: string }[]> {
-		const data = await this.matrixFetch('/_matrix/client/v3/joined_rooms') as { joined_rooms: string[] }
-		return data.joined_rooms.map(r => ({ room_id: r }))
+	async whoami(): Promise<{ user_id: string }> {
+		const client = await this.ensureClient()
+		const res = await client.whoami()
+		return { user_id: res.user_id }
 	}
 
 	clientProvider(_clientName: string): MatrixProviderImpl {
@@ -159,4 +262,5 @@ class MatrixProvider {
 	}
 }
 
-export default ({ exoEval }: ProviderInit<MatrixCaps>) => new MatrixProvider(exoEval)
+export default ({ exoEval, ring0, config }: ProviderInit<MatrixCaps>) =>
+	new MatrixProvider(exoEval, ring0 as MatrixRing0, config.dataDir)

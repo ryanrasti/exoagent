@@ -38,9 +38,11 @@ const fetchInitSchema = z
 
 export class FetchProviderImpl {
 	private readonly nativeFetch: typeof globalThis.fetch
+	private readonly URLCtor: typeof URL
 
-	constructor(nativeFetch: typeof globalThis.fetch) {
+	constructor(nativeFetch: typeof globalThis.fetch, URLCtor: typeof URL) {
 		this.nativeFetch = nativeFetch
+		this.URLCtor = URLCtor
 	}
 
 	clientProvider(_clientName: string): FetchProviderImpl {
@@ -49,25 +51,29 @@ export class FetchProviderImpl {
 
 	@tool(z.array(z.string()))
 	allow(domains: string[]): ScopedFetch {
-		return new ScopedFetch(this.nativeFetch, new Set(domains))
+		return new ScopedFetch(this.nativeFetch, this.URLCtor, new Set(domains))
 	}
 }
 
-export default ({ ring0 }: ProviderInit) =>
-	new FetchProviderImpl(ring0 as Ring0)
+export default ({ ring0 }: ProviderInit) => {
+	const r = ring0 as Ring0
+	return new FetchProviderImpl(r.fetch, r.URL)
+}
 
 export class ScopedFetch {
 	private readonly nativeFetch: typeof globalThis.fetch
+	private readonly URLCtor: typeof URL
 	private readonly allowed: Set<string>
 
-	constructor(nativeFetch: typeof globalThis.fetch, allowed: Set<string>) {
+	constructor(nativeFetch: typeof globalThis.fetch, URLCtor: typeof URL, allowed: Set<string>) {
 		this.nativeFetch = nativeFetch
+		this.URLCtor = URLCtor
 		this.allowed = allowed
 	}
 
 	@tool(z.string(), fetchInitSchema)
 	async fetch(url: string, init?: FetchInit): Promise<FetchResponse> {
-		const parsed = new URL(url)
+		const parsed = new this.URLCtor(url)
 
 		if (!this.allowed.has(parsed.hostname)) {
 			throw new Error(

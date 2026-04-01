@@ -8,9 +8,7 @@ import 'ses'
 
 const RealFunction = Function
 
-if (typeof Compartment === 'undefined') {
-	lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
-}
+lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
 
 const testDir = join(tmpdir(), `exoagent-loader-test-${process.pid}`)
 const testDistDir = join(tmpdir(), `exoagent-loader-dist-${process.pid}`)

@@ -13,7 +13,7 @@ export default {
 		const fs = await import('node:fs')
 		const net = await import('node:net')
 		return {
-			pty,
+			pty: { spawn: pty.spawn },
 			resolve: path.resolve,
 			join: path.join,
 

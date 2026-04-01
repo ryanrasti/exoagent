@@ -78,7 +78,10 @@ const main = async () => {
 	}
 
 	const cwd = process.env.EXOAGENT_CWD || process.cwd()
-	const { session } = await createAgentSession({ cwd, customTools })
+	// When caps are provided, only expose exoeval (no built-in file/bash tools).
+	// Built-in tools will be re-enabled when agents run inside scoped VMs.
+	const tools = customTools.length > 0 ? [] : undefined
+	const { session } = await createAgentSession({ cwd, customTools, tools })
 	const interactive = new InteractiveMode(session)
 	await interactive.run()
 }

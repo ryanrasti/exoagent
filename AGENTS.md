@@ -191,6 +191,15 @@ Messages inlined in steer (first 5, max 1k chars) — zero tool calls to receive
 Agent can call `inbox.peek()` to re-read or check for more.
 Heartbeat re-steers if messages remain unacked.
 
+## TODO
+
+- **SES / exoeval / ring0 integration** — audit exactly how these 3 interact
+  and the right mechanics (e.g., `harden`) for passing caps. Currently ring0
+  results are hardened before passing to compartments, but need to verify:
+  prototype chain isolation, whether compartment globals vs function args
+  differ in taming, and that exoeval's AST-walking sandbox doesn't leak
+  authority through cap object prototypes.
+
 ## Deferred
 
 - **Git submodule tracking** — runtime repo tracks agent workdirs as submodules

@@ -122,7 +122,7 @@ export class ProviderLoader {
 				// Resolve ring0 if needed
 				if (def.parsed.ring0Source) {
 					const fn = new RealFunction(`return (${def.parsed.ring0Source})()`) as () => Promise<unknown>
-					def.parsed.ring0Result = await fn()
+					def.parsed.ring0Result = harden(await fn())
 				}
 
 				// Check that all deps are ready
@@ -181,6 +181,28 @@ export class ProviderLoader {
 				p.status = 'ready'
 				p.bootMs = Math.round(performance.now() - start)
 				console.log(`  ✓ ${def.name} (${p.bootMs}ms)`)
+
+				// Wire up pi's capEvalFactory as soon as pi loads
+				// (must happen before exos boot, which are later in DAG order)
+				if (def.name === '@exoagent/providers/pi') {
+					const piInst = instance as {
+						setCapEvalFactory?: (factory: (capNames: string[], client: string) => (code: string) => unknown) => void
+					}
+					if (piInst.setCapEvalFactory) {
+						piInst.setCapEvalFactory((capNames: string[], client: string) => {
+							const bindings: { [key: string]: unknown } = {}
+							for (const name of capNames) {
+								const fullName = `@exoagent/providers/${name}`
+								const inst = instances.get(fullName) as { clientProvider?: (name: string) => unknown } | undefined
+								if (inst?.clientProvider) {
+									bindings[name] = inst.clientProvider(client)
+								}
+							}
+							const boundEval = makeBoundEval(bindings)
+							return (code: string) => boundEval(new RealFunction(`return ${code}`)() as any)
+						})
+					}
+				}
 			}
 			catch (err) {
 				p.status = 'error'
@@ -198,7 +220,7 @@ export class ProviderLoader {
 		for (const def of defs) {
 			if (def.parsed.ring0Source) {
 				const fn = new RealFunction(`return (${def.parsed.ring0Source})()`) as () => Promise<unknown>
-				def.parsed.ring0Result = await fn()
+				def.parsed.ring0Result = harden(await fn())
 			}
 		}
 
@@ -320,7 +342,7 @@ export class ProviderLoader {
 	private async warmSharedModules(): Promise<Map<string, object>> {
 		if (this.sharedModules) { return this.sharedModules }
 		const { ModuleSource } = await import('@endo/module-source')
-		const zodSrc = readFileSync(resolve(process.cwd(), 'dist/shared/zod.js'), 'utf-8')
+		const zodSrc = readFileSync(resolve(import.meta.dirname, '..', 'dist/shared/zod.js'), 'utf-8')
 		this.sharedModules = new Map([
 			['zod', { source: new ModuleSource(zodSrc) }],
 		])

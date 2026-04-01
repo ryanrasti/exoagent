@@ -23,6 +23,7 @@ export type ConfigFieldSchema = {
 	isRequired?: boolean
 	isSecret?: boolean
 	description?: string
+	default?: string
 }
 
 const fieldSchemaZod = z.object({
@@ -30,6 +31,7 @@ const fieldSchemaZod = z.object({
 	isRequired: z.boolean().optional(),
 	isSecret: z.boolean().optional(),
 	description: z.string().optional(),
+	default: z.string().optional(),
 })
 
 export class ConfigProviderImpl {
@@ -130,7 +132,9 @@ export class ScopedConfig {
 				sqlite.get('SELECT value FROM config WHERE scope = ? AND key = ?', [scope, key]),
 			{ scope, key },
 		) as { value: string } | null
-		return row ? row.value : null
+		if (row) { return row.value }
+		const schema = this.schemas.get(this.scope)
+		return schema?.[key]?.default ?? null
 	}
 
 	@tool(z.string(), z.string())

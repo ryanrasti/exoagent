@@ -18,9 +18,15 @@ type SessionInfo = {
 	alive: boolean
 }
 
+/** Parse hash route: #/pi/{client}/{sessionId} */
+const parseRoute = (): { client: string, sessionId: string } | null => {
+	const match = window.location.hash.match(/^#\/pi\/([^/]+)\/(.+)$/)
+	return match ? { client: match[1], sessionId: match[2] } : null
+}
+
 export default function PiPanel() {
 	const [sessions, setSessions] = useState<SessionInfo[]>([])
-	const [activeSession, setActiveSession] = useState<{ client: string, sessionId: string } | null>(null)
+	const [route, setRoute] = useState(parseRoute)
 	const [error, setError] = useState<string | null>(null)
 
 	const loadSessions = async () => {
@@ -37,15 +43,25 @@ export default function PiPanel() {
 	useEffect(() => {
 		loadSessions()
 		const interval = setInterval(loadSessions, 3000)
-		return () => clearInterval(interval)
+
+		const onHashChange = () => setRoute(parseRoute())
+		window.addEventListener('hashchange', onHashChange)
+
+		return () => {
+			clearInterval(interval)
+			window.removeEventListener('hashchange', onHashChange)
+		}
 	}, [])
 
-	if (activeSession) {
+	if (route) {
 		return (
 			<TerminalView
-				client={activeSession.client}
-				sessionId={activeSession.sessionId}
-				onBack={() => setActiveSession(null)}
+				client={route.client}
+				sessionId={route.sessionId}
+				onBack={() => {
+					window.location.hash = ''
+					setRoute(null)
+				}}
 			/>
 		)
 	}
@@ -72,7 +88,10 @@ export default function PiPanel() {
 					<button
 						key={`${s.client}:${s.sessionId}`}
 						type="button"
-						onClick={() => setActiveSession({ client: s.client, sessionId: s.sessionId })}
+						onClick={() => {
+							window.location.hash = `#/pi/${s.client}/${s.sessionId}`
+							setRoute({ client: s.client, sessionId: s.sessionId })
+						}}
 						className="bg-neutral-800 border border-neutral-700 rounded-lg p-4 text-left hover:border-neutral-600 transition-colors cursor-pointer w-full"
 					>
 						<div className="flex items-center justify-between">
@@ -96,7 +115,7 @@ export default function PiPanel() {
 const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId: string, onBack: () => void }) => {
 	const termRef = useRef<HTMLDivElement>(null)
 	const disposedRef = useRef(false)
-	const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+	const [status, setStatus] = useState<'connecting' | 'connected' | 'exited'>('connecting')
 
 	useEffect(() => {
 		disposedRef.current = false
@@ -126,7 +145,6 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 			term.loadAddon(unicodeAddon)
 			term.unicode.activeVersion = '11'
 			term.open(termRef.current)
-			setStatus('connected')
 
 			// Fit when container resizes (initial layout + window resize)
 			let fitting = false
@@ -150,9 +168,8 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				}
 			})
 
-			// Send initial resize — also triggers pi to redraw (buffer may have been drained by StrictMode)
+			// Send initial resize
 			const { cols, rows } = term
-			// Resize to 1 less then back to force a redraw
 			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
 			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
 
@@ -176,18 +193,20 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 						)
 						if (disposedRef.current || !term) { break }
 						if (typeof data === 'string' && data.length > 0) {
+							setStatus('connected')
 							term.write(data)
 						}
 						else if (data === '') {
-							setStatus('disconnected')
+							// read() returns empty string when session exits
+							setStatus('exited')
 							break
 						}
 					}
 					catch {
 						if (!disposedRef.current) {
-							setStatus('disconnected')
+							// Connection error — retry after a brief delay
+							await new Promise(r => setTimeout(r, 1000))
 						}
-						break
 					}
 				}
 			}
@@ -222,7 +241,7 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 						? 'bg-green-900 text-green-300'
 						: status === 'connecting'
 							? 'bg-yellow-900 text-yellow-300'
-							: 'bg-neutral-700 text-gray-500'
+							: 'bg-red-900 text-red-300'
 				}`}
 				>
 					{status}

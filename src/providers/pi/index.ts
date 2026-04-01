@@ -37,6 +37,7 @@ class PiProvider {
 	private readonly ring0: Ring0
 	private readonly dataDir: string
 	private readonly sessions = new Map<string, PtySession>()
+	private capEvalFactory?: (capNames: string[], client: string) => (code: string) => unknown
 
 	constructor(init: ProviderInit<PiCaps>) {
 		this.ring0 = init.ring0 as Ring0
@@ -83,7 +84,7 @@ class PiProvider {
 				}
 			}
 			const capsDts = dtsParts.join('\n\n')
-			return this.createWithIpc(client, sessionId, cwd, capsDts)
+			return this.createWithIpc(client, sessionId, cwd, capsDts, capNames)
 		}
 
 		return this.createSimple(client, sessionId, cwd)
@@ -111,6 +112,7 @@ class PiProvider {
 		sessionId: string,
 		cwd: string,
 		capsDts: string,
+		capNames: string[],
 	): Promise<{ client: string, sessionId: string, cwd: string }> {
 		const ipcPath = this.ring0.join(this.dataDir, 'providers', 'pi', `${client}-${sessionId}.sock`)
 		// Clean up stale socket
@@ -173,6 +175,11 @@ class PiProvider {
 			catch { /* ignore */ }
 		}
 
+		// Wire up capEval so IPC tool calls can evaluate against provider caps
+		if (this.capEvalFactory) {
+			session.capEval = this.capEvalFactory(capNames, client)
+		}
+
 		return { client, sessionId, cwd }
 	}
 
@@ -210,22 +217,9 @@ class PiProvider {
 		return session
 	}
 
-	/** Register a BoundEval for a session's exoeval tool calls. Called by exos after create(). */
-	@tool(z.string(), z.string())
-	registerCapEval(_client: string, _sessionId: string): { ok: true } {
-		// The actual capEval function will be set by the exo via a direct call
-		// This is a placeholder — the real mechanism is setCapEval below
-		return { ok: true }
-	}
-
-	/** Set the cap eval function for a session (called directly, not via exoRpc) */
-	setCapEval(client: string, sessionId: string, capEval: (code: string) => unknown): void {
-		const key = this.sessionKey(client, sessionId)
-		const session = this.sessions.get(key)
-		if (!session) {
-			throw new Error(`no session for ${key}`)
-		}
-		session.capEval = capEval
+	/** Set the capEvalFactory — called by the loader after boot. */
+	setCapEvalFactory(factory: (capNames: string[], client: string) => (code: string) => unknown): void {
+		this.capEvalFactory = factory
 	}
 
 	@tool()
