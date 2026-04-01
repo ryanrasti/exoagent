@@ -7,7 +7,7 @@
  * Each client (exo) gets its own scoped inbox.
  */
 
-import { BoundEval } from '../../bound-eval'
+import type { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedSqlite } from '../sqlite'
 import z from 'zod'

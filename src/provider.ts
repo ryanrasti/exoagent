@@ -3,7 +3,7 @@
  * Every provider factory receives this single object.
  */
 
-import { BoundEval } from './bound-eval'
+import type { BoundEval } from './bound-eval'
 import type { DaemonConfig } from './loader'
 
 export type ProviderInit<Caps = unknown> = {

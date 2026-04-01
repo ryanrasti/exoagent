@@ -10,9 +10,9 @@
  * the provider supports them.
  */
 
-import { BoundEval } from 'exoagent/bound-eval'
-import type { PiProviderImpl } from 'exoagent/providers/pi'
+import type { BoundEval } from 'exoagent/bound-eval'
 import type { InboxProviderImpl } from 'exoagent/providers/inbox'
+import type { PiProviderImpl } from 'exoagent/providers/pi'
 
 type PmCaps = {
 	pi: PiProviderImpl
@@ -23,7 +23,7 @@ export default async ({ exoEval }: { exoEval: BoundEval<PmCaps> }) => {
 	console.log('[pm] creating project manager agent...')
 
 	// Create pi agent with matrix + github cap types available
-	const result = await exoEval(
+	const result = await exoEval.run(
 		({ pi }) => pi.create('pm', 'main', capNames),
 		{ capNames: ['github', 'matrix'] },
 	)

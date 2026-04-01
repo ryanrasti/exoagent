@@ -14,10 +14,10 @@
  * 4. Set homeserver_url, access_token, and space_id in the config UI
  */
 
-import { BoundEval } from '../../bound-eval'
+import type { createClient as CreateClientFn, MatrixClient, MemoryStore as MemoryStoreCls } from 'matrix-js-sdk'
+import type { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
-import type { MatrixClient } from 'matrix-js-sdk'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
 
@@ -26,8 +26,8 @@ type MatrixCaps = {
 }
 
 type MatrixRing0 = {
-	createClient: typeof import('matrix-js-sdk').createClient
-	MemoryStore: typeof import('matrix-js-sdk').MemoryStore
+	createClient: typeof CreateClientFn
+	MemoryStore: typeof MemoryStoreCls
 	readFileSync: (path: string, encoding: string) => string
 	writeFileSync: (path: string, data: string) => void
 	mkdirSync: (path: string, opts?: { recursive?: boolean }) => void

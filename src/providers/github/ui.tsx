@@ -41,7 +41,8 @@ export default function GitHubPanel() {
 				<p className="text-sm text-gray-400 mb-4">
 					Token is managed via the
 					{' '}
-					<a href={`http://localhost:${window.location.port}/providers/config`} className="text-blue-400 hover:text-blue-300 underline">config provider</a>.
+					<a href={`http://localhost:${window.location.port}/providers/config`} className="text-blue-400 hover:text-blue-300 underline">config provider</a>
+					.
 				</p>
 
 				<button

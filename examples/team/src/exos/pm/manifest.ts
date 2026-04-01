@@ -1,7 +1,7 @@
-import type { PiProviderImpl } from 'exoagent/providers/pi'
+import type { GithubProviderImpl } from 'exoagent/providers/github'
 import type { InboxProviderImpl } from 'exoagent/providers/inbox'
 import type { MatrixProviderImpl } from 'exoagent/providers/matrix'
-import type { GithubProviderImpl } from 'exoagent/providers/github'
+import type { PiProviderImpl } from 'exoagent/providers/pi'
 
 /**
  * PM exo — project manager agent.

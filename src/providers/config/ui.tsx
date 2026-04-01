@@ -76,7 +76,8 @@ export default function ConfigPanel() {
 								}
 								setSaveStatus(prev => ({ ...prev, [scope]: 'saved' }))
 								setTimeout(() => setSaveStatus(prev => ({ ...prev, [scope]: null })), 2000)
-							} catch {
+							}
+							catch {
 								setSaveStatus(prev => ({ ...prev, [scope]: 'error' }))
 								setTimeout(() => setSaveStatus(prev => ({ ...prev, [scope]: null })), 3000)
 							}

@@ -103,5 +103,3 @@ export class BoundEval<Caps = unknown> {
 		return new BoundEval<Caps & OtherCaps>(combined)
 	}
 }
-
-

@@ -3,7 +3,7 @@
  * Creates a pi agent with github caps and leaves it running for UI attach.
  */
 
-import { BoundEval } from 'exoagent/bound-eval'
+import type { BoundEval } from 'exoagent/bound-eval'
 import type { PiProviderImpl } from 'exoagent/providers/pi'
 
 type HelloCaps = {
@@ -12,7 +12,7 @@ type HelloCaps = {
 
 export default async ({ exoEval }: { exoEval: BoundEval<HelloCaps> }) => {
 	console.log('[hello] creating agent session with github caps...')
-	const result = await exoEval(
+	const result = await exoEval.run(
 		({ pi }) => pi.create('hello', 'default', capNames),
 		{ capNames: ['github'] },
 	)

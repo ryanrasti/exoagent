@@ -12,10 +12,10 @@
 
 import type { ScanDir } from '../loader'
 import { mkdirSync } from 'node:fs'
-import { createInterface } from 'node:readline'
 import { resolve } from 'node:path'
-import { ProviderLoader } from '../loader'
+import { createInterface } from 'node:readline'
 import { BoundEval } from '../bound-eval'
+import { ProviderLoader } from '../loader'
 
 const usage = () => {
 	console.log(`Usage: exoeval --caps <cap1,cap2,...> [expression]`)

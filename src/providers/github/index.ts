@@ -6,7 +6,7 @@
  *   - fetch: for making HTTP requests to api.github.com
  */
 
-import { BoundEval } from '../../bound-eval'
+import type { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
 import type { FetchResponse, ScopedFetch } from '../fetch'

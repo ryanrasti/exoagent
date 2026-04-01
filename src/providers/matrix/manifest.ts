@@ -7,8 +7,8 @@ import type { ScopedConfig } from '../config'
  * config: for storing homeserver URL, access token, space ID.
  */
 export default {
-	ring0: async () => {
-		// @ts-ignore — fake-indexeddb/auto types not resolved via package.json exports
+	'ring0': async () => {
+		// @ts-expect-error — fake-indexeddb/auto types not resolved via package.json exports
 		await import('fake-indexeddb/auto')
 
 		// Silence Rust crypto tracing (DEBUG/INFO spam)
@@ -21,10 +21,10 @@ export default {
 		// The SDK uses loglevel: the root logger + child loggers (MatrixRTCSession etc.)
 		// Setting the root level to SILENT prevents child loggers from inheriting DEBUG.
 		const { logger } = await import('matrix-js-sdk/lib/logger')
-		// @ts-ignore — setLevel/setDefaultLevel exist on the loglevel-backed logger
+		// @ts-expect-error — setLevel exists on the loglevel-backed logger
 		logger.setLevel('silent')
 		// Also silence any future child loggers by patching getChild
-		const origGetChild = logger.getChild as Function
+		const origGetChild = logger.getChild as (...args: unknown[]) => unknown
 		logger.getChild = (namespace: string) => {
 			const child = origGetChild.call(logger, namespace) as any
 			child.setLevel('silent')

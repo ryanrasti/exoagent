@@ -20,7 +20,7 @@ class MockConfig {
 
 class MockGithub {
 	@tool(z.string(), z.string())
-	createIssue(owner: string, title: string): { number: number } {
+	createIssue(_owner: string, _title: string): { number: number } {
 		return { number: 42 }
 	}
 
@@ -90,7 +90,7 @@ describe('BoundEval class', () => {
 		const be = new BoundEval<{ github: MockGithub }>({ github })
 
 		const attenuated = be.map({
-			github: (g) => ({ createIssue: g.createIssue }),
+			github: g => ({ createIssue: g.createIssue }),
 		})
 
 		expect(attenuated.capNames).toEqual(['github'])
@@ -105,7 +105,7 @@ describe('BoundEval class', () => {
 		const github = new MockGithub()
 		const be = new BoundEval<{ config: MockConfig, github: MockGithub }>({ config, github })
 
-		const attenuated = be.map({ github: (g) => g })
+		const attenuated = be.map({ github: g => g })
 		expect(attenuated.capNames).toEqual(['github'])
 	})
 
@@ -141,7 +141,7 @@ describe('BoundEval class', () => {
 
 		// Attenuate github, drop config
 		const agentCaps = be.map({
-			github: (g) => ({ createIssue: g.createIssue }),
+			github: g => ({ createIssue: g.createIssue }),
 		})
 
 		// Add inbox (using a toolable class)
