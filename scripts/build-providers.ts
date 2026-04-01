@@ -5,6 +5,18 @@ import { build } from 'esbuild'
 
 const isWatch = process.argv.includes('--watch')
 
+// Bundle shared deps (zod) into dist/shared/ — parsed once by SES at boot
+const buildShared = async () => {
+	await build({
+		entryPoints: [resolve(process.cwd(), 'node_modules/zod/index.js')],
+		outfile: resolve(process.cwd(), 'dist/shared/zod.js'),
+		bundle: true,
+		format: 'esm',
+		target: 'es2022',
+		logLevel: 'info',
+	})
+}
+
 const scanModules = (srcDir: string, distDir: string): { name: string, entry: string, out: string }[] => {
 	if (!existsSync(srcDir)) { return [] }
 	const modules: { name: string, entry: string, out: string }[] = []
@@ -34,7 +46,7 @@ const buildModule = async (mod: { name: string, entry: string, out: string }) =>
 		target: 'es2022',
 		// We don't mark zod as external so esbuild inlines it into the bundle.
 		// Native modules and heavy db bindings stay external but are bridged or passed via ring0.
-		external: ['node:*', 'better-sqlite3', 'node-pty', '@mariozechner/pi-coding-agent'],
+		external: ['node:*', 'better-sqlite3', 'node-pty', '@mariozechner/pi-coding-agent', 'zod'],
 		logLevel: 'info',
 	}
 
@@ -47,7 +59,7 @@ const buildModule = async (mod: { name: string, entry: string, out: string }) =>
 	}
 }
 
-Promise.all(modules.map(buildModule))
+Promise.all([buildShared(), ...modules.map(buildModule)])
 	.then(() => {
 		if (isWatch) {
 			console.log('Watching for changes...')

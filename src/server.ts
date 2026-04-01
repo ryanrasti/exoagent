@@ -183,6 +183,9 @@ export const createApp = (
 					shortName,
 					hasUI: p.hasUI,
 					clients: p.clients,
+					status: p.status,
+					bootMs: p.bootMs,
+					error: p.error,
 				})
 			}
 			return c.json({ providers: list })

@@ -38,12 +38,17 @@ export type ProviderDef = {
 	hasUI: boolean
 }
 
+export type ModuleStatus = 'pending' | 'ready' | 'error'
+
 export type LoadedProvider = {
 	name: string
 	shortName: string
 	uiInstance: object | null
 	clients: string[]
 	hasUI: boolean
+	status: ModuleStatus
+	bootMs?: number
+	error?: string
 }
 
 export type ScanDir = {
@@ -70,7 +75,123 @@ export class ProviderLoader {
 		this.config = config
 	}
 
-	/** Scan, resolve ring0, DAG sort, dynamically import + instantiate. */
+	/**
+	 * Scan, DAG sort, return pending modules immediately.
+	 * Call boot() to start instantiating in the background.
+	 */
+	prepare(): { providers: { [shortName: string]: LoadedProvider }, sorted: ProviderDef[] } {
+		const defs = this.scan()
+		const sorted = this.dagSort(defs)
+
+		const providers: { [shortName: string]: LoadedProvider } = {}
+		for (const def of sorted) {
+			providers[def.shortName] = {
+				name: def.name,
+				shortName: def.shortName,
+				uiInstance: null,
+				clients: [],
+				hasUI: def.hasUI,
+				status: 'pending',
+			}
+		}
+
+		return { providers, sorted }
+	}
+
+	/**
+	 * Instantiate modules one by one in DAG order, updating providers map in place.
+	 * Failures are isolated — a failed module is marked 'error' but others continue.
+	 */
+	async boot(
+		sorted: ProviderDef[],
+		providers: { [shortName: string]: LoadedProvider },
+		RealFunction: FunctionConstructor,
+	): Promise<void> {
+		const instances = new Map<string, object>()
+		const clients = new Map<string, string[]>()
+
+		for (const def of sorted) {
+			clients.set(def.name, [])
+		}
+
+		for (const def of sorted) {
+			const start = performance.now()
+			const p = providers[def.shortName]
+
+			try {
+				// Resolve ring0 if needed
+				if (def.parsed.ring0Source) {
+					const fn = new RealFunction(`return (${def.parsed.ring0Source})()`) as () => Promise<unknown>
+					def.parsed.ring0Result = await fn()
+				}
+
+				// Check that all deps are ready
+				const { deps, attenuations, ring0Result } = def.parsed
+				for (const dep of deps) {
+					const depShort = dep.split('/').at(-1)!
+					if (providers[depShort]?.status === 'error') {
+						throw new Error(`dependency "${dep}" failed to load`)
+					}
+				}
+
+				const { default: createProvider } = await this.sesImport(def.bundlePath, def.name)
+				if (typeof createProvider !== 'function') {
+					throw new TypeError(`index.ts must default-export a factory function`)
+				}
+
+				// Build attenuated caps
+				const capBindings: { [key: string]: unknown } = {}
+				for (const dep of deps) {
+					const depRoot = instances.get(dep) as { clientProvider?: (name: string) => unknown }
+					if (!depRoot) {
+						throw new Error(`"${dep}" is not loaded`)
+					}
+					if (typeof depRoot.clientProvider !== 'function') {
+						throw new TypeError(`"${dep}" does not export a clientProvider`)
+					}
+
+					const scoped = depRoot.clientProvider(def.name)
+					const fnSource = attenuations[dep]
+					if (!fnSource) {
+						throw new Error(`missing attenuation for dep "${dep}"`)
+					}
+					const attenuationFn = exoEval(fnSource)
+					if (typeof attenuationFn !== 'function') {
+						throw new TypeError(`attenuation for dep "${dep}" must be a function`)
+					}
+
+					const depShortName = dep.split('/').at(-1)!
+					capBindings[depShortName] = attenuationFn(scoped)
+					clients.get(dep)?.push(def.name)
+				}
+
+				const result = createProvider({
+					exoEval: makeBoundEval(capBindings),
+					ring0: ring0Result ?? null,
+					config: this.config,
+				})
+				const instance = result instanceof Promise ? (await result ?? {}) : result
+				instances.set(def.name, instance)
+
+				const root = instance as { uiProvider?: (clients: string[]) => object }
+				const myClients = clients.get(def.name) ?? []
+
+				p.uiInstance = typeof root.uiProvider === 'function' ? root.uiProvider(myClients) : null
+				p.clients = myClients
+				p.status = 'ready'
+				p.bootMs = Math.round(performance.now() - start)
+				console.log(`  ✓ ${def.name} (${p.bootMs}ms)`)
+			}
+			catch (err) {
+				p.status = 'error'
+				p.error = err instanceof Error ? err.message : String(err)
+				p.bootMs = Math.round(performance.now() - start)
+				console.error(`  ✗ ${def.name}: ${p.error}`)
+			}
+		}
+	}
+
+	/** Convenience: scan + sort + instantiate all at once (for tests). */
 	async load(RealFunction: FunctionConstructor): Promise<{ loaded: LoadedProvider[], instances: Map<string, object> }> {
 		const defs = this.scan()
 
@@ -192,6 +313,22 @@ export class ProviderLoader {
 
 	// ── SES import ─────────────────────────────────────────────────
 
+	// Cached ModuleSource instances — parsed once, reused across compartments
+	private moduleSourceCache = new Map<string, object>()
+	private ModuleSource: (new (code: string) => object) | null = null
+
+	/** Ensure ModuleSource + shared deps are parsed and cached. */
+	async ensureModuleSource(): Promise<void> {
+		if (this.ModuleSource) { return }
+		const { ModuleSource } = await import('@endo/module-source')
+		this.ModuleSource = ModuleSource
+
+		// Pre-parse shared dependencies once (bundled by esbuild AOT)
+		const zodPath = resolve(process.cwd(), 'dist/shared/zod.js')
+		const zodSrc = readFileSync(zodPath, 'utf-8')
+		this.moduleSourceCache.set('zod', { source: new ModuleSource(zodSrc) })
+	}
+
 	/** Import a module via SES Compartment from its pre-built bundle. */
 	async sesImport(bundlePath: string, name: string): Promise<{ default: (init: unknown) => object }> {
 		let code: string
@@ -202,37 +339,26 @@ export class ProviderLoader {
 			throw new Error(`missing pre-bundled index.js for provider "${name}" at ${bundlePath}`)
 		}
 
-		// Dynamically import @endo/module-source because we might be running
-		// this before top-level await SES lockdown in some tests.
-		const { ModuleSource } = await import('@endo/module-source')
+		await this.ensureModuleSource()
+		const MS = this.ModuleSource!
+		const cache = this.moduleSourceCache
 
 		const compartment = new Compartment({
 			globals: { console, process: { env: process.env } },
 			resolveHook: (spec: string) => spec,
 			importHook: async (spec: string) => {
 				if (spec === 'root') {
-					return { source: new ModuleSource(code) }
+					return { source: new MS(code) }
 				}
-				// Provide minimal bridge for external node/npm modules used by providers.
-				// In a fully hardened setup, these would be stubs or deeply attenuated.
-				if (['node:path', 'node:fs', 'zod', 'better-sqlite3'].includes(spec)) {
-					const ns = Object.keys((globalThis as any).__ext[spec] || {})
-					const exportsStr = ns.map(k => k === 'default' ? `export default globalThis.__ext['${spec}'].default;` : `export const ${k} = globalThis.__ext['${spec}']['${k}'];`).join('\\n')
-					const source = new ModuleSource(exportsStr)
-					return { source }
+				// Return cached ModuleSource for shared deps (zod, etc.)
+				const cached = cache.get(spec)
+				if (cached) {
+					return cached
 				}
 				throw new Error(`Compartment missing external import: ${spec}`)
 			},
-			__options__: true, // Temporary flag needed for Endo module-source integration
+			__options__: true,
 		})
-
-		// Expose bridged modules on globalThis for the bridge source to read.
-		;(globalThis as any).__ext = (globalThis as any).__ext || {}
-		for (const dep of ['node:path', 'node:fs', 'zod', 'better-sqlite3']) {
-			if (!(globalThis as any).__ext[dep]) {
-				;(globalThis as any).__ext[dep] = await import(dep)
-			}
-		}
 
 		const { namespace } = await compartment.import('root')
 		return namespace as { default: (init: unknown) => object }
@@ -343,6 +469,7 @@ export class ProviderLoader {
 				uiInstance: typeof root.uiProvider === 'function' ? root.uiProvider(myClients) : null,
 				clients: myClients,
 				hasUI: def.hasUI,
+				status: 'ready',
 			})
 		}
 		return { loaded, instances }

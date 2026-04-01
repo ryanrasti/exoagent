@@ -7,6 +7,9 @@ type ProviderInfo = {
 	shortName: string
 	hasUI: boolean
 	clients: string[]
+	status: 'pending' | 'ready' | 'error'
+	bootMs?: number
+	error?: string
 }
 
 const formatUptime = (ms: number): string => {
@@ -24,12 +27,18 @@ function Dashboard() {
 	const [uptime, setUptime] = useState('')
 
 	useEffect(() => {
-		fetch('/api/providers')
-			.then(r => r.json())
-			.then((d: { providers: ProviderInfo[] }) => setProviders(d.providers))
+		const load = () => {
+			fetch('/api/providers')
+				.then(r => r.json())
+				.then((d: { providers: ProviderInfo[] }) => setProviders(d.providers))
+		}
 		fetch('/health')
 			.then(r => r.json())
 			.then((d: { bootMs: number, startedAt: number }) => setHealth(d))
+		load()
+		// Poll while any module is still pending
+		const interval = setInterval(load, 500)
+		return () => clearInterval(interval)
 	}, [])
 
 	useEffect(() => {
@@ -78,8 +87,25 @@ function Dashboard() {
 								: (
 									<span className="text-gray-500 font-semibold text-lg">{p.shortName}</span>
 								)}
-							<span className="text-xs text-gray-600 font-mono">{p.name}</span>
+							<div className="flex items-center gap-2">
+								<span className="text-xs text-gray-600 font-mono">{p.name}</span>
+								<span className={`text-xs px-1.5 py-0.5 rounded ${
+									p.status === 'ready'
+										? 'bg-green-900 text-green-300'
+										: p.status === 'error'
+											? 'bg-red-900 text-red-300'
+											: 'bg-yellow-900 text-yellow-300'
+								}`}
+								>
+									{p.status}
+									{p.bootMs !== undefined ? ` ${p.bootMs}ms` : ''}
+								</span>
+							</div>
 						</div>
+
+						{p.error && (
+							<div className="mt-2 text-xs text-red-400 font-mono bg-red-950 px-3 py-2 rounded">{p.error}</div>
+						)}
 
 						{p.clients.length > 0 && (
 							<div className="mt-3">

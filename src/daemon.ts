@@ -2,17 +2,18 @@
  * exoagentd — daemon entry point.
  *
  * 1. Imports ses, calls lockdown()
- * 2. Loads providers dynamically via manifest DAG resolution
- * 3. Starts HTTP server with subdomain routing
+ * 2. Scans manifests, DAG sorts modules
+ * 3. Starts HTTP server immediately (all modules pending)
+ * 4. Boots modules one by one in the background
  */
 
-import type { LoadedProvider, ScanDir } from './loader'
-import { statSync } from 'node:fs'
+import type { ScanDir } from './loader'
+import { mkdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ProviderLoader } from './loader'
 import { startServer } from './server'
 
-async function main() {
+const main = async () => {
 	const bootStart = performance.now()
 
 	// Capture the real Function before SES lockdown so we can evaluate ring0 manifests
@@ -29,10 +30,7 @@ async function main() {
 	const providerDir = resolve(import.meta.dirname, 'providers')
 	const providerDistDir = resolve(import.meta.dirname, '..', 'dist', 'providers')
 
-	const { mkdirSync } = await import('node:fs')
 	mkdirSync(dataDir, { recursive: true })
-
-	console.log(`Starting exoagentd (workDir: ${workDir}, dataDir: ${dataDir})`)
 
 	const scanDirs: ScanDir[] = [
 		{ src: providerDir, dist: providerDistDir, namespace: '@exoagent/providers' },
@@ -48,17 +46,19 @@ async function main() {
 		scanDirs.push({ src: workExos, dist: resolve(workDir, 'dist/exos'), namespace: './exos' })
 	}
 
+	// Phase 1: Scan + sort (fast — just file reads)
 	const loader = new ProviderLoader(scanDirs, { dataDir })
-	const { loaded } = await loader.load(RealFunction)
+	const { providers, sorted } = loader.prepare()
 
-	// Key by shortName for subdomain routing
-	const providers: { [shortName: string]: LoadedProvider } = {}
-	for (const p of loaded) {
-		providers[p.shortName] = p
-	}
+	// Phase 2: Start server immediately with all modules in 'pending' state
+	const serverBootMs = Math.round(performance.now() - bootStart)
+	startServer(providers, { port, dev: process.env.NODE_ENV !== 'production', bootMs: serverBootMs })
 
-	const bootMs = Math.round(performance.now() - bootStart)
-	startServer(providers, { port, dev: process.env.NODE_ENV !== 'production', bootMs })
+	// Phase 3: Boot modules in the background
+	console.log(`Booting ${sorted.length} modules...`)
+	await loader.boot(sorted, providers, RealFunction)
+	const totalBootMs = Math.round(performance.now() - bootStart)
+	console.log(`All modules booted (${totalBootMs}ms total)`)
 }
 
 main().catch((err) => {
