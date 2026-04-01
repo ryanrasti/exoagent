@@ -60,7 +60,7 @@ class PiProvider {
 		const cwd = this.ensureCwd(client, sessionId)
 
 		// Spawn pi in interactive mode inside a PTY
-		const ptyProcess = this.ring0.pty.spawn('npx', ['pi'], {
+		const ptyProcess = this.ring0.pty.spawn('pi', [], {
 			name: 'xterm-256color',
 			cols: 120,
 			rows: 40,

@@ -13,6 +13,8 @@ import { ProviderLoader } from './loader'
 import { startServer } from './server'
 
 async function main() {
+	const bootStart = performance.now()
+
 	// Capture the real Function before SES lockdown so we can evaluate ring0 manifests
 	// that might contain dynamic imports (which SES strictly rejects at parse time).
 	const RealFunction = Function
@@ -27,15 +29,18 @@ async function main() {
 	const providerDir = resolve(import.meta.dirname, 'providers')
 	const providerDistDir = resolve(import.meta.dirname, '..', 'dist', 'providers')
 
+	const { mkdirSync } = await import('node:fs')
+	mkdirSync(dataDir, { recursive: true })
+
 	console.log(`Starting exoagentd (workDir: ${workDir}, dataDir: ${dataDir})`)
 
 	const scanDirs: ScanDir[] = [
 		{ src: providerDir, dist: providerDistDir, namespace: '@exoagent/providers' },
 	]
 
-	// Add workspace directories if they exist
+	// Add workspace directories if they exist (and aren't the same as built-in)
 	const workProviders = resolve(workDir, 'src/providers')
-	if (statSync(workProviders, { throwIfNoEntry: false })?.isDirectory()) {
+	if (workProviders !== providerDir && statSync(workProviders, { throwIfNoEntry: false })?.isDirectory()) {
 		scanDirs.push({ src: workProviders, dist: resolve(workDir, 'dist/providers'), namespace: './providers' })
 	}
 	const workExos = resolve(workDir, 'src/exos')
@@ -52,7 +57,8 @@ async function main() {
 		providers[p.shortName] = p
 	}
 
-	startServer(providers, { port, dev: process.env.NODE_ENV !== 'production' })
+	const bootMs = Math.round(performance.now() - bootStart)
+	startServer(providers, { port, dev: process.env.NODE_ENV !== 'production', bootMs })
 }
 
 main().catch((err) => {

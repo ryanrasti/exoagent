@@ -207,8 +207,9 @@ export class ProviderLoader {
 		const { ModuleSource } = await import('@endo/module-source')
 
 		const compartment = new Compartment({
-			resolveHook: spec => spec,
-			importHook: async (spec) => {
+			globals: { console, process: { env: process.env } },
+			resolveHook: (spec: string) => spec,
+			importHook: async (spec: string) => {
 				if (spec === 'root') {
 					return { source: new ModuleSource(code) }
 				}
@@ -314,7 +315,10 @@ export class ProviderLoader {
 				if (typeof attenuationFn !== 'function') {
 					throw new TypeError(`attenuation for "${def.name}" dep "${dep}" must be a function`)
 				}
-				capBindings[dep] = attenuationFn(scoped)
+
+				// Use short name (last segment) as the binding key — this is what user code destructures
+				const depShortName = dep.split('/').at(-1)!
+				capBindings[depShortName] = attenuationFn(scoped)
 
 				clients.get(dep)?.push(def.name)
 			}

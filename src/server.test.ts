@@ -40,7 +40,10 @@ describe('server', () => {
 	it('GET /health on dashboard', async () => {
 		const res = await app.request('http://localhost/health')
 		expect(res.status).toBe(200)
-		expect(await res.json()).toEqual({ status: 'ok' })
+		const data = await res.json() as { status: string, bootMs: number, startedAt: number }
+		expect(data.status).toBe('ok')
+		expect(data.bootMs).toBe(0)
+		expect(typeof data.startedAt).toBe('number')
 	})
 
 	it('GET /api/providers', async () => {

@@ -6,11 +6,14 @@
  * - Provider UIs served from a generic HTML template (no per-provider boilerplate)
  */
 
+import type { IncomingMessage } from 'node:http'
+import type { Duplex } from 'node:stream'
 import type { LoadedProvider } from './loader'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
+import { WebSocketServer } from 'ws'
 import { exoEval } from './exoeval'
 
 /**
@@ -38,7 +41,7 @@ const providerHTML = (providerName: string, isDev: boolean): string => {
 	<title>${providerName} — exoagent</title>
 	<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 	<meta name="x-provider" content="${providerName}" />
-	<style>body { margin: 0; background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; }</style>
+	<style>html, body, #root { margin: 0; height: 100%; background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; }</style>
 </head>
 <body>
 	<div id="root"></div>
@@ -99,6 +102,7 @@ const getSubdomain = (c: { req: { header: (name: string) => string | undefined, 
 export type ServerOptions = {
 	port?: number
 	dev?: boolean
+	bootMs?: number
 }
 
 /**
@@ -109,6 +113,7 @@ export const createApp = (
 	options: ServerOptions = {},
 ) => {
 	const { dev = false } = options
+	const startedAt = Date.now()
 	const app = new Hono()
 
 	// Route based on Host header
@@ -167,7 +172,7 @@ export const createApp = (
 		const path = new URL(c.req.url).pathname
 
 		if (c.req.method === 'GET' && path === '/health') {
-			return c.json({ status: 'ok' })
+			return c.json({ status: 'ok', bootMs: options.bootMs ?? 0, startedAt })
 		}
 
 		if (c.req.method === 'GET' && path === '/api/providers') {
@@ -203,13 +208,55 @@ export const startServer = (
 	const { port = 3000 } = options
 	const app = createApp(providers, options)
 
-	serve({ fetch: app.fetch, port }, (info) => {
-		console.log(`exoagentd listening on http://localhost:${info.port}`)
+	const server = serve({ fetch: app.fetch, port }, (info) => {
+		console.log(`exoagentd listening on http://localhost:${info.port} (boot: ${options.bootMs ?? '?'}ms)`)
 		for (const [shortName, p] of Object.entries(providers)) {
 			if (p.hasUI) {
 				console.log(`  ${p.name}: http://${shortName}.localhost:${info.port}/`)
 			}
 		}
+	})
+
+	// WebSocket RPC — same exoeval protocol over a persistent connection
+	const wss = new WebSocketServer({ noServer: true })
+
+	// eslint-disable-next-line node/prefer-global/buffer
+	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+		const hostname = req.headers.host?.split(':')[0] ?? ''
+		const match = hostname.match(/^([a-z0-9-]+)\.localhost$/)
+		const subdomain = match ? match[1] : null
+		const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
+
+		if (!subdomain || url.pathname !== '/ws') {
+			socket.destroy()
+			return
+		}
+
+		const provider = providers[subdomain]
+		if (!provider?.uiInstance) {
+			socket.destroy()
+			return
+		}
+
+		wss.handleUpgrade(req, socket, head, (ws) => {
+			ws.on('message', async (raw) => {
+				try {
+					const msg = JSON.parse(raw.toString()) as { id?: number, code: string }
+					const result = exoEval(msg.code, { [subdomain]: provider.uiInstance })
+					const resolved = result instanceof Promise ? await result : result
+					if (msg.id !== undefined) {
+						ws.send(JSON.stringify({ id: msg.id, result: resolved ?? null }))
+					}
+				}
+				catch (err) {
+					const msg = JSON.parse(raw.toString()) as { id?: number }
+					const error = err instanceof Error ? err.message : String(err)
+					if (msg.id !== undefined) {
+						ws.send(JSON.stringify({ id: msg.id, error }))
+					}
+				}
+			})
+		})
 	})
 
 	return app

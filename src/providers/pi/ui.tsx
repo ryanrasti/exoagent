@@ -1,8 +1,10 @@
-import type { FitAddon } from '@xterm/addon-fit'
-import type { Terminal } from '@xterm/xterm'
 import type { PiProviderImpl } from './index'
+import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import { exoRpc } from '../../ui/lib/exoRpc'
+import { ExoWs } from '../../ui/lib/exoWs'
 import '@xterm/xterm/css/xterm.css'
 
 type PiCaps = {
@@ -100,14 +102,12 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 		disposedRef.current = false
 		let term: Terminal | null = null
 		let fitAddon: FitAddon | null = null
+		let ro: ResizeObserver | null = null
+		const ws = new ExoWs('pi')
 
-		const setup = async () => {
-			const xtermMod = await import('@xterm/xterm')
-			const fitMod = await import('@xterm/addon-fit')
-
+		const setup = () => {
 			if (disposedRef.current || !termRef.current) { return }
-
-			term = new xtermMod.Terminal({
+			term = new Terminal({
 				cursorBlink: true,
 				fontSize: 13,
 				fontFamily: 'JetBrains Mono, Fira Code, monospace',
@@ -116,46 +116,61 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 					foreground: '#e0e0e0',
 					cursor: '#e0e0e0',
 				},
+				rightClickSelectsWord: true,
+				allowProposedApi: true,
 			})
 
-			fitAddon = new fitMod.FitAddon()
+			fitAddon = new FitAddon()
+			const unicodeAddon = new Unicode11Addon()
 			term.loadAddon(fitAddon)
+			term.loadAddon(unicodeAddon)
+			term.unicode.activeVersion = '11'
 			term.open(termRef.current)
-			fitAddon.fit()
 			setStatus('connected')
 
-			// Send resize to server
-			const { cols, rows } = term
-			exoRpc<PiCaps>(
-				({ pi }) => pi.resize(client, sessionId, cols, rows),
-				{ client, sessionId, cols, rows },
-			).catch(() => {})
+			// Fit when container resizes (initial layout + window resize)
+			let fitting = false
+			let fitTimer: ReturnType<typeof setTimeout> | null = null
+			ro = new ResizeObserver(() => {
+				if (fitting) { return }
+				if (fitTimer) { clearTimeout(fitTimer) }
+				fitTimer = setTimeout(() => {
+					fitting = true
+					fitAddon?.fit()
+					fitting = false
+				}, 50)
+			})
+			ro.observe(termRef.current)
 
-			// Handle resize
-			const resizeObserver = new ResizeObserver(() => {
-				if (fitAddon && term) {
-					fitAddon.fit()
-					exoRpc<PiCaps>(
-						({ pi }) => pi.resize(client, sessionId, term!.cols, term!.rows),
-						{ client, sessionId, cols: term.cols, rows: term.rows },
-					).catch(() => {})
+			// Copy-on-select: automatically copy highlighted text to clipboard
+			term.onSelectionChange(() => {
+				const selection = term?.getSelection()
+				if (selection) {
+					navigator.clipboard.writeText(selection).catch(() => {})
 				}
 			})
-			resizeObserver.observe(termRef.current)
 
-			// Input: send keystrokes to server
-			term.onData((data: string) => {
-				exoRpc<PiCaps>(
-					({ pi }) => pi.input(client, sessionId, data),
-					{ client, sessionId, data },
-				).catch(() => {})
+			// Send initial resize — also triggers pi to redraw (buffer may have been drained by StrictMode)
+			const { cols, rows } = term
+			// Resize to 1 less then back to force a redraw
+			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
+			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
+
+			// Handle resize via xterm's own onResize event
+			term.onResize(({ cols: c, rows: r }) => {
+				ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, c, r), { client, sessionId, c, r })
 			})
 
-			// Output: long-poll loop
+			// Input: fire-and-forget over WebSocket
+			term.onData((data: string) => {
+				ws.fire<PiCaps>(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
+			})
+
+			// Output: long-poll via WebSocket call()
 			const poll = async () => {
 				while (!disposedRef.current) {
 					try {
-						const data = await exoRpc<PiCaps>(
+						const data = await ws.call<PiCaps>(
 							({ pi }) => pi.read(client, sessionId),
 							{ client, sessionId },
 						)
@@ -164,7 +179,6 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 							term.write(data)
 						}
 						else if (data === '') {
-							// Session exited
 							setStatus('disconnected')
 							break
 						}
@@ -184,13 +198,15 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 
 		return () => {
 			disposedRef.current = true
+			ro?.disconnect()
+			ws.dispose()
 			term?.dispose()
 		}
 	}, [client, sessionId])
 
 	return (
-		<div className="h-screen flex flex-col bg-[#1a1a1a]">
-			<div className="flex items-center gap-3 px-4 py-3 bg-neutral-900 border-b border-neutral-700">
+		<div className="fixed inset-0 flex flex-col bg-[#1a1a1a]">
+			<div className="flex-none flex items-center gap-3 px-4 py-3 bg-neutral-900 border-b border-neutral-700">
 				<button
 					type="button"
 					onClick={onBack}
@@ -212,7 +228,9 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 					{status}
 				</span>
 			</div>
-			<div ref={termRef} className="flex-1 p-1" />
+			<div className="relative flex-1 min-h-0 overflow-hidden">
+				<div ref={termRef} className="absolute inset-0 overflow-hidden" />
+			</div>
 		</div>
 	)
 }

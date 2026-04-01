@@ -9,14 +9,36 @@ type ProviderInfo = {
 	clients: string[]
 }
 
+const formatUptime = (ms: number): string => {
+	const seconds = Math.floor(ms / 1000)
+	if (seconds < 60) { return `${seconds}s` }
+	const minutes = Math.floor(seconds / 60)
+	if (minutes < 60) { return `${minutes}m ${seconds % 60}s` }
+	const hours = Math.floor(minutes / 60)
+	return `${hours}h ${minutes % 60}m`
+}
+
 function Dashboard() {
 	const [providers, setProviders] = useState<ProviderInfo[]>([])
+	const [health, setHealth] = useState<{ bootMs: number, startedAt: number } | null>(null)
+	const [uptime, setUptime] = useState('')
 
 	useEffect(() => {
 		fetch('/api/providers')
 			.then(r => r.json())
 			.then((d: { providers: ProviderInfo[] }) => setProviders(d.providers))
+		fetch('/health')
+			.then(r => r.json())
+			.then((d: { bootMs: number, startedAt: number }) => setHealth(d))
 	}, [])
+
+	useEffect(() => {
+		if (!health) { return }
+		const tick = () => setUptime(formatUptime(Date.now() - health.startedAt))
+		tick()
+		const interval = setInterval(tick, 1000)
+		return () => clearInterval(interval)
+	}, [health])
 
 	const sortedProviders = providers // The backend already sends them topo sorted!
 
@@ -25,6 +47,14 @@ function Dashboard() {
 			<div className="flex items-center gap-3 mb-8">
 				<img src="/assets/logo.svg" alt="logo" className="w-8 h-8" />
 				<h1 className="text-2xl m-0 font-bold">exoagent</h1>
+				{health && (
+					<div className="ml-auto text-xs text-gray-500 font-mono">
+						<span title={`boot: ${health.bootMs}ms`}>
+							up
+							{uptime}
+						</span>
+					</div>
+				)}
 			</div>
 
 			<h2 className="text-base mb-4 text-gray-400 font-semibold">providers</h2>

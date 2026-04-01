@@ -39,8 +39,10 @@ export default ({ ring0, config }: ProviderInit) => {
 		clientProvider(clientName: string): ScopedSqlite {
 			let db = dbs.get(clientName)
 			if (!db) {
-				mkdirSync(root, { recursive: true })
-				db = new Database(resolve(root, `${clientName}.db`)) as unknown as DatabaseInstance
+				const dbPath = resolve(root, `${clientName}.db`)
+				// Create parent dirs (clientName may contain slashes, e.g., @exoagent/providers/config)
+				mkdirSync(dbPath.substring(0, dbPath.lastIndexOf('/')), { recursive: true })
+				db = new Database(dbPath) as unknown as DatabaseInstance
 				db.pragma('journal_mode = WAL')
 				dbs.set(clientName, db)
 			}
