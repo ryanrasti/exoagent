@@ -172,9 +172,10 @@ export const createApp = (
 
 		if (c.req.method === 'GET' && path === '/api/providers') {
 			const list = []
-			for (const [name, p] of Object.entries(providers)) {
+			for (const [shortName, p] of Object.entries(providers)) {
 				list.push({
-					name,
+					name: p.name,
+					shortName,
 					hasUI: p.hasUI,
 					clients: p.clients,
 				})
@@ -204,9 +205,9 @@ export const startServer = (
 
 	serve({ fetch: app.fetch, port }, (info) => {
 		console.log(`exoagentd listening on http://localhost:${info.port}`)
-		for (const [name, p] of Object.entries(providers)) {
+		for (const [shortName, p] of Object.entries(providers)) {
 			if (p.hasUI) {
-				console.log(`  ${name}: http://${name}.localhost:${info.port}/`)
+				console.log(`  ${p.name}: http://${shortName}.localhost:${info.port}/`)
 			}
 		}
 	})

@@ -3,6 +3,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { build } from 'esbuild'
 
+const rootDir = import.meta.dirname
 const isWatch = process.argv.includes('--watch')
 
 const scanModules = (srcDir: string, distDir: string): { name: string, entry: string, out: string }[] => {
@@ -19,8 +20,8 @@ const scanModules = (srcDir: string, distDir: string): { name: string, entry: st
 }
 
 const modules = [
-	...scanModules(resolve(process.cwd(), 'src/providers'), resolve(process.cwd(), 'dist/providers')),
-	...scanModules(resolve(process.cwd(), 'examples'), resolve(process.cwd(), 'dist/examples')),
+	...scanModules(resolve(rootDir, 'src/providers'), resolve(rootDir, 'dist/providers')),
+	...scanModules(resolve(rootDir, 'src/exos'), resolve(rootDir, 'dist/exos')),
 ]
 
 console.log(`Building ${modules.length} modules...`)
@@ -32,8 +33,6 @@ const buildModule = async (mod: { name: string, entry: string, out: string }) =>
 		bundle: true,
 		format: 'esm',
 		target: 'es2022',
-		// We don't mark zod as external so esbuild inlines it into the bundle.
-		// Native modules and heavy db bindings stay external but are bridged or passed via ring0.
 		external: ['node:*', 'better-sqlite3', 'node-pty', '@mariozechner/pi-coding-agent'],
 		logLevel: 'info',
 	}

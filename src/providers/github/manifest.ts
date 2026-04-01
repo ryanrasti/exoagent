@@ -8,6 +8,6 @@ import type { ScopedConfig } from '../config'
 import type { FetchProviderImpl } from '../fetch'
 
 export default {
-	config: (config: ScopedConfig) => config,
-	fetch: (fetch: FetchProviderImpl) => fetch.allow(['api.github.com']),
+	'@exoagent/providers/config': (config: ScopedConfig) => config,
+	'@exoagent/providers/fetch': (fetch: FetchProviderImpl) => fetch.allow(['api.github.com']),
 }

@@ -13,7 +13,11 @@ if (typeof Compartment === 'undefined') {
 }
 
 const testDir = join(tmpdir(), `exoagent-loader-test-${process.pid}`)
+const testDistDir = join(tmpdir(), `exoagent-loader-dist-${process.pid}`)
 const daemonConfig = { dataDir: testDir }
+const testNs = '@test/providers'
+
+const testScanDir = () => ({ src: testDir, dist: testDistDir, namespace: testNs })
 
 const makeProvider = (name: string, manifest: string, indexTs?: string) => {
 	const dir = resolve(testDir, name)
@@ -21,31 +25,31 @@ const makeProvider = (name: string, manifest: string, indexTs?: string) => {
 	writeFileSync(resolve(dir, 'manifest.ts'), manifest)
 	if (indexTs) {
 		writeFileSync(resolve(dir, 'index.ts'), indexTs)
-		// For tests, mock the build output step
-		const distDir = resolve(process.cwd(), 'dist/providers', name)
+		const distDir = resolve(testDistDir, name)
 		mkdirSync(distDir, { recursive: true })
-		writeFileSync(resolve(distDir, 'index.js'), indexTs) // In tests, the raw code is already plain JS
+		writeFileSync(resolve(distDir, 'index.js'), indexTs)
 	}
 }
 
 describe('ProviderLoader.scan', () => {
-	beforeEach(() => mkdirSync(testDir, { recursive: true }))
-	afterEach(() => rmSync(testDir, { recursive: true, force: true }))
+	beforeEach(() => { mkdirSync(testDir, { recursive: true }); mkdirSync(testDistDir, { recursive: true }) })
+	afterEach(() => { rmSync(testDir, { recursive: true, force: true }); rmSync(testDistDir, { recursive: true, force: true }) })
 
 	it('scans directories with manifest.ts', () => {
 		makeProvider('alpha', 'export default {}')
 		makeProvider('beta', 'export default {}')
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
 		const defs = loader.scan()
-		expect(defs.map(d => d.name).toSorted()).toEqual(['alpha', 'beta'])
+		expect(defs.map(d => d.shortName).toSorted()).toEqual(['alpha', 'beta'])
+		expect(defs.map(d => d.name).toSorted()).toEqual([`${testNs}/alpha`, `${testNs}/beta`])
 	})
 
-	it('throws if provider dir missing manifest.ts', () => {
+	it('skips directories without manifest.ts', () => {
 		mkdirSync(resolve(testDir, 'no-manifest'), { recursive: true })
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
-		expect(() => loader.scan()).toThrow(/missing manifest\.ts/)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
+		expect(loader.scan()).toHaveLength(0)
 	})
 
 	it('extracts deps from manifest', () => {
@@ -59,7 +63,7 @@ describe('ProviderLoader.scan', () => {
 			`,
 		)
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
 		const defs = loader.scan()
 		expect(defs[0].parsed.deps).toEqual(['parent'])
 	})
@@ -72,7 +76,7 @@ describe('ProviderLoader.scan', () => {
 			}`,
 		)
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
 		const defs = loader.scan()
 		expect(defs[0].parsed.ring0Source).toContain('async')
 		expect(defs[0].parsed.ring0Source).toContain('42')
@@ -88,7 +92,7 @@ describe('ProviderLoader.scan', () => {
 			}`,
 		)
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
 		const defs = loader.scan()
 		expect(defs[0].parsed.ring0Source).toContain('99')
 		expect(defs[0].parsed.deps).toEqual(['other'])
@@ -103,26 +107,28 @@ describe('ProviderLoader.dagSort', () => {
 		}
 		return {
 			name,
+			shortName: name,
 			dir: '',
+			bundlePath: '',
 			parsed: { ring0Source: null, ring0Result: undefined, attenuations, deps },
 			hasUI: false,
 		}
 	}
 
 	it('sorts leaves first', () => {
-		const loader = new ProviderLoader(tmpdir(), daemonConfig)
+		const loader = new ProviderLoader([{ src: tmpdir(), dist: tmpdir(), namespace: '@test/providers' }], daemonConfig)
 		const sorted = loader.dagSort([def('b', ['a']), def('a', [])])
 		expect(sorted.map(d => d.name)).toEqual(['a', 'b'])
 	})
 
 	it('alphabetical tie-breaking', () => {
-		const loader = new ProviderLoader(tmpdir(), daemonConfig)
+		const loader = new ProviderLoader([{ src: tmpdir(), dist: tmpdir(), namespace: '@test/providers' }], daemonConfig)
 		const sorted = loader.dagSort([def('c', []), def('a', []), def('b', [])])
 		expect(sorted.map(d => d.name)).toEqual(['a', 'b', 'c'])
 	})
 
 	it('diamond dependency', () => {
-		const loader = new ProviderLoader(tmpdir(), daemonConfig)
+		const loader = new ProviderLoader([{ src: tmpdir(), dist: tmpdir(), namespace: '@test/providers' }], daemonConfig)
 		const sorted = loader.dagSort([
 			def('d', ['b', 'c']),
 			def('b', ['a']),
@@ -133,19 +139,19 @@ describe('ProviderLoader.dagSort', () => {
 	})
 
 	it('throws on cycle', () => {
-		const loader = new ProviderLoader(tmpdir(), daemonConfig)
+		const loader = new ProviderLoader([{ src: tmpdir(), dist: tmpdir(), namespace: '@test/providers' }], daemonConfig)
 		expect(() => loader.dagSort([def('a', ['b']), def('b', ['a'])])).toThrow(/cycle/)
 	})
 
 	it('throws on unknown dep', () => {
-		const loader = new ProviderLoader(tmpdir(), daemonConfig)
+		const loader = new ProviderLoader([{ src: tmpdir(), dist: tmpdir(), namespace: '@test/providers' }], daemonConfig)
 		expect(() => loader.dagSort([def('a', ['missing'])])).toThrow(/unknown provider/)
 	})
 })
 
 describe('ProviderLoader.load', () => {
-	beforeEach(() => mkdirSync(testDir, { recursive: true }))
-	afterEach(() => rmSync(testDir, { recursive: true, force: true }))
+	beforeEach(() => { mkdirSync(testDir, { recursive: true }); mkdirSync(testDistDir, { recursive: true }) })
+	afterEach(() => { rmSync(testDir, { recursive: true, force: true }); rmSync(testDistDir, { recursive: true, force: true }) })
 
 	it('loads ring0 provider via dynamic import', async () => {
 		makeProvider(
@@ -159,11 +165,12 @@ describe('ProviderLoader.load', () => {
 			}`,
 		)
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
-		const loaded = await loader.load(RealFunction)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
+		const { loaded } = await loader.load(RealFunction)
 
 		expect(loaded).toHaveLength(1)
-		expect(loaded[0].name).toBe('leaf')
+		expect(loaded[0].shortName).toBe('leaf')
+		expect(loaded[0].name).toBe(`${testNs}/leaf`)
 		expect((loaded[0].uiInstance as any).value).toBe(123)
 		expect((loaded[0].uiInstance as any).dataDir).toBe(testDir)
 	})
@@ -187,7 +194,7 @@ describe('ProviderLoader.load', () => {
 		)
 		makeProvider(
 			'child',
-			'export default { root: (r) => r }',
+			`export default { '${testNs}/root': (r) => r }`,
 			`export default ({ }) => {
 				return {
 					clientProvider() { return { ok: true } },
@@ -196,14 +203,14 @@ describe('ProviderLoader.load', () => {
 			}`,
 		)
 
-		const loader = new ProviderLoader(testDir, daemonConfig)
-		const loaded = await loader.load(RealFunction)
+		const loader = new ProviderLoader([testScanDir()], daemonConfig)
+		const { loaded } = await loader.load(RealFunction)
 
 		expect(loaded).toHaveLength(2)
-		expect(loaded[0].name).toBe('root')
-		expect(loaded[1].name).toBe('child')
-		expect(loaded[0].clients).toEqual(['child'])
-		expect((loaded[0].uiInstance as any).clients).toEqual(['child'])
+		expect(loaded[0].shortName).toBe('root')
+		expect(loaded[1].shortName).toBe('child')
+		expect(loaded[0].clients).toEqual([`${testNs}/child`])
+		expect((loaded[0].uiInstance as any).clients).toEqual([`${testNs}/child`])
 		expect((loaded[1].uiInstance as any).ok).toBe(true)
 	})
 })

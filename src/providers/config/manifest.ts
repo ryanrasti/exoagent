@@ -5,5 +5,5 @@
 import type { ScopedSqlite } from '../sqlite'
 
 export default {
-	sqlite: (sqlite: ScopedSqlite) => sqlite,
+	'@exoagent/providers/sqlite': (sqlite: ScopedSqlite) => sqlite,
 }

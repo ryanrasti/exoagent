@@ -18,6 +18,10 @@
     "typecheck": "tsgo",
     "test": "vitest --run"
   },
+  "exports": {
+    "./providers/*": "./src/providers/*/index.ts",
+    "./bound-eval": "./src/bound-eval.ts"
+  },
   "bin": {
     "exoagentd": "bin/exoagentd"
   },

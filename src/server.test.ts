@@ -21,12 +21,12 @@ class MockProvider {
 	}
 }
 
-function loaded(name: string, instance: object): LoadedProvider {
-	return { name, uiInstance: instance, clients: [], hasUI: false }
+function loaded(name: string, shortName: string, instance: object): LoadedProvider {
+	return { name, shortName, uiInstance: instance, clients: [], hasUI: false }
 }
 
 const app = createApp({
-	mock: loaded('mock', new MockProvider()),
+	mock: loaded('@test/providers/mock', 'mock', new MockProvider()),
 })
 
 async function rpc(provider: string, code: string): Promise<Response> {
@@ -46,8 +46,9 @@ describe('server', () => {
 	it('GET /api/providers', async () => {
 		const res = await app.request('http://localhost/api/providers')
 		expect(res.status).toBe(200)
-		const data = (await res.json()) as { providers: { name: string }[] }
-		expect(data.providers.map((p: { name: string }) => p.name)).toEqual(['mock'])
+		const data = (await res.json()) as { providers: { name: string, shortName: string }[] }
+		expect(data.providers.map((p: { shortName: string }) => p.shortName)).toEqual(['mock'])
+		expect(data.providers.map((p: { name: string }) => p.name)).toEqual(['@test/providers/mock'])
 	})
 
 	it('POST /rpc on unknown subdomain returns 404', async () => {

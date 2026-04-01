@@ -28,34 +28,50 @@ type ParsedManifest = {
 }
 
 export type ProviderDef = {
+	/** Fully qualified name, e.g., '@exoagent/providers/pi' */
 	name: string
+	/** Short name (directory name), e.g., 'pi' — used for routing, filesystem, RPC bindings */
+	shortName: string
 	dir: string
+	bundlePath: string
 	parsed: ParsedManifest
 	hasUI: boolean
 }
 
 export type LoadedProvider = {
 	name: string
+	shortName: string
 	uiInstance: object | null
 	clients: string[]
 	hasUI: boolean
 }
 
+export type ScanDir = {
+	/** Directory to scan for module subdirectories */
+	src: string
+	/** Directory where pre-built bundles live */
+	dist: string
+	/** Namespace prefix (e.g., '@exoagent/providers', './exos') */
+	namespace: string
+}
+
 export class ProviderLoader {
-	private readonly providerDir: string
+	private readonly scanDirs: ScanDir[]
 	private readonly config: DaemonConfig
 
-	constructor(providerDir: string, config: DaemonConfig) {
-		const stat = statSync(providerDir, { throwIfNoEntry: false })
-		if (!stat?.isDirectory()) {
-			throw new Error(`provider directory does not exist: ${providerDir}`)
+	constructor(scanDirs: ScanDir[], config: DaemonConfig) {
+		for (const { src } of scanDirs) {
+			const stat = statSync(src, { throwIfNoEntry: false })
+			if (!stat?.isDirectory()) {
+				throw new Error(`module directory does not exist: ${src}`)
+			}
 		}
-		this.providerDir = providerDir
+		this.scanDirs = scanDirs
 		this.config = config
 	}
 
 	/** Scan, resolve ring0, DAG sort, dynamically import + instantiate. */
-	async load(RealFunction: FunctionConstructor): Promise<LoadedProvider[]> {
+	async load(RealFunction: FunctionConstructor): Promise<{ loaded: LoadedProvider[], instances: Map<string, object> }> {
 		const defs = this.scan()
 
 		for (const def of defs) {
@@ -73,33 +89,45 @@ export class ProviderLoader {
 
 	scan(): ProviderDef[] {
 		const defs: ProviderDef[] = []
+		const seen = new Map<string, string>()
 
-		for (const entry of readdirSync(this.providerDir)) {
-			const dir = resolve(this.providerDir, entry)
-			if (!statSync(dir).isDirectory()) { continue }
+		for (const { src, dist, namespace } of this.scanDirs) {
+			for (const entry of readdirSync(src)) {
+				const dir = resolve(src, entry)
+				if (!statSync(dir).isDirectory()) { continue }
 
-			const manifestPath = resolve(dir, 'manifest.ts')
-			if (!statSync(manifestPath, { throwIfNoEntry: false })) {
-				throw new Error(`provider "${entry}" is missing manifest.ts`)
+				const manifestPath = resolve(dir, 'manifest.ts')
+				if (!statSync(manifestPath, { throwIfNoEntry: false })) {
+					// Skip directories without a manifest (e.g., README-only dirs)
+					continue
+				}
+
+				const fullName = `${namespace}/${entry}`
+				if (seen.has(entry)) {
+					throw new Error(`duplicate short name "${entry}" — used by both "${seen.get(entry)}" and "${fullName}"`)
+				}
+				seen.set(entry, fullName)
+
+				const raw = readFileSync(manifestPath, 'utf-8')
+				const relPath = relative(src, manifestPath)
+				const entries = this.parseManifest(raw, relPath)
+
+				const { ring0, ...attenuations } = entries
+
+				defs.push({
+					name: fullName,
+					shortName: entry,
+					dir,
+					bundlePath: resolve(dist, entry, 'index.js'),
+					parsed: {
+						ring0Source: ring0 ?? null,
+						ring0Result: undefined,
+						attenuations,
+						deps: Object.keys(attenuations),
+					},
+					hasUI: statSync(resolve(dir, 'ui.tsx'), { throwIfNoEntry: false }) !== undefined,
+				})
 			}
-
-			const raw = readFileSync(manifestPath, 'utf-8')
-			const relPath = relative(this.providerDir, manifestPath)
-			const entries = this.parseManifest(raw, relPath)
-
-			const { ring0, ...attenuations } = entries
-
-			defs.push({
-				name: entry,
-				dir,
-				parsed: {
-					ring0Source: ring0 ?? null,
-					ring0Result: undefined,
-					attenuations,
-					deps: Object.keys(attenuations),
-				},
-				hasUI: statSync(resolve(dir, 'ui.tsx'), { throwIfNoEntry: false }) !== undefined,
-			})
 		}
 
 		return defs
@@ -164,13 +192,8 @@ export class ProviderLoader {
 
 	// ── SES import ─────────────────────────────────────────────────
 
-	/**
-	 * Import a provider module via SES Compartment.
-	 * Reads the pre-bundled dist/providers/<name>/index.js file, wraps it in a ModuleSource,
-	 * and evaluates it within a Compartment to isolate it.
-	 */
-	async sesImport(dir: string, name: string): Promise<{ default: (init: unknown) => object }> {
-		const bundlePath = resolve(process.cwd(), 'dist/providers', name, 'index.js')
+	/** Import a module via SES Compartment from its pre-built bundle. */
+	async sesImport(bundlePath: string, name: string): Promise<{ default: (init: unknown) => object }> {
 		let code: string
 		try {
 			code = readFileSync(bundlePath, 'utf-8')
@@ -253,7 +276,7 @@ export class ProviderLoader {
 
 	// ── Instantiation ──────────────────────────────────────────────
 
-	async instantiate(sorted: ProviderDef[]): Promise<LoadedProvider[]> {
+	async instantiate(sorted: ProviderDef[]): Promise<{ loaded: LoadedProvider[], instances: Map<string, object> }> {
 		const instances = new Map<string, object>()
 		const clients = new Map<string, string[]>()
 
@@ -264,7 +287,7 @@ export class ProviderLoader {
 		for (const def of sorted) {
 			const { deps, attenuations, ring0Result } = def.parsed
 
-			const { default: createProvider } = await this.sesImport(def.dir, def.name)
+			const { default: createProvider } = await this.sesImport(def.bundlePath, def.name)
 			if (typeof createProvider !== 'function') {
 				throw new TypeError(`provider "${def.name}" index.ts must default-export a factory function`)
 			}
@@ -296,11 +319,13 @@ export class ProviderLoader {
 				clients.get(dep)?.push(def.name)
 			}
 
-			instances.set(def.name, createProvider({
+			const result = createProvider({
 				exoEval: makeBoundEval(capBindings),
 				ring0: ring0Result ?? null,
 				config: this.config,
-			}))
+			})
+			// Await if factory returns a promise (e.g., exos with async init)
+			instances.set(def.name, result instanceof Promise ? (await result ?? {}) : result)
 		}
 
 		const loaded: LoadedProvider[] = []
@@ -310,11 +335,12 @@ export class ProviderLoader {
 
 			loaded.push({
 				name: def.name,
+				shortName: def.shortName,
 				uiInstance: typeof root.uiProvider === 'function' ? root.uiProvider(myClients) : null,
 				clients: myClients,
 				hasUI: def.hasUI,
 			})
 		}
-		return loaded
+		return { loaded, instances }
 	}
 }

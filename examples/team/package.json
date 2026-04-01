@@ -1,0 +1,16 @@
+{
+  "name": "exoagent-team",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsx build.ts",
+    "dev": "tsx build.ts --watch"
+  },
+  "dependencies": {
+    "exoagent": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0"
+  }
+}

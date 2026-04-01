@@ -6,7 +6,8 @@
  * 3. Starts HTTP server with subdomain routing
  */
 
-import type { LoadedProvider } from './loader'
+import type { LoadedProvider, ScanDir } from './loader'
+import { statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ProviderLoader } from './loader'
 import { startServer } from './server'
@@ -21,17 +22,34 @@ async function main() {
 	lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
 
 	const port = Number(process.env.PORT) || 3000
-	const dataDir = process.env.EXOAGENT_DATA ?? resolve(process.cwd(), '.exoagent')
+	const workDir = process.env.EXOAGENT_DIR ?? process.cwd()
+	const dataDir = resolve(workDir, '.exoagent')
 	const providerDir = resolve(import.meta.dirname, 'providers')
+	const providerDistDir = resolve(import.meta.dirname, '..', 'dist', 'providers')
 
-	console.log(`Starting exoagentd (dataDir: ${dataDir})`)
+	console.log(`Starting exoagentd (workDir: ${workDir}, dataDir: ${dataDir})`)
 
-	const loader = new ProviderLoader(providerDir, { dataDir })
-	const loaded = await loader.load(RealFunction)
+	const scanDirs: ScanDir[] = [
+		{ src: providerDir, dist: providerDistDir, namespace: '@exoagent/providers' },
+	]
 
-	const providers: { [name: string]: LoadedProvider } = {}
+	// Add workspace directories if they exist
+	const workProviders = resolve(workDir, 'src/providers')
+	if (statSync(workProviders, { throwIfNoEntry: false })?.isDirectory()) {
+		scanDirs.push({ src: workProviders, dist: resolve(workDir, 'dist/providers'), namespace: './providers' })
+	}
+	const workExos = resolve(workDir, 'src/exos')
+	if (statSync(workExos, { throwIfNoEntry: false })?.isDirectory()) {
+		scanDirs.push({ src: workExos, dist: resolve(workDir, 'dist/exos'), namespace: './exos' })
+	}
+
+	const loader = new ProviderLoader(scanDirs, { dataDir })
+	const { loaded } = await loader.load(RealFunction)
+
+	// Key by shortName for subdomain routing
+	const providers: { [shortName: string]: LoadedProvider } = {}
 	for (const p of loaded) {
-		providers[p.name] = p
+		providers[p.shortName] = p
 	}
 
 	startServer(providers, { port, dev: process.env.NODE_ENV !== 'production' })

@@ -6,6 +6,23 @@
 - Prefer `const fn = () => {}` over `function fn() {}` for top-level and local functions.
 - Use regular method syntax in classes (`foo() {}` not `foo = () => {}`).
 
+## Open Design Questions
+
+1. **Module namespacing vs UI routing.** Modules are namespaced by origin:
+   - `@exoagent/providers/pi` (built-in)
+   - `./exos/hello` (workspace)
+   - `<npm-pkg>/providers/foo` (npm, future)
+   
+   Subdomains can't represent these names (no `@` or `/` in DNS). Currently we use
+   short names (`pi.localhost:3000`) with collision = error, but this won't scale to
+   npm packages.
+   
+   The right solution is probably **path-based routing with iframes**: each module UI
+   loads at `localhost:3000/ui/<full-name>/` inside an iframe. The iframe's only way
+   out is `postMessage` to the parent dashboard — enforcing isolation without relying
+   on subdomains. The server must set `X-Frame-Options` / CSP to prevent cross-origin
+   framing (should be default, needs a test).
+
 ## Future Features / Use Cases
 
 1. Implement Submodule Git Tracking

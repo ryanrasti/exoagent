@@ -4,6 +4,7 @@ import '../index.css'
 
 type ProviderInfo = {
 	name: string
+	shortName: string
 	hasUI: boolean
 	clients: string[]
 }
@@ -38,15 +39,16 @@ function Dashboard() {
 							{p.hasUI
 								? (
 									<a
-										href={`http://${p.name}.localhost:${window.location.port}/`}
+										href={`http://${p.shortName}.localhost:${window.location.port}/`}
 										className="text-blue-400 hover:text-blue-300 no-underline font-semibold text-lg"
 									>
-										{p.name}
+										{p.shortName}
 									</a>
 								)
 								: (
-									<span className="text-gray-500 font-semibold text-lg">{p.name}</span>
+									<span className="text-gray-500 font-semibold text-lg">{p.shortName}</span>
 								)}
+							<span className="text-xs text-gray-600 font-mono">{p.name}</span>
 						</div>
 
 						{p.clients.length > 0 && (
