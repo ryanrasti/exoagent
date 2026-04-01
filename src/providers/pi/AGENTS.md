@@ -43,26 +43,36 @@ The pi provider UI is **scoped per client** (per exo that uses it).
 
 - The UI panel lists every active client as a clickable link
 - Clicking a client opens an **xterm.js** terminal in the browser
-- The terminal connects via **WebSocket** to a **PTY** running pi's `InteractiveMode`
+- The terminal communicates via **long-poll exoRpc** — no WebSocket needed
 - This gives you full access to pi's TUI: streaming responses, tool execution,
   model cycling, compaction, everything — no custom chat UI needed
 - It's like `tmux attach` for agents
 
-#### Architecture
-```
-Browser (xterm.js)
-  ↕ WebSocket
-Hono server (pi.localhost:3000/ws/:client)
-  ↕ node-pty
-pi InteractiveMode (full TUI in a PTY)
+#### Transport: Long-Poll over exoRpc
+xterm.js is transport-agnostic — it just exposes `write(data)` and `onData(cb)`.
+We implement the transport using two `@tool()` methods:
+
+- `input(client, data)` — fire-and-forget POST for keystrokes
+- `read(client)` — long-poll that blocks until PTY has output, then returns it
+
+The UI loop:
+```ts
+const poll = async () => {
+  const data = await exoRpc(({ pi }) => pi.read(client), { client })
+  term.write(data)
+  poll() // immediately re-poll
+}
+poll()
+
+term.onData((data) => exoRpc(({ pi }) => pi.input(client, data), { client, data }))
 ```
 
-#### Why xterm.js + PTY?
-- Pi's TUI is already feature-complete (ink-based rendering, tool display, etc.)
-- Building a custom web chat UI would duplicate all of that work
-- A PTY faithfully reproduces the terminal experience including colors, cursor,
-  scrollback, and interactive input
-- You can literally type into the agent from your browser (or phone via tunnel)
+Server-side, `read()` resolves the moment the PTY emits data (or batches a few ms).
+Effectively SSE semantics over plain HTTP — one outstanding request at all times,
+instant response when data arrives.
+
+This keeps everything within exoRpc. No WebSocket, no custom Hono handlers,
+the pi provider stays in SES like all other providers.
 
 ### Key SDK Entry Points
 - `createAgentSession(options)` — creates session with defaults, discovers extensions/skills
@@ -89,12 +99,12 @@ Where `PiAgent` provides:
 
 ### Scoping
 - `clientProvider(clientName)`: returns the factory itself (exos get full `create()`)
-- `uiProvider(clients)`: returns the list of active clients + WebSocket attach capability
+- `uiProvider(clients)`: returns the list of active clients + long-poll read/input capability
 
 ## Implementation Plan
 1. `manifest.ts` — ring0 for pi SDK, node-pty, node:path, node:os
 2. `index.ts` — factory that wraps `createAgentSession()` + manages PTYs per client
-3. WebSocket endpoint in server.ts — `/ws/:client` on `pi.localhost`, pipes to PTY
+3. `@tool()` methods: `create()`, `list()`, `input(client, data)`, `read(client)` (long-poll)
 4. `src/ui/pi/Panel.tsx` — lists active clients, clicking one opens xterm.js terminal
 5. Test with a simple exo that creates an agent and prompts it
 
@@ -102,4 +112,3 @@ Where `PiAgent` provides:
 - `node-pty` — PTY spawning (native module)
 - `@xterm/xterm` — terminal emulator for the browser
 - `@xterm/addon-fit` — auto-resize xterm to container
-- `@xterm/addon-web-links` — clickable URLs in terminal output
