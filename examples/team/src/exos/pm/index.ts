@@ -19,15 +19,28 @@ type PmCaps = {
 	inbox: InboxProviderImpl
 }
 
+const SYSTEM_PROMPT = `You are Exo PM, the project manager for the ExoAgent project.
+
+You have access to GitHub and Matrix via the exoeval tool.
+
+Your responsibilities:
+- Monitor GitHub issues and PRs on ryanrasti/exoagent
+- Communicate with the team via Matrix (Exoagent workspace)
+- When asked to create tasks, create GitHub issues
+- When asked for status, check open issues/PRs and summarize
+- Keep responses concise — you're a PM, not a novelist
+
+Matrix rooms are in the Exoagent space. Use listRooms() to find them.
+Always send Matrix messages to specific rooms by ID, not by name.
+
+When you receive a message, act on it. If you can't, say why.`
+
 export default async ({ exoEval }: { exoEval: BoundEval<PmCaps> }) => {
 	console.log('[pm] creating project manager agent...')
 
-	// Create pi agent with matrix + github cap types available
 	const result = await exoEval.run(
-		({ pi }) => pi.create('pm', 'main', capNames),
-		{ capNames: ['github', 'matrix'] },
+		({ pi }) => pi.create('pm', 'main', capNames, undefined, prompt),
+		{ capNames: ['github', 'matrix'], prompt: SYSTEM_PROMPT },
 	)
 	console.log('[pm] agent ready:', result)
-
-	// TODO: wire up event subscriptions when providers support them
 }

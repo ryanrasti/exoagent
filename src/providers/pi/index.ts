@@ -54,12 +54,13 @@ class PiProvider {
 		return cwd
 	}
 
-	@tool(z.string(), z.string(), z.array(z.string()).optional(), z.string().optional())
+	@tool(z.string(), z.string(), z.array(z.string()).optional(), z.string().optional(), z.string().optional())
 	create(
 		client: string,
 		sessionId: string,
 		capNames?: string[],
 		cwdOverride?: string,
+		prompt?: string,
 	): { client: string, sessionId: string, cwd: string } | Promise<{ client: string, sessionId: string, cwd: string }> {
 		const key = this.sessionKey(client, sessionId)
 		const existing = this.sessions.get(key)
@@ -84,24 +85,27 @@ class PiProvider {
 				}
 			}
 			const capsDts = dtsParts.join('\n\n')
-			return this.createWithIpc(client, sessionId, cwd, capsDts, capNames)
+			return this.createWithIpc(client, sessionId, cwd, capsDts, capNames, prompt)
 		}
 
-		return this.createSimple(client, sessionId, cwd)
+		return this.createSimple(client, sessionId, cwd, prompt)
 	}
 
 	private createSimple(
 		client: string,
 		sessionId: string,
 		cwd: string,
+		prompt?: string,
 	): { client: string, sessionId: string, cwd: string } {
 		const workerPath = this.ring0.resolve(process.cwd(), 'src/providers/pi/agent-worker.ts')
+		const env: { [key: string]: string | undefined } = { ...process.env, TERM: 'xterm-256color', EXOAGENT_CWD: cwd }
+		if (prompt) { env.EXOAGENT_SYSTEM_PROMPT = prompt }
 		const ptyProcess = this.ring0.pty.spawn('npx', ['tsx', workerPath], {
 			name: 'xterm-256color',
 			cols: 120,
 			rows: 40,
 			cwd,
-			env: { ...process.env, TERM: 'xterm-256color', EXOAGENT_CWD: cwd },
+			env,
 		})
 		this.registerSession(client, sessionId, cwd, ptyProcess)
 		return { client, sessionId, cwd }
@@ -113,6 +117,7 @@ class PiProvider {
 		cwd: string,
 		capsDts: string,
 		capNames: string[],
+		prompt?: string,
 	): Promise<{ client: string, sessionId: string, cwd: string }> {
 		const ipcPath = this.ring0.join(this.dataDir, 'providers', 'pi', `${client}-${sessionId}.sock`)
 		// Clean up stale socket
@@ -165,6 +170,7 @@ class PiProvider {
 				EXOAGENT_CWD: cwd,
 				EXOAGENT_IPC: ipcPath,
 				EXOAGENT_CAPS_DTS: capsDts,
+				...(prompt ? { EXOAGENT_SYSTEM_PROMPT: prompt } : {}),
 			},
 		})
 

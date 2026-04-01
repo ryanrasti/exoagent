@@ -11,12 +11,13 @@
 
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent'
 import { createConnection } from 'node:net'
-import { createAgentSession, InteractiveMode } from '@mariozechner/pi-coding-agent'
+import { createAgentSession, DefaultResourceLoader, InteractiveMode } from '@mariozechner/pi-coding-agent'
 
 import { Type } from '@sinclair/typebox'
 
 const ipcPath = process.env.EXOAGENT_IPC
 const capsDts = process.env.EXOAGENT_CAPS_DTS
+const systemPrompt = process.env.EXOAGENT_SYSTEM_PROMPT
 
 const main = async () => {
 	const customTools: ToolDefinition[] = []
@@ -81,7 +82,12 @@ const main = async () => {
 	// When caps are provided, only expose exoeval (no built-in file/bash tools).
 	// Built-in tools will be re-enabled when agents run inside scoped VMs.
 	const tools = customTools.length > 0 ? [] : undefined
-	const { session } = await createAgentSession({ cwd, customTools, tools })
+
+	const resourceLoader = systemPrompt
+		? new DefaultResourceLoader({ cwd, systemPromptOverride: () => systemPrompt })
+		: undefined
+
+	const { session } = await createAgentSession({ cwd, customTools, tools, resourceLoader })
 	const interactive = new InteractiveMode(session)
 	await interactive.run()
 }
