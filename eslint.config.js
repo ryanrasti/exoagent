@@ -7,7 +7,7 @@ export default antfu(
 		ignores: [
 			'**/dist/**',
 			'.pnpm-store/**',
-			'AGENTS.md',
+			'**/*.md',
 		],
 	},
 	{

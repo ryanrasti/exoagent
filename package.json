@@ -25,10 +25,13 @@
     "@endo/module-source": "^1.4.0",
     "@hono/node-server": "^1.19.12",
     "@mariozechner/pi-coding-agent": "^0.64.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "acorn": "^8.16.0",
     "better-sqlite3": "^12.8.0",
     "esbuild": "^0.27.4",
     "hono": "^4.12.9",
+    "node-pty": "^1.1.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "secure-json-parse": "^4.1.0",
@@ -56,7 +59,8 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
-      "esbuild"
+      "esbuild",
+      "node-pty"
     ]
   }
 }

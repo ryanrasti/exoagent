@@ -21,6 +21,7 @@ else {
 	const panels: { [name: string]: () => Promise<{ default: React.ComponentType }> } = {
 		github: () => import('./github/Panel'),
 		config: () => import('./config/Panel'),
+		pi: () => import('./pi/Panel'),
 	}
 
 	const loader = panels[providerName]

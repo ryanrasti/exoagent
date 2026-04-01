@@ -21,11 +21,11 @@ An exo defines *what* an agent can do by choosing which caps to pass.
 For example, an "engineer" exo might:
 ```ts
 const agent = await pi.create({
-  sessionId: 'pr-123',
-  tools: [readTool, bashTool, editTool, writeTool],
-  customTools: [githubTool],
+	sessionId: 'pr-123',
+	tools: [readTool, bashTool, editTool, writeTool],
+	customTools: [githubTool],
 })
-await agent.prompt("Review the latest PR and post comments")
+await agent.prompt('Review the latest PR and post comments')
 ```
 
 The pi provider itself doesn't decide what caps the agent gets — the exo does.
@@ -83,14 +83,14 @@ We implement the transport using two `@tool()` methods:
 The UI loop:
 ```ts
 const poll = async () => {
-  const data = await exoRpc(({ pi }) => pi.read(client, sessionId), { client, sessionId })
-  term.write(data)
-  poll() // immediately re-poll
+	const data = await exoRpc(({ pi }) => pi.read(client, sessionId), { client, sessionId })
+	term.write(data)
+	poll() // immediately re-poll
 }
 poll()
 
-term.onData((data) =>
-  exoRpc(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
+term.onData(data =>
+	exoRpc(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
 )
 ```
 

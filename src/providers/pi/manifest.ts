@@ -1,16 +1,17 @@
 /**
- * Pi provider — ring0 for pi SDK imports and native node modules.
+ * Pi provider — ring0 for pi SDK and node-pty.
  *
- * Also depends on config for storing API keys.
+ * No config dependency for v0 — pi manages its own API keys
+ * via ~/.pi/agent/auth.json and ANTHROPIC_API_KEY env var.
  */
-import type { ScopedConfig } from '../config'
 
 export default {
 	ring0: async () => {
 		const piSdk = await import('@mariozechner/pi-coding-agent')
+		const pty = await import('node-pty')
 		const path = await import('node:path')
 		const os = await import('node:os')
-		return { piSdk, resolve: path.resolve, join: path.join, homedir: os.homedir }
+		const fs = await import('node:fs')
+		return { piSdk, pty, resolve: path.resolve, join: path.join, homedir: os.homedir, mkdirSync: fs.mkdirSync }
 	},
-	config: (config: ScopedConfig) => config,
 }

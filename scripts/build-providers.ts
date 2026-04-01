@@ -1,11 +1,12 @@
+import type { BuildOptions } from 'esbuild'
 import { readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { build, type BuildOptions } from 'esbuild'
+import { build } from 'esbuild'
 
 const srcDir = resolve(process.cwd(), 'src/providers')
 const distDir = resolve(process.cwd(), 'dist/providers')
 
-const providers = readdirSync(srcDir).filter(entry => {
+const providers = readdirSync(srcDir).filter((entry) => {
 	const stat = statSync(resolve(srcDir, entry))
 	return stat.isDirectory()
 })
@@ -26,7 +27,7 @@ const buildProvider = async (name: string) => {
 		target: 'es2022',
 		// We don't mark zod as external so esbuild inlines it into the bundle.
 		// Native modules and heavy db bindings stay external but are bridged or passed via ring0.
-		external: ['node:*', 'better-sqlite3'],
+		external: ['node:*', 'better-sqlite3', 'node-pty', '@mariozechner/pi-coding-agent'],
 		logLevel: 'info',
 	}
 
