@@ -2,6 +2,9 @@
 
 - Prefer `for (const x of y) {}` over `.forEach()`. Use `for...of` for all iteration.
 - Prefer `{ [key: string]: T }` over `Record<string, T>`.
+- Prefer `type` over `interface` for all type declarations.
+- Prefer `const fn = () => {}` over `function fn() {}` for top-level and local functions.
+- Use regular method syntax in classes (`foo() {}` not `foo = () => {}`).
 
 ## 3/30 Workerd + capnweb -> SES + exoeval
 Rationale:

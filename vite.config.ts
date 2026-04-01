@@ -8,16 +8,16 @@ export default defineConfig({
 	build: {
 		rollupOptions: {
 			input: {
-				dashboard: resolve(__dirname, 'src/ui/dashboard/index.html'),
-				github: resolve(__dirname, 'src/ui/github/index.html'),
+				'provider-mount': resolve(__dirname, 'src/ui/provider-mount.tsx'),
+				dashboard: resolve(__dirname, 'src/ui/dashboard/Dashboard.tsx'),
 			},
 		},
 		outDir: resolve(__dirname, 'dist/ui'),
 		emptyOutDir: true,
 	},
 	server: {
-		proxy: {
-			'/api': 'http://localhost:3000',
-		},
+		// In dev, Vite serves the UI files and the daemon serves HTML templates
+		// that point to Vite's dev server for JS
+		port: 5173,
 	},
 })

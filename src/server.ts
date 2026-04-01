@@ -1,59 +1,173 @@
 /**
  * exoagentd HTTP server.
  *
- * Single Hono server that:
- * - Routes POST /api/<provider> for exoeval RPC
- * - GET /api/providers to list providers
- * - GET /health for health checks
- * - Subdomain routing: <provider>.localhost:<port> serves provider UI
+ * - Subdomain routing: <provider>.localhost:<port> for provider UI + RPC
  * - localhost:<port> serves dashboard
+ * - Provider UIs served from a generic HTML template (no per-provider boilerplate)
  */
 
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import type { LoadedProvider } from './loader'
 import { serve } from '@hono/node-server'
-import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { exoEval } from './exoeval'
 
-export interface ProviderRegistration {
-	/** The provider instance with @tool() methods */
-	instance: object
+/**
+ * Generic HTML shell for provider UIs.
+ * Vite injects the actual panel component at dev time via /src/ui/provider-mount.tsx
+ */
+const providerHTML = (providerName: string, isDev: boolean): string => {
+	const script = isDev
+		? `
+		<script type="module">
+			import RefreshRuntime from "http://localhost:5173/@react-refresh"
+			RefreshRuntime.injectIntoGlobalHook(window)
+			window.$RefreshReg$ = () => {}
+			window.$RefreshSig$ = () => (type) => type
+			window.__vite_plugin_react_preamble_installed__ = true
+		</script>
+		<script type="module" src="http://localhost:5173/src/ui/provider-mount.tsx?provider=${providerName}"></script>`
+		: `<script type="module" src="/assets/provider-mount.js"></script>`
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>${providerName} — exoagent</title>
+	<meta name="x-provider" content="${providerName}" />
+</head>
+<body>
+	<div id="root"></div>
+	${script}
+</body>
+</html>`
+}
+
+const dashboardHTML = (isDev: boolean): string => {
+	const script = isDev
+		? `
+		<script type="module">
+			import RefreshRuntime from "http://localhost:5173/@react-refresh"
+			RefreshRuntime.injectIntoGlobalHook(window)
+			window.$RefreshReg$ = () => {}
+			window.$RefreshSig$ = () => (type) => type
+			window.__vite_plugin_react_preamble_installed__ = true
+		</script>
+		<script type="module" src="http://localhost:5173/src/ui/dashboard/Dashboard.tsx"></script>`
+		: `<script type="module" src="/assets/dashboard.js"></script>`
+
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>exoagent</title>
+</head>
+<body>
+	<div id="root"></div>
+	${script}
+</body>
+</html>`
+}
+
+/**
+ * Extract subdomain from Host header or request URL.
+ * e.g. "github.localhost:3000" → "github"
+ * e.g. "localhost:3000" → null
+ */
+const getSubdomain = (c: { req: { header: (name: string) => string | undefined, url: string } }): string | null => {
+	// Try Host header first (real HTTP), fall back to URL (tests)
+	let hostname = c.req.header('host')?.split(':')[0]
+	if (!hostname) {
+		try {
+			hostname = new URL(c.req.url).hostname
+		}
+		catch {
+			return null
+		}
+	}
+	const match = hostname.match(/^([a-z0-9-]+)\.localhost$/)
+	return match ? match[1] : null
+}
+
+export type ServerOptions = {
+	port?: number
+	dev?: boolean
 }
 
 /**
  * Create the exoagentd Hono app.
  */
-export function createApp(providers: { [name: string]: ProviderRegistration }) {
+export const createApp = (
+	providers: { [name: string]: LoadedProvider },
+	options: ServerOptions = {},
+) => {
+	const { dev = false } = options
 	const app = new Hono()
 
-	// Health check
-	app.get('/health', (c) => c.json({ status: 'ok' }))
+	// Route based on Host header
+	app.use('*', async (c, next) => {
+		const subdomain = getSubdomain(c)
 
-	// List providers
-	app.get('/api/providers', (c) => c.json({ providers: Object.keys(providers) }))
-
-	// exoeval RPC endpoint: POST /api/<provider>
-	app.post('/api/:provider', async (c) => {
-		const name = c.req.param('provider')
-		const registration = providers[name]
-		if (!registration) {
-			return c.json({ error: `unknown provider: ${name}` }, 404)
-		}
-
-		try {
-			const code = await c.req.text()
-			if (!code.trim()) {
-				return c.json({ error: 'empty expression' }, 400)
+		if (subdomain) {
+			const provider = providers[subdomain]
+			if (!provider) {
+				return c.text(`unknown provider: ${subdomain}`, 404)
 			}
 
-			const result = exoEval(code, { [name]: registration.instance })
-			const resolved = result instanceof Promise ? await result : result
-			return c.json(resolved ?? null)
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
-			return c.text(message, 500)
+			// Provider subdomain routes
+			const path = new URL(c.req.url).pathname
+
+			// RPC endpoint
+			if (c.req.method === 'POST' && path === '/rpc') {
+				try {
+					const code = await c.req.text()
+					if (!code.trim()) {
+						return c.json({ error: 'empty expression' }, 400)
+					}
+					const result = exoEval(code, { [subdomain]: provider.instance })
+					const resolved = result instanceof Promise ? await result : result
+					return c.json(resolved ?? null)
+				}
+				catch (err) {
+					const message = err instanceof Error ? err.message : String(err)
+					return c.text(message, 500)
+				}
+			}
+
+			// Provider UI
+			if (c.req.method === 'GET' && (path === '/' || path === '/index.html')) {
+				return c.html(providerHTML(subdomain, dev))
+			}
+
+			// Fall through for static assets
+			return next()
 		}
+
+		// Dashboard (no subdomain)
+		const path = new URL(c.req.url).pathname
+
+		if (c.req.method === 'GET' && path === '/health') {
+			return c.json({ status: 'ok' })
+		}
+
+		if (c.req.method === 'GET' && path === '/api/providers') {
+			const list = []
+			for (const [name, p] of Object.entries(providers)) {
+				list.push({
+					name,
+					hasUI: p.hasUI,
+					clients: p.clients,
+				})
+			}
+			return c.json({ providers: list })
+		}
+
+		if (c.req.method === 'GET' && (path === '/' || path === '/index.html')) {
+			return c.html(dashboardHTML(dev))
+		}
+
+		return next()
 	})
 
 	return app
@@ -62,17 +176,19 @@ export function createApp(providers: { [name: string]: ProviderRegistration }) {
 /**
  * Start the server on the given port.
  */
-export function startServer(
-	providers: { [name: string]: ProviderRegistration },
-	options: { port?: number; uiDir?: string } = {},
-) {
-	const { port = 3000, uiDir } = options
-	const app = createApp(providers)
+export const startServer = (
+	providers: { [name: string]: LoadedProvider },
+	options: ServerOptions = {},
+) => {
+	const { port = 3000 } = options
+	const app = createApp(providers, options)
 
 	serve({ fetch: app.fetch, port }, (info) => {
 		console.log(`exoagentd listening on http://localhost:${info.port}`)
-		for (const name of Object.keys(providers)) {
-			console.log(`  ${name}: http://${name}.localhost:${info.port}/`)
+		for (const [name, p] of Object.entries(providers)) {
+			if (p.hasUI) {
+				console.log(`  ${name}: http://${name}.localhost:${info.port}/`)
+			}
 		}
 	})
 
