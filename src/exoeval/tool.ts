@@ -1,7 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
-export const toolSymbol = Symbol('tool')
-export const toolFieldsSymbol = Symbol('toolFields')
+export const toolSymbol = Symbol.for('exoeval_tool')
+export const toolFieldsSymbol = Symbol.for('exoeval_toolFields')
 
 export type ToolKind = 'raw' | 'expr' | 'constructor'
 

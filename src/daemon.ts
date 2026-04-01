@@ -11,21 +11,33 @@ import { resolve } from 'node:path'
 import { ProviderLoader } from './loader'
 import { startServer } from './server'
 
-// SES: lock down the global environment
-await import('ses')
-// @ts-expect-error — ses augments globalThis
-lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
+async function main() {
+	// Capture the real Function before SES lockdown so we can evaluate ring0 manifests
+	// that might contain dynamic imports (which SES strictly rejects at parse time).
+	const RealFunction = Function
 
-const port = Number(process.env.PORT) || 3000
-const dataDir = process.env.EXOAGENT_DATA ?? resolve(process.cwd(), '.exoagent')
-const providerDir = resolve(import.meta.dirname, 'providers')
+	// SES: lock down the global environment
+	await import('ses')
+	lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
 
-const loader = new ProviderLoader(providerDir, { dataDir })
-const loaded = await loader.load()
+	const port = Number(process.env.PORT) || 3000
+	const dataDir = process.env.EXOAGENT_DATA ?? resolve(process.cwd(), '.exoagent')
+	const providerDir = resolve(import.meta.dirname, 'providers')
 
-const providers: { [name: string]: LoadedProvider } = {}
-for (const p of loaded) {
-	providers[p.name] = p
+	console.log(`Starting exoagentd (dataDir: ${dataDir})`)
+
+	const loader = new ProviderLoader(providerDir, { dataDir })
+	const loaded = await loader.load(RealFunction)
+
+	const providers: { [name: string]: LoadedProvider } = {}
+	for (const p of loaded) {
+		providers[p.name] = p
+	}
+
+	startServer(providers, { port, dev: process.env.NODE_ENV !== 'production' })
 }
 
-startServer(providers, { port, dev: process.env.NODE_ENV !== 'production' })
+main().catch((err) => {
+	console.error('Fatal daemon error:', err)
+	process.exit(1)
+})

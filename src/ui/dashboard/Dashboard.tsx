@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import '../index.css'
 
 type ProviderInfo = {
 	name: string
@@ -16,46 +17,53 @@ function Dashboard() {
 			.then((d: { providers: ProviderInfo[] }) => setProviders(d.providers))
 	}, [])
 
-	return (
-		<div
-			style={{
-				maxWidth: 480,
-				margin: '2rem auto',
-				padding: '0 1rem',
-				fontFamily: 'system-ui, sans-serif',
-				color: '#e0e0e0',
-				background: '#1a1a1a',
-				minHeight: '100vh',
-			}}
-		>
-			<h1 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>exoagent</h1>
+	const sortedProviders = providers // The backend already sends them topo sorted!
 
-			<h2 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: '#aaa' }}>providers</h2>
-			<ul style={{ listStyle: 'none', padding: 0 }}>
-				{providers.map(p => (
-					<li key={p.name} style={{ marginBottom: '0.75rem' }}>
-						{p.hasUI
-							? (
-								<a
-									href={`http://${p.name}.localhost:${window.location.port}/`}
-									style={{ color: '#6af', textDecoration: 'none' }}
-								>
-									{p.name}
-								</a>
-							)
-							: (
-								<span style={{ color: '#888' }}>{p.name}</span>
-							)}
+	return (
+		<div className="max-w-[600px] mx-auto my-8 px-4 font-sans text-gray-200">
+			<div className="flex items-center gap-3 mb-8">
+				<img src="/assets/logo.svg" alt="logo" className="w-8 h-8" />
+				<h1 className="text-2xl m-0 font-bold">exoagent</h1>
+			</div>
+
+			<h2 className="text-base mb-4 text-gray-400 font-semibold">providers</h2>
+
+			<div className="flex flex-col gap-2">
+				{sortedProviders.map(p => (
+					<div
+						key={p.name}
+						className="bg-neutral-800 border border-neutral-700 rounded-lg p-4 transition-colors hover:border-neutral-600"
+					>
+						<div className="flex items-center justify-between">
+							{p.hasUI
+								? (
+									<a
+										href={`http://${p.name}.localhost:${window.location.port}/`}
+										className="text-blue-400 hover:text-blue-300 no-underline font-semibold text-lg"
+									>
+										{p.name}
+									</a>
+								)
+								: (
+									<span className="text-gray-500 font-semibold text-lg">{p.name}</span>
+								)}
+						</div>
+
 						{p.clients.length > 0 && (
-							<span style={{ color: '#666', fontSize: '0.8rem', marginLeft: '0.5rem' }}>
-								→
-								{' '}
-								{p.clients.join(', ')}
-							</span>
+							<div className="mt-3">
+								<div className="text-xs text-gray-500 mb-1">used by:</div>
+								<div className="flex gap-2 flex-wrap">
+									{p.clients.sort().map(client => (
+										<span key={client} className="bg-neutral-700 px-2 py-0.5 rounded text-sm text-gray-300">
+											{client}
+										</span>
+									))}
+								</div>
+							</div>
 						)}
-					</li>
+					</div>
 				))}
-			</ul>
+			</div>
 		</div>
 	)
 }

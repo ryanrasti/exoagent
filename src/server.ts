@@ -7,6 +7,8 @@
  */
 
 import type { LoadedProvider } from './loader'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { exoEval } from './exoeval'
@@ -25,7 +27,7 @@ const providerHTML = (providerName: string, isDev: boolean): string => {
 			window.$RefreshSig$ = () => (type) => type
 			window.__vite_plugin_react_preamble_installed__ = true
 		</script>
-		<script type="module" src="http://localhost:5173/src/ui/provider-mount.tsx?provider=${providerName}"></script>`
+		<script type="module" src="http://localhost:5173/provider-mount.tsx?provider=${providerName}"></script>`
 		: `<script type="module" src="/assets/provider-mount.js"></script>`
 
 	return `<!DOCTYPE html>
@@ -34,7 +36,9 @@ const providerHTML = (providerName: string, isDev: boolean): string => {
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<title>${providerName} — exoagent</title>
+	<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 	<meta name="x-provider" content="${providerName}" />
+	<style>body { margin: 0; background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; }</style>
 </head>
 <body>
 	<div id="root"></div>
@@ -53,7 +57,7 @@ const dashboardHTML = (isDev: boolean): string => {
 			window.$RefreshSig$ = () => (type) => type
 			window.__vite_plugin_react_preamble_installed__ = true
 		</script>
-		<script type="module" src="http://localhost:5173/src/ui/dashboard/Dashboard.tsx"></script>`
+		<script type="module" src="http://localhost:5173/dashboard/Dashboard.tsx"></script>`
 		: `<script type="module" src="/assets/dashboard.js"></script>`
 
 	return `<!DOCTYPE html>
@@ -62,6 +66,8 @@ const dashboardHTML = (isDev: boolean): string => {
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<title>exoagent</title>
+	<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+	<style>body { margin: 0; background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; }</style>
 </head>
 <body>
 	<div id="root"></div>
@@ -106,6 +112,16 @@ export const createApp = (
 	const app = new Hono()
 
 	// Route based on Host header
+	app.get('/assets/favicon.svg', (c) => {
+		const svg = readFileSync(resolve(process.cwd(), 'public/favicon.svg'), 'utf-8')
+		return c.html(svg, 200, { 'Content-Type': 'image/svg+xml' })
+	})
+
+	app.get('/assets/logo.svg', (c) => {
+		const svg = readFileSync(resolve(process.cwd(), 'public/logo.svg'), 'utf-8')
+		return c.html(svg, 200, { 'Content-Type': 'image/svg+xml' })
+	})
+
 	app.use('*', async (c, next) => {
 		const subdomain = getSubdomain(c)
 
@@ -125,7 +141,10 @@ export const createApp = (
 					if (!code.trim()) {
 						return c.json({ error: 'empty expression' }, 400)
 					}
-					const result = exoEval(code, { [subdomain]: provider.instance })
+					if (!provider.uiInstance) {
+						return c.json({ error: `provider "${subdomain}" does not export a uiProvider` }, 400)
+					}
+					const result = exoEval(code, { [subdomain]: provider.uiInstance })
 					const resolved = result instanceof Promise ? await result : result
 					return c.json(resolved ?? null)
 				}

@@ -24,11 +24,11 @@ export async function exoRpc<Caps>(
 	const fnSource = fn.toString()
 
 	// Build the eval expression.
-	// Captured variables are serialized as let bindings prepended to the expression.
+	// Captured variables are serialized as const bindings prepended to the expression.
 	let prefix = ''
 	if (capture) {
 		for (const [key, value] of Object.entries(capture)) {
-			prefix += `let ${key} = ${JSON.stringify(value)}; `
+			prefix += `const ${key} = ${JSON.stringify(value)}; `
 		}
 	}
 

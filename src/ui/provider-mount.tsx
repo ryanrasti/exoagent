@@ -8,6 +8,7 @@
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import './index.css'
 
 const providerName = document.querySelector('meta[name="x-provider"]')?.getAttribute('content')
 
@@ -19,6 +20,7 @@ else {
 	// Vite handles this via glob or explicit dynamic import
 	const panels: { [name: string]: () => Promise<{ default: React.ComponentType }> } = {
 		github: () => import('./github/Panel'),
+		config: () => import('./config/Panel'),
 	}
 
 	const loader = panels[providerName]

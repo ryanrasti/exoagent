@@ -33,19 +33,19 @@ const fetchInitSchema = z
 	})
 	.optional()
 
-class FetchProviderImpl {
+export class FetchProviderImpl {
 	private readonly nativeFetch: typeof globalThis.fetch
 
 	constructor(nativeFetch: typeof globalThis.fetch) {
 		this.nativeFetch = nativeFetch
 	}
 
-	scoped(_clientName: string): FetchProviderImpl {
+	clientProvider(_clientName: string): FetchProviderImpl {
 		return this
 	}
 
-	@tool(z.string().array())
-	allow(...domains: string[]): ScopedFetch {
+	@tool(z.array(z.string()))
+	allow(domains: string[]): ScopedFetch {
 		return new ScopedFetch(this.nativeFetch, new Set(domains))
 	}
 }

@@ -14,7 +14,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": ["node", "ses"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

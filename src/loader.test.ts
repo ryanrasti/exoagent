@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProviderLoader } from './loader'
 import 'ses'
 
+const RealFunction = Function
+
 if (typeof Compartment === 'undefined') {
 	lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
 }
@@ -150,17 +152,20 @@ describe('ProviderLoader.load', () => {
 			'leaf',
 			'export default { ring0: async () => 123 }',
 			`export default ({ ring0, config }) => {
-				return { value: ring0, dataDir: config.dataDir, scoped() { return this } }
+				return { 
+					clientProvider() { return { value: ring0, dataDir: config.dataDir } },
+					uiProvider() { return { value: ring0, dataDir: config.dataDir } }
+				}
 			}`,
 		)
 
 		const loader = new ProviderLoader(testDir, daemonConfig)
-		const loaded = await loader.load()
+		const loaded = await loader.load(RealFunction)
 
 		expect(loaded).toHaveLength(1)
 		expect(loaded[0].name).toBe('leaf')
-		expect((loaded[0].instance as any).value).toBe(123)
-		expect((loaded[0].instance as any).dataDir).toBe(testDir)
+		expect((loaded[0].uiInstance as any).value).toBe(123)
+		expect((loaded[0].uiInstance as any).dataDir).toBe(testDir)
 	})
 
 	it('loads provider with deps and auto-scoping', async () => {
@@ -170,10 +175,12 @@ describe('ProviderLoader.load', () => {
 			`export default ({ }) => {
 				const clients = []
 				return {
-					clients,
-					scoped(name) {
+					clientProvider(name) {
 						clients.push(name)
-						return { scopedFor: name, scoped() { return this } }
+						return { scopedFor: name }
+					},
+					uiProvider() {
+						return { clients }
 					}
 				}
 			}`,
@@ -182,16 +189,21 @@ describe('ProviderLoader.load', () => {
 			'child',
 			'export default { root: (r) => r }',
 			`export default ({ }) => {
-				return { ok: true, scoped() { return this } }
+				return {
+					clientProvider() { return { ok: true } },
+					uiProvider() { return { ok: true } }
+				}
 			}`,
 		)
 
 		const loader = new ProviderLoader(testDir, daemonConfig)
-		const loaded = await loader.load()
+		const loaded = await loader.load(RealFunction)
 
 		expect(loaded).toHaveLength(2)
 		expect(loaded[0].name).toBe('root')
 		expect(loaded[1].name).toBe('child')
 		expect(loaded[0].clients).toEqual(['child'])
+		expect((loaded[0].uiInstance as any).clients).toEqual(['child'])
+		expect((loaded[1].uiInstance as any).ok).toBe(true)
 	})
 })

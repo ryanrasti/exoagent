@@ -5,3 +5,5 @@ dist
 .dev.vars
 worker-configuration.d.ts
 .direnv
+.exoagent
+.exobox

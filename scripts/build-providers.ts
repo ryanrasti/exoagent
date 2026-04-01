@@ -24,8 +24,9 @@ const buildProvider = async (name: string) => {
 		bundle: true,
 		format: 'esm',
 		target: 'es2022',
-		// Mark native modules and shared npm packages as external
-		external: ['node:*', 'zod', 'better-sqlite3'],
+		// We don't mark zod as external so esbuild inlines it into the bundle.
+		// Native modules and heavy db bindings stay external but are bridged or passed via ring0.
+		external: ['node:*', 'better-sqlite3'],
 		logLevel: 'info',
 	}
 

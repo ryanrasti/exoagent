@@ -22,7 +22,7 @@ class MockProvider {
 }
 
 function loaded(name: string, instance: object): LoadedProvider {
-	return { name, instance, clients: [], hasUI: false }
+	return { name, uiInstance: instance, clients: [], hasUI: false }
 }
 
 const app = createApp({

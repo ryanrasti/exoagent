@@ -6,10 +6,14 @@
  */
 
 import type { ProviderInit } from '../../provider'
-import { mkdirSync } from 'node:fs'
-import { resolve } from 'node:path'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
+
+type Ring0Caps = {
+	Database: DatabaseConstructor
+	mkdirSync: (path: string, options?: { recursive: boolean }) => void
+	resolve: (...paths: string[]) => string
+}
 
 export type DatabaseConstructor = new (
 	filename: string,
@@ -30,16 +34,16 @@ type Statement = {
 }
 
 export default ({ ring0, config }: ProviderInit) => {
-	const Ctor = ring0 as DatabaseConstructor
+	const { Database, mkdirSync, resolve } = ring0 as Ring0Caps
 	const root = resolve(config.dataDir, 'sqlite')
 	const dbs = new Map<string, DatabaseInstance>()
 
 	return {
-		scoped(clientName: string): ScopedSqlite {
+		clientProvider(clientName: string): ScopedSqlite {
 			let db = dbs.get(clientName)
 			if (!db) {
 				mkdirSync(root, { recursive: true })
-				db = new Ctor(resolve(root, `${clientName}.db`))
+				db = new Database(resolve(root, `${clientName}.db`))
 				db.pragma('journal_mode = WAL')
 				dbs.set(clientName, db)
 			}

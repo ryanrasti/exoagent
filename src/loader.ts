@@ -36,7 +36,7 @@ export type ProviderDef = {
 
 export type LoadedProvider = {
 	name: string
-	instance: object
+	uiInstance: object | null
 	clients: string[]
 	hasUI: boolean
 }
@@ -55,7 +55,7 @@ export class ProviderLoader {
 	}
 
 	/** Scan, resolve ring0, DAG sort, dynamically import + instantiate. */
-	async load(RealFunction: FunctionConstructor = Function): Promise<LoadedProvider[]> {
+	async load(RealFunction: FunctionConstructor): Promise<LoadedProvider[]> {
 		const defs = this.scan()
 
 		for (const def of defs) {
@@ -98,7 +98,7 @@ export class ProviderLoader {
 					attenuations,
 					deps: Object.keys(attenuations),
 				},
-				hasUI: statSync(resolve(dir, 'Panel.tsx'), { throwIfNoEntry: false }) !== undefined,
+				hasUI: statSync(resolve(process.cwd(), 'src/ui', entry, 'Panel.tsx'), { throwIfNoEntry: false }) !== undefined,
 			})
 		}
 
@@ -189,10 +189,26 @@ export class ProviderLoader {
 				if (spec === 'root') {
 					return { source: new ModuleSource(code) }
 				}
+				// Provide minimal bridge for external node/npm modules used by providers.
+				// In a fully hardened setup, these would be stubs or deeply attenuated.
+				if (['node:path', 'node:fs', 'zod', 'better-sqlite3'].includes(spec)) {
+					const ns = Object.keys((globalThis as any).__ext[spec] || {})
+					const exportsStr = ns.map(k => k === 'default' ? `export default globalThis.__ext['${spec}'].default;` : `export const ${k} = globalThis.__ext['${spec}']['${k}'];`).join('\\n')
+					const source = new ModuleSource(exportsStr)
+					return { source }
+				}
 				throw new Error(`Compartment missing external import: ${spec}`)
 			},
 			__options__: true, // Temporary flag needed for Endo module-source integration
 		})
+
+		// Expose bridged modules on globalThis for the bridge source to read.
+		;(globalThis as any).__ext = (globalThis as any).__ext || {}
+		for (const dep of ['node:path', 'node:fs', 'zod', 'better-sqlite3']) {
+			if (!(globalThis as any).__ext[dep]) {
+				;(globalThis as any).__ext[dep] = await import(dep)
+			}
+		}
 
 		const { namespace } = await compartment.import('root')
 		return namespace as { default: (init: unknown) => object }
@@ -257,12 +273,15 @@ export class ProviderLoader {
 			const capBindings: { [key: string]: unknown } = {}
 
 			for (const dep of deps) {
-				const depInstance = instances.get(dep) as { scoped: (name: string) => unknown }
-				if (!depInstance) {
+				const depRoot = instances.get(dep) as { clientProvider?: (name: string) => unknown }
+				if (!depRoot) {
 					throw new Error(`"${def.name}" depends on "${dep}" which is not loaded`)
 				}
+				if (typeof depRoot.clientProvider !== 'function') {
+					throw new TypeError(`"${dep}" does not export a clientProvider`)
+				}
 
-				const scoped = depInstance.scoped(def.name)
+				const scoped = depRoot.clientProvider(def.name)
 
 				const fnSource = attenuations[dep]
 				if (!fnSource) {
@@ -286,10 +305,13 @@ export class ProviderLoader {
 
 		const loaded: LoadedProvider[] = []
 		for (const def of sorted) {
+			const root = instances.get(def.name) as { uiProvider?: (clients: string[]) => object }
+			const myClients = clients.get(def.name) ?? []
+
 			loaded.push({
 				name: def.name,
-				instance: instances.get(def.name)!,
-				clients: clients.get(def.name) ?? [],
+				uiInstance: typeof root.uiProvider === 'function' ? root.uiProvider(myClients) : null,
+				clients: myClients,
 				hasUI: def.hasUI,
 			})
 		}
