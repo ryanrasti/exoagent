@@ -31,97 +31,171 @@ The build pipeline emits `.d.ts` files for each provider via tsgo:
 | FE Assets  | Vite    | `src/ui/provider-mount.tsx`  | `dist/ui/`                          |
 
 The `.d.ts` files serve a dual purpose:
-1. **Type safety** for exos importing provider types (`import type { ... } from 'exoagent/providers/github'`)
-2. **LLM context** — the pi provider reads `.d.ts` files and concatenates them into
-   the exoeval tool description so the agent knows what caps are available and how to call them
+1. **Type safety** for exos importing provider types
+2. **LLM context** — pi reads `.d.ts` files and concatenates them into
+   the exoeval tool description so the agent knows what caps are available
 
 This is one of the main reasons for the separation between providers and the agent runtime.
+
+## Core Primitives: Agent Registry + Inbox
+
+Two built-in providers that every agent-based exo needs:
+
+### Agent Registry (`@exoagent/providers/registry`)
+
+Persistent registry of agents, scoped per exo client. Handles lifecycle:
+
+- `getOrCreate(id)` — lookup or spawn a new pi agent
+- Persists agent config to sqlite — survives daemon restart
+- On daemon start, resumes all registered agents
+- Each agent runs pi in interactive mode (attachable via xterm.js UI)
+
+### Inbox (`@exoagent/providers/inbox`)
+
+Durable message queue per agent. The interface between external events and agents:
+
+- `agent.deliver(message)` — write to agent's inbox (exo/provider side)
+- `inbox.peek()` — read oldest unacked, non-snoozed message (agent side)
+- `inbox.ack(id)` — mark as handled
+- `inbox.snooze(id, seconds)` — delay redelivery
+- `inbox.pending()` — count of unacked, non-snoozed messages
+
+Backed by SQLite. When a new message arrives, daemon steers the agent:
+messages are inlined in the steer (first 5, max 1k chars) to avoid
+a tool call round trip. Heartbeat re-steers if messages remain unacked.
+
+### Why this architecture
+
+- **Decouples event sources from agents** — GitHub, Linear, Matrix all just
+  `deliver()`. The agent doesn't care where messages came from.
+- **Survives restarts** — durable queue + registry resume agents on boot.
+- **No long-lived exo needed** — the exo registers callbacks and exits.
+  Providers own event loops, inbox owns the queue, daemon owns steering.
+- **Handles agent being busy** — snooze, heartbeat, ack when done.
+- **Path to ocap** — eventually caps arrive alongside inbox messages.
+
+### Event source pattern
+
+Providers with event sources (GitHub, Linear, Matrix) expose subscription methods.
+The exo registers callbacks, then exits. Callbacks fire when events arrive:
+
+```ts
+export default async ({ exoEval }) => {
+  // Create agent
+  await exoEval(({ pi }) => pi.create('pm', 'main'))
+
+  // Subscribe — callbacks close over all caps in the BoundEval scope
+  await exoEval(({ linear, pi }) =>
+    linear.onIssueCreated(issue =>
+      pi.prompt(`New issue: ${issue.title}\n${issue.description}`)
+    )
+  )
+
+  await exoEval(({ matrix, pi }) =>
+    matrix.onMessage(msg =>
+      pi.prompt(`Message from ${msg.sender}: ${msg.body}`)
+    )
+  )
+}
+```
 
 ## Next Steps (in order)
 
 1. **Exoeval as pi's single custom tool**
    - Give pi ONE custom tool: `exoeval`
    - The tool is a BoundEval closure pre-bound to the exo's caps
-   - Read `.d.ts` files from `dist/providers/*/index.d.ts` and concatenate into tool description
-   - The agent sees type definitions and calls `exoeval(({ github }) => github.getUser("x"))`
+   - Read `.d.ts` files from `dist/providers/*/index.d.ts`, concat into tool description
    - Wire up tsgo in the build pipeline to emit `.d.ts` files
 
-2. **Linear provider**
-   - @tool() methods: create/update/query issues, manage projects
+2. **Agent registry + inbox providers**
+   - Registry: persistent agent lifecycle, scoped per client
+   - Inbox: durable message queue with ack/snooze/steer
+   - Both backed by sqlite provider
+   - Unit tests for registry CRUD and inbox queue semantics
+
+3. **Linear provider**
+   - @tool() methods: create/update/query issues (GraphQL API internally)
+   - `onIssueCreated(callback)`, `onIssueUpdated(callback)` — polling-based
    - Config schema for API key
    - Manifest: depends on config + fetch (attenuated to `api.linear.app`)
-   - Unit tests for tool methods (mock fetch responses)
+   - Unit tests with mock fetch responses
 
-3. **Matrix provider**
-   - Use an existing Matrix server (e.g., matrix.org) + private room/space
-   - Agent joins as a bot user, sends/receives via Matrix REST API
-   - @tool() methods: sendMessage, waitForReply, listRooms
-   - Manifest: depends on config + fetch (attenuated to homeserver domain)
+4. **Matrix provider**
+   - Use existing Matrix server (e.g., matrix.org) + private room/space
+   - @tool() methods: sendMessage, onMessage (via `/sync` long-poll)
    - Config schema for homeserver URL, access token, room ID
-   - Unit tests for tool methods (mock fetch responses)
+   - Manifest: depends on config + fetch (attenuated to homeserver)
+   - Unit tests with mock fetch responses
+   - Leave space for setup instructions (register bot, grab token)
 
-4. **PM exo**
-   - Consumes: pi, linear, matrix, github
-   - Pi agent with exoeval tool bound to linear + matrix + github caps
-   - Can: triage issues, post updates to Matrix, check GitHub activity
-   - Runs as a long-lived exo (polls or responds to events)
-   - Unit tests for the exo setup logic
+5. **PM exo**
+   - Consumes: pi, registry, inbox, linear, matrix, github
+   - Registers event callbacks, creates agent via registry
+   - Linear/Matrix/GitHub events → inbox → daemon steers agent
    - Lives in `examples/team/src/exos/pm/`
+   - Unit tests for routing logic
 
-5. **VM provider** (for engineer agent)
+6. **VM provider** (for engineer agent)
    - Krun-based sandboxed execution
    - Nix derivation defines rootfs
    - Agent gets a `bash` cap that runs inside the VM
    - Unit tests with mock VM execution
 
-6. **Engineer exo**
-   - Consumes: pi, github, vm
-   - Pi agent with exoeval tool bound to github + vm caps
-   - Can: review PRs, write code, run tests in VM, push branches
+7. **Engineer exo**
+   - Consumes: pi, registry, inbox, github, vm
+   - GitHub issue events → inbox → agent codes + opens PR
+   - Agent works on branch (`issue-<number>/<desc>`), rebases on main
    - Lives in `examples/team/src/exos/engineer/`
 
 ## Implementation Notes
-
-### Exoeval tool for pi
-
-The pi provider's `create()` accepts a `capDts` string and a `caps` BoundEval.
-It constructs a single pi `ToolDefinition`:
-
-```ts
-{
-  name: 'exoeval',
-  description: `Execute code against the following capabilities:\n\n${capDts}\n\nProvide a JS function: (caps) => { ... }`,
-  parameters: Type.Object({ code: Type.String() }),
-  execute: async (id, { code }) => {
-    const result = await caps(new Function('return ' + code)())
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] }
-  }
-}
-```
 
 ### Provider pattern for linear/matrix
 
 Same as github:
 ```
-src/providers/linear/
+src/providers/<name>/
   index.ts      # @tool() class with API methods
   manifest.ts   # { config: ..., fetch: ... }
-  ui.tsx         # config panel (API key, project selection)
-
-src/providers/matrix/
-  index.ts      # @tool() class with messaging methods
-  manifest.ts   # { config: ..., fetch: ... }
-  ui.tsx         # config panel (homeserver, token, room)
+  ui.tsx         # config panel
 ```
 
 ### Testing approach
 
 - Provider unit tests: mock the BoundEval/exoEval to return canned responses
 - Exo tests: mock provider instances, verify the exo calls the right caps
-- Integration: the hello exo + daemon smoke test we already have
+- Integration: daemon smoke test (existing)
+
+### Agent communication detail
+
+Daemon watches inboxes and steers agents when messages arrive:
+
+```
+Event source → provider.deliver(msg) → inbox (SQLite)
+  → daemon sees new unacked message
+  → daemon steers agent with messages inlined:
+
+    "New messages in your inbox:
+
+    1. [id:abc] [issue_comment] @ryan on #42 (2min ago):
+       The tests are still failing on CI
+
+    2. [id:def] [linear] Issue LIN-123 assigned to you:
+       Fix login page redirect
+
+    Use inbox.ack(id) when you've addressed each one."
+
+  → agent acts, calls inbox.ack("abc"), inbox.ack("def")
+```
+
+Messages inlined in steer (first 5, max 1k chars) — zero tool calls to receive.
+Agent can call `inbox.peek()` to re-read or check for more.
+Heartbeat re-steers if messages remain unacked.
 
 ## Deferred
 
 - **Git submodule tracking** — runtime repo tracks agent workdirs as submodules
-- **IFC (Information Flow Control)** — exoeval already provides the indirection layer
-- **Tunnel / remote access** — Tailscale or Cloudflare, after local POC works
+- **IFC (Information Flow Control)** — exoeval provides the indirection layer
+- **Tunnel / remote access** — Tailscale or Cloudflare, after local POC
+- **Scoped caps per issue** — agent gets caps scoped to specific issue/PR (ocap actor model)
+- **git worktree** — parallel agents on same repo
+- **Agent budget/timeout** — per-agent token limits
