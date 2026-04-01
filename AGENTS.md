@@ -102,6 +102,10 @@ export default async ({ exoEval }) => {
 
 ## Next Steps (in order)
 
+Instructions: keep going until all planned tasks are completed. If a task has
+unanticipated complexity, note it and skip. After done, put a summary after
+each task with an emoji denoting status: ✅ done, ⏭️ skipped, 🚧 partial.
+
 1. **Exoeval as pi's single custom tool**
    - Give pi ONE custom tool: `exoeval`
    - The tool is a BoundEval closure pre-bound to the exo's caps
