@@ -109,8 +109,11 @@ each task with an emoji denoting status: ✅ done, ⏭️ skipped, 🚧 partial.
 1. **Exoeval as pi's single custom tool**
    - Give pi ONE custom tool: `exoeval`
    - The tool is a BoundEval closure pre-bound to the exo's caps
-   - Read `.d.ts` files from `dist/providers/*/index.d.ts`, concat into tool description
-   - Wire up tsgo in the build pipeline to emit `.d.ts` files
+   - Read `.d.ts` files from `dist/types/providers/*/index.d.ts`, concat into tool description
+   - Wire up tsc in the build pipeline to emit `.d.ts` files
+   - **Requires switching pi from subprocess PTY to in-process SDK** (`createAgentSession()`
+     with `InteractiveMode` running inside the PTY). Subprocess can't receive custom tools.
+     The old pi provider on `main` did this — port the pattern.
 
 2. **Inbox provider**
    - Durable message queue with ack/snooze/steer

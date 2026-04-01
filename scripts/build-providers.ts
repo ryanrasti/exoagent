@@ -5,6 +5,13 @@ import { build } from 'esbuild'
 
 const isWatch = process.argv.includes('--watch')
 
+// Generate .d.ts files for providers (used by LLM as tool descriptions)
+const buildTypes = async () => {
+	const { execSync } = await import('node:child_process')
+	execSync('npx tsc --declaration --emitDeclarationOnly --noEmit false --outDir dist/types --rootDir src', { stdio: 'inherit' })
+	console.log('Generated .d.ts files')
+}
+
 // Bundle shared deps (zod) into dist/shared/ — parsed once by SES at boot
 const buildShared = async () => {
 	await build({
@@ -59,7 +66,7 @@ const buildModule = async (mod: { name: string, entry: string, out: string }) =>
 	}
 }
 
-Promise.all([buildShared(), ...modules.map(buildModule)])
+Promise.all([buildShared(), buildTypes(), ...modules.map(buildModule)])
 	.then(() => {
 		if (isWatch) {
 			console.log('Watching for changes...')

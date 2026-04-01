@@ -29,6 +29,7 @@
     "@endo/module-source": "^1.4.0",
     "@hono/node-server": "^1.19.12",
     "@mariozechner/pi-coding-agent": "^0.64.0",
+    "@sinclair/typebox": "^0.34.49",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/xterm": "^6.0.0",

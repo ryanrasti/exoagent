@@ -2,11 +2,13 @@
  * Pi provider — agent factory backed by pi SDK.
  *
  * Creates pi agent sessions in PTYs, one per (client, sessionId).
+ * Each PTY runs agent-worker.ts which connects back via IPC for exoeval tool calls.
  * UI attaches via long-poll exoRpc (read/input).
  *
- * ring0 provides: piSdk, pty, resolve, join, homedir, mkdirSync
+ * ring0 provides: pty, resolve, join, homedir, mkdirSync, createServer (net)
  */
 
+import type { Socket } from 'node:net'
 import type { ProviderInit } from '../../provider'
 import type manifest from './manifest'
 import z from 'zod'
@@ -25,6 +27,8 @@ type PtySession = {
 	outputBuffer: string[]
 	waiters: Array<(data: string) => void>
 	alive: boolean
+	ipcCleanup?: () => void
+	capEval?: (code: string) => unknown
 }
 
 export type PiProviderImpl = InstanceType<typeof PiProvider>
@@ -49,18 +53,94 @@ class PiProvider {
 		return cwd
 	}
 
-	@tool(z.string(), z.string())
-	create(client: string, sessionId: string): { client: string, sessionId: string, cwd: string } {
+	@tool(z.string(), z.string(), z.string().optional(), z.string().optional())
+	create(
+		client: string,
+		sessionId: string,
+		capsDts?: string,
+		cwdOverride?: string,
+	): { client: string, sessionId: string, cwd: string } | Promise<{ client: string, sessionId: string, cwd: string }> {
 		const key = this.sessionKey(client, sessionId)
 		const existing = this.sessions.get(key)
 		if (existing) {
 			return { client, sessionId, cwd: existing.cwd }
 		}
 
-		const cwd = this.ensureCwd(client, sessionId)
+		const cwd = cwdOverride ?? this.ensureCwd(client, sessionId)
+		this.ring0.mkdirSync(cwd, { recursive: true })
 
-		// Spawn pi in interactive mode inside a PTY
-		const ptyProcess = this.ring0.pty.spawn('pi', [], {
+		// If caps are provided, set up IPC for exoeval tool calls
+		if (capsDts) {
+			return this.createWithIpc(client, sessionId, cwd, capsDts)
+		}
+
+		return this.createSimple(client, sessionId, cwd)
+	}
+
+	private createSimple(
+		client: string,
+		sessionId: string,
+		cwd: string,
+	): { client: string, sessionId: string, cwd: string } {
+		const workerPath = this.ring0.resolve(this.ring0.dirname, 'agent-worker.ts')
+		const ptyProcess = this.ring0.pty.spawn('npx', ['tsx', workerPath], {
+			name: 'xterm-256color',
+			cols: 120,
+			rows: 40,
+			cwd,
+			env: { ...process.env, TERM: 'xterm-256color', EXOAGENT_CWD: cwd },
+		})
+		this.registerSession(client, sessionId, cwd, ptyProcess)
+		return { client, sessionId, cwd }
+	}
+
+	private async createWithIpc(
+		client: string,
+		sessionId: string,
+		cwd: string,
+		capsDts: string,
+	): Promise<{ client: string, sessionId: string, cwd: string }> {
+		const ipcPath = this.ring0.join(this.dataDir, 'providers', 'pi', `${client}-${sessionId}.sock`)
+		// Clean up stale socket
+		try { this.ring0.unlinkSync(ipcPath) }
+		catch { /* doesn't exist */ }
+
+		// Create IPC server — handles exoeval tool calls from the agent worker
+		const server = this.ring0.createServer((conn: Socket) => {
+			// eslint-disable-next-line node/prefer-global/buffer
+			conn.on('data', (buf: Buffer) => {
+				for (const line of buf.toString().split('\n')) {
+					if (!line.trim()) { continue }
+					try {
+						const msg = JSON.parse(line) as { id: number, code: string }
+						// The exo that called create() must have set up a capEval on this session
+						const session = this.sessions.get(this.sessionKey(client, sessionId))
+						if (session?.capEval) {
+							const doEval = async () => {
+								try {
+									const fn = session.capEval!(msg.code)
+									const result = fn instanceof Promise ? await fn : fn
+									conn.write(`${JSON.stringify({ id: msg.id, result: result ?? null })}\n`)
+								}
+								catch (err) {
+									conn.write(`${JSON.stringify({ id: msg.id, error: err instanceof Error ? err.message : String(err) })}\n`)
+								}
+							}
+							doEval()
+						}
+						else {
+							conn.write(`${JSON.stringify({ id: msg.id, error: 'no capEval registered' })}\n`)
+						}
+					}
+					catch { /* ignore malformed */ }
+				}
+			})
+		})
+
+		await new Promise<void>((resolve) => { server.listen(ipcPath, resolve) })
+
+		const workerPath = this.ring0.resolve(this.ring0.dirname, 'agent-worker.ts')
+		const ptyProcess = this.ring0.pty.spawn('npx', ['tsx', workerPath], {
 			name: 'xterm-256color',
 			cols: 120,
 			rows: 40,
@@ -68,9 +148,23 @@ class PiProvider {
 			env: {
 				...process.env,
 				TERM: 'xterm-256color',
+				EXOAGENT_CWD: cwd,
+				EXOAGENT_IPC: ipcPath,
+				EXOAGENT_CAPS_DTS: capsDts,
 			},
 		})
 
+		const session = this.registerSession(client, sessionId, cwd, ptyProcess)
+		session.ipcCleanup = () => {
+			server.close()
+			try { this.ring0.unlinkSync(ipcPath) }
+			catch { /* ignore */ }
+		}
+
+		return { client, sessionId, cwd }
+	}
+
+	private registerSession(client: string, sessionId: string, cwd: string, ptyProcess: Pty): PtySession {
 		const session: PtySession = {
 			client,
 			sessionId,
@@ -82,7 +176,6 @@ class PiProvider {
 		}
 
 		ptyProcess.onData((data: string) => {
-			// If there are waiters, resolve the first one immediately
 			if (session.waiters.length > 0) {
 				const waiter = session.waiters.shift()!
 				waiter(data)
@@ -94,15 +187,33 @@ class PiProvider {
 
 		ptyProcess.onExit(() => {
 			session.alive = false
-			// Resolve any remaining waiters with empty string
+			session.ipcCleanup?.()
 			for (const waiter of session.waiters) {
 				waiter('')
 			}
 			session.waiters.length = 0
 		})
 
-		this.sessions.set(key, session)
-		return { client, sessionId, cwd }
+		this.sessions.set(this.sessionKey(client, sessionId), session)
+		return session
+	}
+
+	/** Register a BoundEval for a session's exoeval tool calls. Called by exos after create(). */
+	@tool(z.string(), z.string())
+	registerCapEval(_client: string, _sessionId: string): { ok: true } {
+		// The actual capEval function will be set by the exo via a direct call
+		// This is a placeholder — the real mechanism is setCapEval below
+		return { ok: true }
+	}
+
+	/** Set the cap eval function for a session (called directly, not via exoRpc) */
+	setCapEval(client: string, sessionId: string, capEval: (code: string) => unknown): void {
+		const key = this.sessionKey(client, sessionId)
+		const session = this.sessions.get(key)
+		if (!session) {
+			throw new Error(`no session for ${key}`)
+		}
+		session.capEval = capEval
 	}
 
 	@tool()
@@ -141,19 +252,16 @@ class PiProvider {
 			throw new Error(`no session for ${key}`)
 		}
 
-		// If there's buffered output, return it immediately
 		if (session.outputBuffer.length > 0) {
 			const data = session.outputBuffer.join('')
 			session.outputBuffer.length = 0
 			return Promise.resolve(data)
 		}
 
-		// If the session is dead, return empty
 		if (!session.alive) {
 			return Promise.resolve('')
 		}
 
-		// Otherwise, wait for output (long-poll)
 		return new Promise<string>((resolve) => {
 			session.waiters.push(resolve)
 		})
@@ -182,6 +290,7 @@ class PiProvider {
 		if (session.alive) {
 			session.ptyProcess.kill()
 		}
+		session.ipcCleanup?.()
 		this.sessions.delete(key)
 		return { ok: true }
 	}
