@@ -7,7 +7,7 @@
  * Each client (exo) gets its own scoped inbox.
  */
 
-import type { BoundEval } from '../../bound-eval'
+import type { BoundEvalFn } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedSqlite } from '../sqlite'
 import z from 'zod'
@@ -30,9 +30,9 @@ type InboxMessage = {
 export type InboxProviderImpl = InstanceType<typeof ScopedInbox>
 
 class InboxRoot {
-	private readonly exoEval: BoundEval<InboxCaps>
+	private readonly exoEval: BoundEvalFn<InboxCaps>
 
-	constructor(exoEval: BoundEval<InboxCaps>) {
+	constructor(exoEval: BoundEvalFn<InboxCaps>) {
 		this.exoEval = exoEval
 
 		this.exoEval(({ sqlite }) =>
@@ -63,10 +63,10 @@ class InboxRoot {
 }
 
 class ScopedInbox {
-	private readonly exoEval: BoundEval<InboxCaps>
+	private readonly exoEval: BoundEvalFn<InboxCaps>
 	private readonly scope: string
 
-	constructor(exoEval: BoundEval<InboxCaps>, scope: string) {
+	constructor(exoEval: BoundEvalFn<InboxCaps>, scope: string) {
 		this.exoEval = exoEval
 		this.scope = scope
 	}

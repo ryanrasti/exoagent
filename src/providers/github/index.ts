@@ -6,7 +6,7 @@
  *   - fetch: for making HTTP requests to api.github.com
  */
 
-import type { BoundEval } from '../../bound-eval'
+import type { BoundEvalFn } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
 import type { FetchResponse, ScopedFetch } from '../fetch'
@@ -77,9 +77,9 @@ type PR = {
 export type GitHubProviderImpl = InstanceType<typeof GitHubProvider>
 
 class GitHubProvider {
-	private readonly exoEval: BoundEval<GitHubCaps>
+	private readonly exoEval: BoundEvalFn<GitHubCaps>
 
-	constructor(exoEval: BoundEval<GitHubCaps>) {
+	constructor(exoEval: BoundEvalFn<GitHubCaps>) {
 		this.exoEval = exoEval
 
 		this.exoEval(({ config }) =>

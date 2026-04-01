@@ -8,7 +8,7 @@
  * .scoped(clientName) → ScopedConfig that filters by scope.
  */
 
-import type { BoundEval } from '../../bound-eval'
+import type { BoundEvalFn } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedSqlite } from '../sqlite'
 import z from 'zod'
@@ -35,10 +35,10 @@ const fieldSchemaZod = z.object({
 })
 
 export class ConfigProviderImpl {
-	private readonly exoEval: BoundEval<ConfigCaps>
+	private readonly exoEval: BoundEvalFn<ConfigCaps>
 	private readonly schemas = new Map<string, { [key: string]: ConfigFieldSchema }>()
 
-	constructor(exoEval: BoundEval<ConfigCaps>) {
+	constructor(exoEval: BoundEvalFn<ConfigCaps>) {
 		this.exoEval = exoEval
 
 		this.exoEval(
@@ -99,12 +99,12 @@ export class ConfigProviderImpl {
 export default ({ exoEval }: ProviderInit<ConfigCaps>) => new ConfigProviderImpl(exoEval)
 
 export class ScopedConfig {
-	private readonly exoEval: BoundEval<ConfigCaps>
+	private readonly exoEval: BoundEvalFn<ConfigCaps>
 	private readonly scope: string
 	private readonly schemas: Map<string, { [key: string]: ConfigFieldSchema }>
 
 	constructor(
-		exoEval: BoundEval<ConfigCaps>,
+		exoEval: BoundEvalFn<ConfigCaps>,
 		scope: string,
 		schemas: Map<string, { [key: string]: ConfigFieldSchema }>,
 	) {

@@ -14,7 +14,7 @@
  * 4. Set homeserver_url, access_token, and space_id in the config UI
  */
 
-import type { BoundEval } from '../../bound-eval'
+import type { BoundEvalFn } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type { ScopedConfig } from '../config'
 import type { MatrixClient } from 'matrix-js-sdk'
@@ -50,13 +50,13 @@ type MatrixRoom = {
 export type MatrixProviderImpl = InstanceType<typeof MatrixProvider>
 
 class MatrixProvider {
-	private readonly exoEval: BoundEval<MatrixCaps>
+	private readonly exoEval: BoundEvalFn<MatrixCaps>
 	private readonly ring0: MatrixRing0
 	private readonly dataDir: string
 	private client: MatrixClient | null = null
 	private initPromise: Promise<void> | null = null
 
-	constructor(exoEval: BoundEval<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
+	constructor(exoEval: BoundEvalFn<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
 		this.exoEval = exoEval
 		this.ring0 = ring0
 		this.dataDir = dataDir
