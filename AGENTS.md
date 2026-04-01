@@ -8,36 +8,58 @@
 
 ## Open Design Questions
 
-1. **Module namespacing vs UI routing.** Modules are namespaced by origin:
-   - `@exoagent/providers/pi` (built-in)
-   - `./exos/hello` (workspace)
-   - `<npm-pkg>/providers/foo` (npm, future)
-   
-   Subdomains can't represent these names (no `@` or `/` in DNS). Currently we use
-   short names (`pi.localhost:3000`) with collision = error, but this won't scale to
-   npm packages.
-   
-   The right solution is probably **path-based routing with iframes**: each module UI
-   loads at `localhost:3000/ui/<full-name>/` inside an iframe. The iframe's only way
-   out is `postMessage` to the parent dashboard — enforcing isolation without relying
-   on subdomains. The server must set `X-Frame-Options` / CSP to prevent cross-origin
-   framing (should be default, needs a test).
+1. **Module namespacing vs UI routing.** Modules are namespaced by origin
+   (`@exoagent/providers/pi`, `./exos/hello`, `<npm-pkg>/providers/foo`).
+   Subdomains can't represent these (no `@` or `/` in DNS). Currently short names
+   with collision = error. The right solution is probably **path-based routing with
+   iframes** and `postMessage` as the only escape hatch. Server must set
+   `X-Frame-Options` / CSP to prevent cross-origin framing (needs a test).
 
-## Future Features / Use Cases
+2. **Bridging @tool() methods → pi ToolDefinitions.** Exos need to pass exoagent
+   provider caps to pi agents as custom tools. Need an adapter that takes a provider's
+   `@tool()` methods and produces pi `ToolDefinition`s with proper TypeBox schemas.
+   This is the key missing piece for a useful agent.
 
-1. Implement Submodule Git Tracking
-   - The runtime repo is the state of the world.
-   - Agent workdirs as git submodules.
-   - `exoagentd` commits submodule pointer updates as agents progress.
-   - Git status on runtime repo = what every agent has been doing.
+3. **Agent cwd.** Pi agents currently run in `.exoagent/providers/pi/<client>/<id>/`
+   which is empty. Exos should be able to set cwd to an actual repo. Need to decide:
+   does the exo pass an absolute path, or does pi clone/mount something?
 
-2. Capability Providers to implement:
-   - `bash`: allow execution of host-level or local tools.
-   - `vm`: create a new vm image rootfs based on a nix derivation via Krun.
-   - `slack`: talk with team/user.
-   - `linear`: manage project tickets.
+## Next Steps
 
-3. "Exos" / Agent definitions:
-   - Provide a way to run static code for scoped tasks (e.g. crons).
-   - Engineer Agent: GitHub cap (create/poll/respond to PRs) + VM cap (local testing).
-   - Project Manager Agent: GitHub (team activity), Slack (chat), Linear (tickets).
+1. **@tool() → pi ToolDefinition bridge**
+   - Adapter that introspects a provider's `@tool()` methods (zod schemas)
+   - Produces pi `ToolDefinition`s (TypeBox schemas + execute function)
+   - Exo passes these as `customTools` to `pi.create()`
+   - Hello exo becomes: pi agent with GitHub tools in a real repo
+
+2. **Real engineer exo**
+   - Points pi at a repo (cwd)
+   - Gives it GitHub tools (read PRs, post comments, push branches)
+   - Gives it bash/read/edit/write for the repo
+   - Can be prompted: "review the latest PR and post comments"
+
+3. **Matrix provider** (replaces Slack)
+   - Self-hosted Conduit server (lightweight Rust Matrix homeserver)
+   - Connect from phone via Element app
+   - Agent sends/receives messages via Matrix REST API
+   - `fetch` provider attenuated to Matrix homeserver domain
+
+4. **Tunnel / remote access**
+   - Tailscale (zero config, private) or Cloudflare Tunnels (public, needs auth)
+   - Expose dashboard + provider UIs from anywhere
+   - Needs wildcard subdomain support or the iframe routing from #1
+
+5. **VM provider**
+   - Krun-based sandboxed execution
+   - Nix derivation defines rootfs
+   - Agent gets a `bash` cap that runs inside the VM
+   - Defense in depth: SES for JS isolation, VM for OS isolation
+
+6. **Git submodule tracking**
+   - Runtime repo (e.g., `examples/team`) tracks agent workdirs as submodules
+   - `exoagentd` commits submodule pointer updates as agents progress
+   - Git log = audit trail of all agent activity
+
+7. **IFC (Information Flow Control)**
+   - Deferred. exoeval already provides the indirection layer.
+   - When ready: tag data with labels, exoeval enforces flow constraints
