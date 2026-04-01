@@ -313,20 +313,18 @@ export class ProviderLoader {
 
 	// ── SES import ─────────────────────────────────────────────────
 
-	// Cached ModuleSource instances — parsed once, reused across compartments
-	private moduleSourceCache = new Map<string, object>()
-	private ModuleSource: (new (code: string) => object) | null = null
+	// Cached ModuleSource for shared deps (zod) — parsed once, reused across compartments
+	private sharedModules: Map<string, object> | null = null
 
-	/** Ensure ModuleSource + shared deps are parsed and cached. */
-	async ensureModuleSource(): Promise<void> {
-		if (this.ModuleSource) { return }
+	/** Pre-parse shared deps. Called once on first sesImport. */
+	private async warmSharedModules(): Promise<Map<string, object>> {
+		if (this.sharedModules) { return this.sharedModules }
 		const { ModuleSource } = await import('@endo/module-source')
-		this.ModuleSource = ModuleSource
-
-		// Pre-parse shared dependencies once (bundled by esbuild AOT)
-		const zodPath = resolve(process.cwd(), 'dist/shared/zod.js')
-		const zodSrc = readFileSync(zodPath, 'utf-8')
-		this.moduleSourceCache.set('zod', { source: new ModuleSource(zodSrc) })
+		const zodSrc = readFileSync(resolve(process.cwd(), 'dist/shared/zod.js'), 'utf-8')
+		this.sharedModules = new Map([
+			['zod', { source: new ModuleSource(zodSrc) }],
+		])
+		return this.sharedModules
 	}
 
 	/** Import a module via SES Compartment from its pre-built bundle. */
@@ -339,19 +337,17 @@ export class ProviderLoader {
 			throw new Error(`missing pre-bundled index.js for provider "${name}" at ${bundlePath}`)
 		}
 
-		await this.ensureModuleSource()
-		const MS = this.ModuleSource!
-		const cache = this.moduleSourceCache
+		const shared = await this.warmSharedModules()
+		const { ModuleSource } = await import('@endo/module-source')
 
 		const compartment = new Compartment({
 			globals: { console, process: { env: process.env } },
 			resolveHook: (spec: string) => spec,
 			importHook: async (spec: string) => {
 				if (spec === 'root') {
-					return { source: new MS(code) }
+					return { source: new ModuleSource(code) }
 				}
-				// Return cached ModuleSource for shared deps (zod, etc.)
-				const cached = cache.get(spec)
+				const cached = shared.get(spec)
 				if (cached) {
 					return cached
 				}
