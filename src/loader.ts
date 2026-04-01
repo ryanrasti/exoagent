@@ -98,7 +98,7 @@ export class ProviderLoader {
 					attenuations,
 					deps: Object.keys(attenuations),
 				},
-				hasUI: statSync(resolve(process.cwd(), 'src/ui', entry, 'Panel.tsx'), { throwIfNoEntry: false }) !== undefined,
+				hasUI: statSync(resolve(dir, 'ui.tsx'), { throwIfNoEntry: false }) !== undefined,
 			})
 		}
 

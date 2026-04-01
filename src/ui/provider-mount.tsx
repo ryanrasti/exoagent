@@ -19,9 +19,9 @@ else {
 	// Dynamic import of the provider's Panel component
 	// Vite handles this via glob or explicit dynamic import
 	const panels: { [name: string]: () => Promise<{ default: React.ComponentType }> } = {
-		github: () => import('./github/Panel'),
-		config: () => import('./config/Panel'),
-		pi: () => import('./pi/Panel'),
+		github: () => import('../providers/github/ui'),
+		config: () => import('../providers/config/ui'),
+		pi: () => import('../providers/pi/ui'),
 	}
 
 	const loader = panels[providerName]

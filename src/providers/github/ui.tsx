@@ -1,6 +1,6 @@
-import type { GitHubProviderImpl } from '../../providers/github'
+import type { GitHubProviderImpl } from './index'
 import { useEffect, useState } from 'react'
-import { exoRpc } from '../lib/exoRpc'
+import { exoRpc } from '../../ui/lib/exoRpc'
 
 type GitHubCaps = {
 	github: GitHubProviderImpl

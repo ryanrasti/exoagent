@@ -1,8 +1,8 @@
 import type { FitAddon } from '@xterm/addon-fit'
 import type { Terminal } from '@xterm/xterm'
-import type { PiProviderImpl } from '../../providers/pi'
+import type { PiProviderImpl } from './index'
 import { useEffect, useRef, useState } from 'react'
-import { exoRpc } from '../lib/exoRpc'
+import { exoRpc } from '../../ui/lib/exoRpc'
 import '@xterm/xterm/css/xterm.css'
 
 type PiCaps = {

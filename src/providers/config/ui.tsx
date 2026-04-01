@@ -1,6 +1,6 @@
-import type { ConfigFieldSchema, ConfigProviderImpl } from '../../providers/config'
+import type { ConfigFieldSchema, ConfigProviderImpl } from './index'
 import { useEffect, useState } from 'react'
-import { exoRpc } from '../lib/exoRpc'
+import { exoRpc } from '../../ui/lib/exoRpc'
 
 type ConfigCaps = { config: ConfigProviderImpl }
 type Schemas = { [scope: string]: { [key: string]: ConfigFieldSchema } }

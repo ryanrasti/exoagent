@@ -7,29 +7,13 @@
  * ring0 provides: piSdk, pty, resolve, join, homedir, mkdirSync
  */
 
-import type { IPty } from 'node-pty'
-import type { mkdirSync as MkdirSyncFn } from 'node:fs'
-import type { homedir as HomedirFn } from 'node:os'
-import type { join as JoinFn, resolve as ResolveFn } from 'node:path'
 import type { ProviderInit } from '../../provider'
+import type manifest from './manifest'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
 
-type PtySpawn = (file: string, args: string[], options: {
-	name?: string
-	cols?: number
-	rows?: number
-	cwd?: string
-	env?: { [key: string]: string | undefined }
-}) => IPty
-
-type PiRing0 = {
-	pty: { spawn: PtySpawn }
-	resolve: typeof ResolveFn
-	join: typeof JoinFn
-	homedir: typeof HomedirFn
-	mkdirSync: typeof MkdirSyncFn
-}
+type Ring0 = Awaited<ReturnType<typeof manifest.ring0>>
+type Pty = ReturnType<Ring0['pty']['spawn']>
 
 type PiCaps = Record<string, never>
 
@@ -37,7 +21,7 @@ type PtySession = {
 	client: string
 	sessionId: string
 	cwd: string
-	ptyProcess: IPty
+	ptyProcess: Pty
 	outputBuffer: string[]
 	waiters: Array<(data: string) => void>
 	alive: boolean
@@ -46,12 +30,12 @@ type PtySession = {
 export type PiProviderImpl = InstanceType<typeof PiProvider>
 
 class PiProvider {
-	private readonly ring0: PiRing0
+	private readonly ring0: Ring0
 	private readonly dataDir: string
 	private readonly sessions = new Map<string, PtySession>()
 
 	constructor(init: ProviderInit<PiCaps>) {
-		this.ring0 = init.ring0 as PiRing0
+		this.ring0 = init.ring0 as Ring0
 		this.dataDir = init.config.dataDir
 	}
 

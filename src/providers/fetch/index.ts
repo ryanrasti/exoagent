@@ -7,8 +7,11 @@
  */
 
 import type { ProviderInit } from '../../provider'
+import type manifest from './manifest'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
+
+type Ring0 = Awaited<ReturnType<typeof manifest.ring0>>
 
 export type FetchInit = {
 	method?: string
@@ -51,7 +54,7 @@ export class FetchProviderImpl {
 }
 
 export default ({ ring0 }: ProviderInit) =>
-	new FetchProviderImpl(ring0 as typeof globalThis.fetch)
+	new FetchProviderImpl(ring0 as Ring0)
 
 export class ScopedFetch {
 	private readonly nativeFetch: typeof globalThis.fetch
