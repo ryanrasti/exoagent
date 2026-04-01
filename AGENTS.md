@@ -37,18 +37,9 @@ The `.d.ts` files serve a dual purpose:
 
 This is one of the main reasons for the separation between providers and the agent runtime.
 
-## Core Primitives: Agent Registry + Inbox
+## Core Primitive: Inbox
 
-Two built-in providers that every agent-based exo needs:
-
-### Agent Registry (`@exoagent/providers/registry`)
-
-Persistent registry of agents, scoped per exo client. Handles lifecycle:
-
-- `getOrCreate(id)` — lookup or spawn a new pi agent
-- Persists agent config to sqlite — survives daemon restart
-- On daemon start, resumes all registered agents
-- Each agent runs pi in interactive mode (attachable via xterm.js UI)
+One built-in provider for agent communication:
 
 ### Inbox (`@exoagent/providers/inbox`)
 
@@ -64,12 +55,22 @@ Backed by SQLite. When a new message arrives, daemon steers the agent:
 messages are inlined in the steer (first 5, max 1k chars) to avoid
 a tool call round trip. Heartbeat re-steers if messages remain unacked.
 
-### Why this architecture
+Agent lifecycle (spawn/resume/attach) is already handled by the pi provider +
+filesystem convention. No separate registry needed for v0:
+- `pi.create(client, sessionId)` spawns or resumes via `SessionManager.continueRecent(cwd)`
+- Pi provider's in-memory map tracks active sessions
+- xterm.js UI lists and attaches to sessions
+
+A registry will be needed when agents are spawned dynamically (e.g., one per
+GitHub issue). The registry would persist which agents exist so they can be
+re-spawned on daemon restart. Deferred until we have that use case.
+
+### Why inbox
 
 - **Decouples event sources from agents** — GitHub, Linear, Matrix all just
   `deliver()`. The agent doesn't care where messages came from.
-- **Survives restarts** — durable queue + registry resume agents on boot.
-- **No long-lived exo needed** — the exo registers callbacks and exits.
+- **Survives restarts** — durable SQLite queue, re-steer on boot.
+- **No long-lived exo needed** — exo registers callbacks and exits.
   Providers own event loops, inbox owns the queue, daemon owns steering.
 - **Handles agent being busy** — snooze, heartbeat, ack when done.
 - **Path to ocap** — eventually caps arrive alongside inbox messages.
@@ -107,11 +108,10 @@ export default async ({ exoEval }) => {
    - Read `.d.ts` files from `dist/providers/*/index.d.ts`, concat into tool description
    - Wire up tsgo in the build pipeline to emit `.d.ts` files
 
-2. **Agent registry + inbox providers**
-   - Registry: persistent agent lifecycle, scoped per client
-   - Inbox: durable message queue with ack/snooze/steer
-   - Both backed by sqlite provider
-   - Unit tests for registry CRUD and inbox queue semantics
+2. **Inbox provider**
+   - Durable message queue with ack/snooze/steer
+   - Backed by sqlite provider
+   - Unit tests for queue semantics
 
 3. **Linear provider**
    - @tool() methods: create/update/query issues (GraphQL API internally)
@@ -129,7 +129,7 @@ export default async ({ exoEval }) => {
    - Leave space for setup instructions (register bot, grab token)
 
 5. **PM exo**
-   - Consumes: pi, registry, inbox, linear, matrix, github
+   - Consumes: pi, inbox, linear, matrix, github
    - Registers event callbacks, creates agent via registry
    - Linear/Matrix/GitHub events → inbox → daemon steers agent
    - Lives in `examples/team/src/exos/pm/`
@@ -142,7 +142,7 @@ export default async ({ exoEval }) => {
    - Unit tests with mock VM execution
 
 7. **Engineer exo**
-   - Consumes: pi, registry, inbox, github, vm
+   - Consumes: pi, inbox, github, vm
    - GitHub issue events → inbox → agent codes + opens PR
    - Agent works on branch (`issue-<number>/<desc>`), rebases on main
    - Lives in `examples/team/src/exos/engineer/`
