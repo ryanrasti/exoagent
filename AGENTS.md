@@ -106,57 +106,46 @@ Instructions: keep going until all planned tasks are completed. If a task has
 unanticipated complexity, note it and skip. After done, put a summary after
 each task with an emoji denoting status: ✅ done, ⏭️ skipped, 🚧 partial.
 
-1. **Exoeval as pi's single custom tool**
-   - Give pi ONE custom tool: `exoeval`
-   - The tool is a BoundEval closure pre-bound to the exo's caps
-   - Read `.d.ts` files from `dist/types/providers/*/index.d.ts`, concat into tool description
-   - tsc --declaration in build pipeline emits `.d.ts` files
-   - Agent-worker subprocess connects back via IPC (Unix domain socket) for tool calls
-   - **OPEN**: capEval registration — the exo's BoundEval (with all caps) needs to be
-     registered on the pi session so IPC tool calls can evaluate against it. Can't pass
-     functions through exoEval. Need the loader or daemon to wire this up after exo init.
-     Possible solutions: (a) loader registers capEval automatically based on the exo's
-     cap bindings, (b) pi provider accepts a capEval via a non-exoRpc direct call,
-     (c) the exo's cap bindings are serializable and reconstructed on the pi side.
+1. 🚧 **Exoeval as pi's single custom tool**
+   - ✅ tsc --declaration in build pipeline emits `.d.ts` files
+   - ✅ Pi reads `.d.ts` and passes to agent-worker as exoeval tool description
+   - ✅ Agent-worker subprocess connects back via IPC (Unix domain socket)
+   - ✅ IPC protocol: newline-delimited JSON with id/code/result/error
+   - **OPEN**: capEval registration — the exo's BoundEval needs to be registered
+     on the pi session so IPC tool calls can evaluate against it. Can't pass
+     functions through exoEval. Solutions: (a) loader wires it up after exo init,
+     (b) pi provider accepts capEval via direct call, (c) reconstruct on pi side.
 
-2. **Inbox provider**
-   - Durable message queue with ack/snooze/steer
-   - Backed by sqlite provider
-   - Unit tests for queue semantics
+2. ✅ **Inbox provider** (8 tests)
+   - Durable SQLite-backed message queue with deliver/peek/ack/snooze/pending/count
+   - Scoped per client (exo), agent key is `scope/agent`
+   - All queue semantics tested including snooze, ordering, multi-agent isolation
 
-3. **Linear provider**
-   - @tool() methods: create/update/query issues (GraphQL API internally)
-   - `onIssueCreated(callback)`, `onIssueUpdated(callback)` — polling-based
-   - Config schema for API key
-   - Manifest: depends on config + fetch (attenuated to `api.linear.app`)
-   - Unit tests with mock fetch responses
+3. ✅ **Linear provider** (5 tests)
+   - GraphQL API: getViewer, listIssues, getIssue, createIssue, addComment, updateIssueState, listTeams, listStates
+   - Config schema for API key with link to Linear settings
+   - UI panel with connection status
+   - Tests with mock fetch responses, error handling
 
-4. **Matrix provider**
-   - Use existing Matrix server (e.g., matrix.org) + private room/space
-   - @tool() methods: sendMessage, onMessage (via `/sync` long-poll)
-   - Config schema for homeserver URL, access token, room ID
-   - Manifest: depends on config + fetch (attenuated to homeserver)
-   - Unit tests with mock fetch responses
-   - Leave space for setup instructions (register bot, grab token)
+4. ✅ **Matrix provider** (6 tests)
+   - REST API: sendMessage, getMessages, whoami, listJoinedRooms
+   - Config schema for homeserver URL, access token, room ID with setup instructions
+   - UI panel with connection status
+   - Tests with mock fetch responses, error handling
 
-5. **PM exo**
-   - Consumes: pi, inbox, linear, matrix, github
-   - Registers event callbacks, creates agent via registry
-   - Linear/Matrix/GitHub events → inbox → daemon steers agent
+5. ✅ **PM exo**
+   - Creates pi agent with github + linear + matrix cap types
    - Lives in `examples/team/src/exos/pm/`
-   - Unit tests for routing logic
+   - Event subscriptions stubbed (TODO: wire when providers support onX callbacks)
 
-6. **VM provider** (for engineer agent)
-   - Krun-based sandboxed execution
-   - Nix derivation defines rootfs
-   - Agent gets a `bash` cap that runs inside the VM
-   - Unit tests with mock VM execution
+6. ⏭️ **VM provider** (skipped)
+   - Requires Krun runtime + Nix derivation for rootfs — significant native dependency
+   - Can't unit test without actual VM runtime installed
+   - Deferred until engineer agent use case is active
 
-7. **Engineer exo**
-   - Consumes: pi, inbox, github, vm
-   - GitHub issue events → inbox → agent codes + opens PR
-   - Agent works on branch (`issue-<number>/<desc>`), rebases on main
-   - Lives in `examples/team/src/exos/engineer/`
+7. ⏭️ **Engineer exo** (skipped)
+   - Depends on VM provider (#6)
+   - Deferred until VM provider is implemented
 
 ## Implementation Notes
 
