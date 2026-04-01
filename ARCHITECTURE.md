@@ -26,6 +26,10 @@ Providers are isolated libraries loaded into their own SES `Compartment`.
 ### 3. Exoeval & Object Capabilities
 All cross-boundary capability invocations route through `exoeval`.
 
+We use `exoeval` inside our SES compartments rather than just using SES object capability sharing for two main reasons:
+1. **Indirection / Hot-Reloading:** It adds a layer of indirection, allowing us to swap out provider implementations behind the scenes without breaking references in running compartments.
+2. **Unified Interface:** Eventually, agent "exos" will also use `exoeval`. This keeps a single, uniform interface for interacting with capabilities, whether it is Provider-to-Provider or Agent-to-Provider.
+
 - **`@tool()` Decorator:** Marks a class method as safely callable by another compartment.
 - **`BoundEval`:** Providers receive a `BoundEval` function (often called `this.exoEval`) that allows them to execute closures using the capabilities they were granted.
 - **Isolation:** A provider does not receive raw access to another provider's instance. It can only execute serialized closures against the attenuated interface.
@@ -56,11 +60,3 @@ The system includes a single-pane-of-glass Dashboard and autonomous Provider pan
 | FE Assets  | Vite    | `src/ui/*/index.html`        | `dist/ui/*/`                        |
 
 In development, Vite runs in strict asset mode alongside the backend's Hono server to provide HMR, while esbuild runs in watch mode to hot-reload provider logic.
-
-## Coding Conventions
-
-- Prefer `for (const x of y) {}` over `.forEach()`. Use `for...of` for all iteration.
-- Prefer `{ [key: string]: T }` over `Record<string, T>`.
-- Prefer `type` over `interface` for all type declarations.
-- Prefer `const fn = () => {}` over `function fn() {}` for top-level and local functions.
-- Use regular method syntax in classes (`foo() {}` not `foo = () => {}`).
