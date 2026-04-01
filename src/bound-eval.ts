@@ -104,22 +104,13 @@ export class BoundEval<Caps = unknown> {
 	}
 }
 
-// ── Backwards compatibility ──────────────────────────────────────
-
-/**
- * @deprecated Use `new BoundEval(bindings)` or `BoundEval.from(bindings)` instead.
- * Kept for existing provider code that uses the function-style API.
- */
+/** Function-style API used by providers. */
 export type BoundEvalFn<Caps> = <T>(
 	fn: (caps: Caps) => T,
 	capture?: { [key: string]: unknown },
 ) => unknown
 
-/**
- * @deprecated Use `new BoundEval(bindings)` instead.
- * Creates a BoundEval and returns its .run() method as a plain function,
- * for backwards compatibility with providers that expect a function.
- */
+/** Create a BoundEval and return its .run() as a plain function. */
 export const makeBoundEval = <Caps>(capBindings: { [key: string]: unknown }): BoundEvalFn<Caps> => {
 	const be = new BoundEval<Caps>(capBindings)
 	return (fn, capture) => be.run(fn, capture)
