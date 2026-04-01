@@ -22,6 +22,8 @@ else {
 		github: () => import('../providers/github/ui'),
 		config: () => import('../providers/config/ui'),
 		pi: () => import('../providers/pi/ui'),
+		linear: () => import('../providers/linear/ui'),
+		matrix: () => import('../providers/matrix/ui'),
 	}
 
 	const loader = panels[providerName]

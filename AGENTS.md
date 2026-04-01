@@ -110,10 +110,14 @@ each task with an emoji denoting status: ✅ done, ⏭️ skipped, 🚧 partial.
    - Give pi ONE custom tool: `exoeval`
    - The tool is a BoundEval closure pre-bound to the exo's caps
    - Read `.d.ts` files from `dist/types/providers/*/index.d.ts`, concat into tool description
-   - Wire up tsc in the build pipeline to emit `.d.ts` files
-   - **Requires switching pi from subprocess PTY to in-process SDK** (`createAgentSession()`
-     with `InteractiveMode` running inside the PTY). Subprocess can't receive custom tools.
-     The old pi provider on `main` did this — port the pattern.
+   - tsc --declaration in build pipeline emits `.d.ts` files
+   - Agent-worker subprocess connects back via IPC (Unix domain socket) for tool calls
+   - **OPEN**: capEval registration — the exo's BoundEval (with all caps) needs to be
+     registered on the pi session so IPC tool calls can evaluate against it. Can't pass
+     functions through exoEval. Need the loader or daemon to wire this up after exo init.
+     Possible solutions: (a) loader registers capEval automatically based on the exo's
+     cap bindings, (b) pi provider accepts a capEval via a non-exoRpc direct call,
+     (c) the exo's cap bindings are serializable and reconstructed on the pi side.
 
 2. **Inbox provider**
    - Durable message queue with ack/snooze/steer
