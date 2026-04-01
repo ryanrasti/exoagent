@@ -53,11 +53,11 @@ class PiProvider {
 		return cwd
 	}
 
-	@tool(z.string(), z.string(), z.string().optional(), z.string().optional())
+	@tool(z.string(), z.string(), z.array(z.string()).optional(), z.string().optional())
 	create(
 		client: string,
 		sessionId: string,
-		capsDts?: string,
+		capNames?: string[],
 		cwdOverride?: string,
 	): { client: string, sessionId: string, cwd: string } | Promise<{ client: string, sessionId: string, cwd: string }> {
 		const key = this.sessionKey(client, sessionId)
@@ -69,8 +69,20 @@ class PiProvider {
 		const cwd = cwdOverride ?? this.ensureCwd(client, sessionId)
 		this.ring0.mkdirSync(cwd, { recursive: true })
 
-		// If caps are provided, set up IPC for exoeval tool calls
-		if (capsDts) {
+		// If cap names are provided, load their .d.ts and set up IPC for exoeval tool calls
+		if (capNames && capNames.length > 0) {
+			const dtsDir = this.ring0.resolve(process.cwd(), 'dist/types/providers')
+			const dtsParts: string[] = []
+			for (const name of capNames) {
+				try {
+					const content = this.ring0.readFileSync(this.ring0.join(dtsDir, name, 'index.d.ts'), 'utf-8')
+					dtsParts.push(`// --- ${name} ---\n${content}`)
+				}
+				catch {
+					dtsParts.push(`// --- ${name} --- (no .d.ts found)`)
+				}
+			}
+			const capsDts = dtsParts.join('\n\n')
 			return this.createWithIpc(client, sessionId, cwd, capsDts)
 		}
 
@@ -82,7 +94,7 @@ class PiProvider {
 		sessionId: string,
 		cwd: string,
 	): { client: string, sessionId: string, cwd: string } {
-		const workerPath = this.ring0.resolve(this.ring0.dirname, 'agent-worker.ts')
+		const workerPath = this.ring0.resolve(process.cwd(), 'src/providers/pi/agent-worker.ts')
 		const ptyProcess = this.ring0.pty.spawn('npx', ['tsx', workerPath], {
 			name: 'xterm-256color',
 			cols: 120,
@@ -139,7 +151,7 @@ class PiProvider {
 
 		await new Promise<void>((resolve) => { server.listen(ipcPath, resolve) })
 
-		const workerPath = this.ring0.resolve(this.ring0.dirname, 'agent-worker.ts')
+		const workerPath = this.ring0.resolve(process.cwd(), 'src/providers/pi/agent-worker.ts')
 		const ptyProcess = this.ring0.pty.spawn('npx', ['tsx', workerPath], {
 			name: 'xterm-256color',
 			cols: 120,

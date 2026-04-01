@@ -16,9 +16,10 @@ export default {
 			pty,
 			resolve: path.resolve,
 			join: path.join,
-			dirname: path.dirname(import.meta.filename),
+
 			homedir: os.homedir,
 			mkdirSync: fs.mkdirSync,
+			readFileSync: fs.readFileSync as (path: string, encoding: 'utf-8') => string,
 			unlinkSync: fs.unlinkSync,
 			createServer: net.createServer,
 		}

@@ -341,7 +341,7 @@ export class ProviderLoader {
 		const { ModuleSource } = await import('@endo/module-source')
 
 		const compartment = new Compartment({
-			globals: { console, process: { env: process.env } },
+			globals: { console, process: { env: process.env, cwd: () => process.cwd() } },
 			resolveHook: (spec: string) => spec,
 			importHook: async (spec: string) => {
 				if (spec === 'root') {
