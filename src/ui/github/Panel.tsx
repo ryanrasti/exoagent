@@ -1,5 +1,5 @@
 import type { GitHubProviderImpl } from '../../providers/github'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { exoRpc } from '../lib/exoRpc'
 
 type GitHubCaps = {
@@ -8,6 +8,7 @@ type GitHubCaps = {
 
 export default function GitHubPanel() {
 	const [token, setToken] = useState('')
+	const [visibleToken, setVisibleToken] = useState(false)
 	const [status, setStatus] = useState<{ type: 'idle' | 'ok' | 'error', message: string }>({
 		type: 'idle',
 		message: '',
@@ -15,6 +16,14 @@ export default function GitHubPanel() {
 	const [user, setUser] = useState<{ login: string, id: number, name: string | null } | null>(
 		null,
 	)
+
+	useEffect(() => {
+		exoRpc<GitHubCaps>(({ github }) => github.getToken()).then((t) => {
+			if (typeof t === 'string') {
+				setToken(t)
+			}
+		}).catch(() => {})
+	}, [])
 
 	async function saveToken() {
 		try {
