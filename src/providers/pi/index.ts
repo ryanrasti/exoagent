@@ -89,9 +89,9 @@ class ScopedPi {
 	}
 
 	/** Deliver a message to an agent's inbox. */
-	@tool(z.string(), z.string(), z.string())
-	deliver(sessionId: string, source: string, body: string): { id: string } {
-		return this.root.deliver(this.client, sessionId, source, body)
+	@tool(z.string(), z.string(), z.string(), z.string().optional())
+	deliver(sessionId: string, source: string, body: string, dedupKey?: string): { id: number } {
+		return this.root.deliver(this.client, sessionId, source, body, dedupKey)
 	}
 }
 
@@ -116,7 +116,7 @@ class PiProvider {
 		const dbDir = this.ring0.join(this.dataDir, 'providers', 'pi')
 		this.ring0.mkdirSync(dbDir, { recursive: true })
 		const db = new (this.ring0 as any).Database(this.ring0.join(dbDir, 'inbox.db'))
-		this.inbox = new Inbox(db)
+		this.inbox = new Inbox(db, (this.ring0 as any).now)
 	}
 
 	/** Set the capEvalFactory — called by the loader after boot. */
@@ -166,13 +166,13 @@ class PiProvider {
 			}
 			// Add inbox types (built-in cap)
 			dtsParts.push(`// --- inbox (built-in) ---
-export type InboxMessage = { id: string; source: string; body: string; created_at: number }
+export type InboxMessage = { id: number; source: string; body: string; created_at: number }
 export declare class AgentInbox {
   peek(): InboxMessage | null
   pending(limit?: number): InboxMessage[]
   count(): number
-  ack(messageId: string): { ok: true }
-  snooze(messageId: string, seconds: number): { ok: true }
+  ack(messageId: number): { ok: true }
+  snooze(messageId: number, seconds: number): { ok: true }
 }`)
 			const capsDts = dtsParts.join('\n\n')
 			return this.createWithIpc(client, sessionId, cwd, capsDts, capNames, prompt)
@@ -370,9 +370,9 @@ export declare class AgentInbox {
 		return { ok: true }
 	}
 
-	deliver(client: string, sessionId: string, source: string, body: string): { id: string } {
+	deliver(client: string, sessionId: string, source: string, body: string, dedupKey?: string): { id: number } {
 		const agentKey = `${client}/${sessionId}`
-		const result = this.inbox.deliver(agentKey, source, body)
+		const result = this.inbox.deliver(agentKey, source, body, dedupKey)
 		this.steerAgent(client, sessionId)
 		return result
 	}

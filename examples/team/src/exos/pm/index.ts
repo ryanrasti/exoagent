@@ -47,7 +47,7 @@ export default async ({ exoEval }: { exoEval: BoundEval<PmCaps> }) => {
 	// Wire Matrix messages → agent inbox
 	exoEval.run(({ matrix, pi }) =>
 		matrix.onMessage((msg) => {
-			pi.deliver('main', 'matrix', `${msg.sender} in ${msg.room_id}: ${msg.body}`)
+			pi.deliver('main', 'matrix', `${msg.sender} in ${msg.room_id}: ${msg.body}`, msg.event_id)
 		}),
 	)
 	console.log('[pm] matrix → inbox wired')

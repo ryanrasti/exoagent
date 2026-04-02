@@ -26,6 +26,7 @@ export default {
 			createServer: net.createServer,
 			Database,
 			BoundEval,
+			now: () => Date.now(),
 		}
 	},
 }

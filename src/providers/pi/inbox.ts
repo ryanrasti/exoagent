@@ -19,7 +19,7 @@ import z from 'zod'
 import { tool } from '../../exoeval/tool'
 
 export type InboxMessage = {
-	id: string
+	id: number
 	source: string
 	body: string
 	created_at: number
@@ -27,12 +27,15 @@ export type InboxMessage = {
 
 export class Inbox {
 	private readonly db: InstanceType<typeof Database>
+	private readonly now: () => number
 
-	constructor(db: InstanceType<typeof Database>) {
+	constructor(db: InstanceType<typeof Database>, now: () => number) {
 		this.db = db
+		this.now = now
 		this.db.exec(`
 			CREATE TABLE IF NOT EXISTS inbox (
-				id TEXT PRIMARY KEY,
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				dedup_key TEXT,
 				agent_key TEXT NOT NULL,
 				source TEXT NOT NULL,
 				body TEXT NOT NULL,
@@ -43,19 +46,19 @@ export class Inbox {
 			)
 		`)
 		this.db.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_agent ON inbox(agent_key, acked, steered_at, snoozed_until)`)
-
-		// Migration: add steered_at if missing (pre-existing DBs)
-		try { this.db.exec(`ALTER TABLE inbox ADD COLUMN steered_at INTEGER`) }
-		catch { /* column already exists */ }
+		this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_dedup ON inbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	}
 
 	/** Deliver a message to an agent's inbox (steered_at = null → needs steering). */
-	deliver(agentKey: string, source: string, body: string): { id: string } {
-		const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-		this.db.prepare(
-			'INSERT INTO inbox (id, agent_key, source, body, created_at) VALUES (?, ?, ?, ?, ?)',
-		).run(id, agentKey, source, body, Date.now())
-		return { id }
+	deliver(agentKey: string, source: string, body: string, dedupKey?: string): { id: number } {
+		if (dedupKey) {
+			const existing = this.db.prepare('SELECT id FROM inbox WHERE dedup_key = ?').get(dedupKey) as { id: number } | undefined
+			if (existing) { return { id: existing.id } }
+		}
+		const result = this.db.prepare(
+			'INSERT INTO inbox (dedup_key, agent_key, source, body, created_at) VALUES (?, ?, ?, ?, ?)',
+		).run(dedupKey ?? null, agentKey, source, body, this.now())
+		return { id: Number(result.lastInsertRowid) }
 	}
 
 	/**
@@ -70,12 +73,12 @@ export class Inbox {
 			 WHERE agent_key = ? AND acked = 0 AND steered_at IS NULL
 			   AND (snoozed_until IS NULL OR snoozed_until <= ?)
 			 ORDER BY created_at ASC LIMIT ?`,
-		).all(agentKey, Date.now(), n) as InboxMessage[]
+		).all(agentKey, this.now(), n) as InboxMessage[]
 	}
 
 	/** Mark messages as steered (written to agent PTY). */
-	markSteered(messageIds: string[]): void {
-		const now = Date.now()
+	markSteered(messageIds: number[]): void {
+		const now = this.now()
 		const stmt = this.db.prepare('UPDATE inbox SET steered_at = ? WHERE id = ?')
 		for (const id of messageIds) {
 			stmt.run(now, id)
@@ -88,13 +91,13 @@ export class Inbox {
 			`SELECT DISTINCT agent_key FROM inbox
 			 WHERE acked = 0 AND steered_at IS NULL
 			   AND (snoozed_until IS NULL OR snoozed_until <= ?)`,
-		).all(Date.now()) as { agent_key: string }[]
+		).all(this.now()) as { agent_key: string }[]
 		return rows.map(r => r.agent_key)
 	}
 
 	/** Get the agent-facing inbox for a specific agent. */
 	agentInbox(agentKey: string): AgentInbox {
-		return new AgentInbox(this.db, agentKey)
+		return new AgentInbox(this.db, agentKey, this.now)
 	}
 }
 
@@ -102,10 +105,12 @@ export class Inbox {
 export class AgentInbox {
 	private readonly db: InstanceType<typeof Database>
 	private readonly agentKey: string
+	private readonly now: () => number
 
-	constructor(db: InstanceType<typeof Database>, agentKey: string) {
+	constructor(db: InstanceType<typeof Database>, agentKey: string, now: () => number) {
 		this.db = db
 		this.agentKey = agentKey
+		this.now = now
 	}
 
 	/** Read the oldest unacked, non-snoozed message. */
@@ -116,7 +121,7 @@ export class AgentInbox {
 			 WHERE agent_key = ? AND acked = 0
 			   AND (snoozed_until IS NULL OR snoozed_until <= ?)
 			 ORDER BY created_at ASC LIMIT 1`,
-		).get(this.agentKey, Date.now()) as InboxMessage | undefined
+		).get(this.agentKey, this.now()) as InboxMessage | undefined
 		return row ?? null
 	}
 
@@ -129,7 +134,7 @@ export class AgentInbox {
 			 WHERE agent_key = ? AND acked = 0
 			   AND (snoozed_until IS NULL OR snoozed_until <= ?)
 			 ORDER BY created_at ASC LIMIT ?`,
-		).all(this.agentKey, Date.now(), n) as InboxMessage[]
+		).all(this.agentKey, this.now(), n) as InboxMessage[]
 	}
 
 	/** Count pending messages. */
@@ -139,21 +144,21 @@ export class AgentInbox {
 			`SELECT COUNT(*) as cnt FROM inbox
 			 WHERE agent_key = ? AND acked = 0
 			   AND (snoozed_until IS NULL OR snoozed_until <= ?)`,
-		).get(this.agentKey, Date.now()) as { cnt: number }
+		).get(this.agentKey, this.now()) as { cnt: number }
 		return row.cnt
 	}
 
 	/** Mark a message as handled. */
-	@tool(z.string())
-	ack(messageId: string): { ok: true } {
+	@tool(z.number())
+	ack(messageId: number): { ok: true } {
 		this.db.prepare('UPDATE inbox SET acked = 1 WHERE id = ? AND agent_key = ?').run(messageId, this.agentKey)
 		return { ok: true }
 	}
 
 	/** Delay redelivery — clears steered_at so it gets re-steered after timer. */
-	@tool(z.string(), z.number())
-	snooze(messageId: string, seconds: number): { ok: true } {
-		const snoozedUntil = Date.now() + (seconds * 1000)
+	@tool(z.number(), z.number())
+	snooze(messageId: number, seconds: number): { ok: true } {
+		const snoozedUntil = this.now() + (seconds * 1000)
 		this.db.prepare(
 			'UPDATE inbox SET snoozed_until = ?, steered_at = NULL WHERE id = ? AND agent_key = ?',
 		).run(snoozedUntil, messageId, this.agentKey)
