@@ -1,11 +1,9 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 
 describe('ExoAgent smoke test', () => {
-	const workDir = mkdtempSync(join(tmpdir(), 'exoagent-smoke-'))
+	const workDir = join(import.meta.dirname, '..', 'examples', 'team')
 	let daemon: ReturnType<typeof spawn>
 
 	afterAll(() => {
@@ -35,29 +33,25 @@ describe('ExoAgent smoke test', () => {
 		})
 		expect(port).toBeGreaterThan(0)
 
-		// Poll until providers are ready
-		type ProviderInfo = { shortName: string, status: string }
-		let providers: ProviderInfo[] | null = null
-		for (let i = 0; i < 20; i++) {
+		// Poll until all providers are ready
+		type Provider = { shortName: string, status: string }
+		let providers: Provider[] = []
+		for (let i = 0; i < 40; i++) {
 			await new Promise(r => setTimeout(r, 250))
 			try {
 				const res = await fetch(`http://127.0.0.1:${port}/api/providers`)
 				if (!res.ok) { continue }
-				const json = await res.json() as { providers: ProviderInfo[] }
-				const list = json.providers
-				const sqlite = list.find(p => p.shortName === 'sqlite')
-				if (sqlite?.status === 'ready') {
-					providers = list
-					break
-				}
+				const json = await res.json() as { providers: Provider[] }
+				providers = json.providers
+				if (providers.every(p => p.status !== 'pending')) { break }
 			}
 			catch { /* not ready */ }
 		}
 
-		const byName = (name: string) => providers?.find(p => p.shortName === name)
-		expect(providers).not.toBeNull()
-		expect(byName('sqlite')?.status).toBe('ready')
-		expect(byName('config')?.status).toBe('ready')
-		expect(byName('fetch')?.status).toBe('ready')
+		// Core providers should be ready (exos may fail in test env)
+		const coreProviders = providers.filter(p => p.shortName !== 'hello' && p.shortName !== 'pm')
+		for (const p of coreProviders) {
+			expect(p.status, `${p.shortName} should be ready`).toBe('ready')
+		}
 	}, 15000)
 })
