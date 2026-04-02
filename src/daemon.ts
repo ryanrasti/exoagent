@@ -39,7 +39,8 @@ export class ExoAgent {
 		lockdown({ errorTaming: 'unsafe', overrideTaming: 'severe', consoleTaming: 'unsafe' })
 
 		const port = options.port ?? (Number(process.env.PORT) || 3000)
-		const workDir = options.workDir ?? process.env.EXOAGENT_DIR ?? process.cwd()
+		const workDir = options.workDir ?? process.env.EXOAGENT_DIR
+		if (!workDir) { throw new Error('workDir or EXOAGENT_DIR must be set') }
 		const dev = options.dev ?? process.env.NODE_ENV !== 'production'
 		const dataDir = resolve(workDir, '.exoagent')
 		const providerDir = resolve(import.meta.dirname, 'providers')
