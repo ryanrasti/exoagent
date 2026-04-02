@@ -115,46 +115,78 @@ Instructions: keep going until all planned tasks are completed. If a task has
 unanticipated complexity, note it and skip. After done, put a summary after
 each task with an emoji denoting status: ✅ done, ⏭️ skipped, 🚧 partial.
 
-1. 🚧 **Exoeval as pi's single custom tool**
-   - ✅ tsc --declaration in build pipeline emits `.d.ts` files
-   - ✅ Pi reads `.d.ts` and passes to agent-worker as exoeval tool description
-   - ✅ Agent-worker subprocess connects back via IPC (Unix domain socket)
-   - ✅ IPC protocol: newline-delimited JSON with id/code/result/error
-   - **OPEN**: capEval registration — the exo's BoundEval needs to be registered
-     on the pi session so IPC tool calls can evaluate against it. Can't pass
-     functions through exoEval. Solutions: (a) loader wires it up after exo init,
-     (b) pi provider accepts capEval via direct call, (c) reconstruct on pi side.
+1. ✅ **Exoeval as pi's single custom tool**
+   - Pi reads `.d.ts` and passes to agent-worker as exoeval tool description
+   - Agent-worker subprocess connects back via IPC (Unix domain socket)
+   - IPC protocol: newline-delimited JSON with id/code/result/error
+   - capEval wired up via capEvalFactory set on pi by the loader after boot
+   - Built-in tools (read/write/bash) disabled when caps provided
 
 2. ✅ **Inbox provider** (8 tests)
    - Durable SQLite-backed message queue with deliver/peek/ack/snooze/pending/count
-   - Scoped per client (exo), agent key is `scope/agent`
-   - All queue semantics tested including snooze, ordering, multi-agent isolation
 
-3. ✅ **Linear provider** (5 tests)
-   - GraphQL API: getViewer, listIssues, getIssue, createIssue, addComment, updateIssueState, listTeams, listStates
-   - Config schema for API key with link to Linear settings
-   - UI panel with connection status
-   - Tests with mock fetch responses, error handling
+3. ❌ **Linear provider** — removed
+   - GitHub Issues suffices for project tracking, one less integration to maintain
 
-4. ✅ **Matrix provider** (6 tests)
-   - REST API: sendMessage, getMessages, whoami, listJoinedRooms
-   - Config schema for homeserver URL, access token, room ID with setup instructions
-   - UI panel with connection status
-   - Tests with mock fetch responses, error handling
+4. ✅ **Matrix provider** — E2EE rewrite
+   - matrix-js-sdk with Rust crypto (Megolm/Olm) via ring0
+   - Space-based workspace model (listRooms, createRoom, sendMessage, getMessages)
+   - Room key persistence to `.exoagent/matrix/room-keys.json`
+   - Proper logging: Tracing(LoggerLevel.Error) + loglevel silent + child logger patching
+   - Config defaults (homeserver_url defaults to https://matrix.org)
 
-5. ✅ **PM exo**
-   - Creates pi agent with github + linear + matrix cap types
-   - Lives in `examples/team/src/exos/pm/`
-   - Event subscriptions stubbed (TODO: wire when providers support onX callbacks)
+5. ✅ **GitHub provider** — full REST API
+   - 12 typed methods on shared `api()` helper: testConnection, getUser,
+     listRepos, getRepo, listIssues, getIssue, createIssue, updateIssue,
+     listComments, addComment, listPRs, getPR
 
-6. ⏭️ **VM provider** (skipped)
-   - Requires Krun runtime + Nix derivation for rootfs — significant native dependency
-   - Can't unit test without actual VM runtime installed
-   - Deferred until engineer agent use case is active
+6. ✅ **PM exo** — working agent with identity
+   - Creates pi agent with github + matrix caps
+   - System prompt: "You are Exo PM..."
+   - Agent responds in character, can call GitHub and Matrix APIs
 
-7. ⏭️ **Engineer exo** (skipped)
-   - Depends on VM provider (#6)
-   - Deferred until VM provider is implemented
+7. ✅ **BoundEval class** — composable capability container
+   - `.run()`, `.map()` (attenuate), `.union()` (combine), `.capNames`
+   - Replaces old `makeBoundEval` function API entirely
+
+8. ✅ **exoeval CLI** — `npx tsx src/cli/exoeval.ts --caps matrix,github '<expr>'`
+   - Boots only requested providers + transitive deps
+   - One-shot and REPL modes
+
+9. ✅ **ExoAgent class** + daemon smoke test
+   - `start()/stop()/port/getProviders()` — clean lifecycle
+   - Smoke test spawns daemon, verifies all core providers ready (~3s)
+
+10. ✅ **Security hardening**
+    - `harden()` ring0 results before passing to compartments
+    - `import type` for BoundEval in providers (prevents acorn bundling → SES rejection)
+    - `void` operator support in exoeval (esbuild compiles `undefined` to `void 0`)
+
+11. ⏭️ **VM provider** — deferred until engineer agent use case
+
+12. ⏭️ **Engineer exo** — depends on VM provider
+
+## Next Steps
+
+1. **Inbox as pi built-in** — every agent gets inbox automatically
+   - Pi provider embeds inbox, exposes `pi.deliver(client, sessionId, msg)` send side
+   - Agent gets `inbox` cap via `.union()` (peek/ack/snooze/pending)
+   - Delete standalone inbox dep from exo manifests
+
+2. **Matrix → inbox event loop** — real-time message delivery
+   - `matrix.onMessage(roomId, callback)` using SDK sync events
+   - Last-seen event ID tracking for restart catch-up
+   - PM exo wires: `matrix.onMessage → pi.deliver`
+
+3. **Inbox → steer** — wake agent when messages arrive
+   - Pi watches inbox, writes to PTY stdin when new messages arrive
+   - Messages inlined in steer (first 5, max 1k chars)
+   - Heartbeat re-steers if messages remain unacked
+
+4. **BoundEval.map() for real attenuation** — exos attenuate caps before passing to agents
+   - PM exo: `exoEval.map({ github: g => ({ listIssues, createIssue, ... }) })`
+   - Agent can't call methods the exo didn't grant
+   - Wire `.d.ts` generation from attenuated types
 
 ## Implementation Notes
 
