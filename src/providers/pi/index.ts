@@ -269,7 +269,7 @@ export declare class AgentInbox {
 		}
 
 		// Build capEval: provider caps from factory + inbox as built-in
-		const agentKey = `${client}/${sessionId}`
+		const agentKey = `${client}:${sessionId}`
 		const agentInbox = this.inbox.agentInbox(agentKey)
 
 		if (this.capEvalFactory) {
@@ -371,7 +371,7 @@ export declare class AgentInbox {
 	}
 
 	deliver(client: string, sessionId: string, source: string, body: string, dedupKey?: string): { id: number } {
-		const agentKey = `${client}/${sessionId}`
+		const agentKey = `${client}:${sessionId}`
 		const result = this.inbox.deliver(agentKey, source, body, dedupKey)
 		this.steerAgent(client, sessionId)
 		return result
@@ -379,7 +379,7 @@ export declare class AgentInbox {
 
 	/** Format pending messages and write to agent's PTY as user input. */
 	private steerAgent(client: string, sessionId: string): void {
-		const agentKey = `${client}/${sessionId}`
+		const agentKey = `${client}:${sessionId}`
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
 		if (!session?.alive) { return }
 
@@ -408,7 +408,9 @@ export declare class AgentInbox {
 	/** Steer all agents with undelivered messages. Called on boot. */
 	steerPending(): void {
 		for (const agentKey of this.inbox.agentsNeedingSteering()) {
-			const [client, sessionId] = agentKey.split('/')
+			const sep = agentKey.lastIndexOf(':')
+			const client = agentKey.slice(0, sep)
+			const sessionId = agentKey.slice(sep + 1)
 			if (client && sessionId) {
 				this.steerAgent(client, sessionId)
 			}
