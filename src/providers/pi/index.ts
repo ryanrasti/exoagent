@@ -12,6 +12,7 @@
  */
 
 import type { Socket } from 'node:net'
+import type { BoundEval } from '../../bound-eval'
 import type { ProviderInit } from '../../provider'
 import type manifest from './manifest'
 import z from 'zod'
@@ -21,7 +22,11 @@ import { Inbox } from './inbox'
 type Ring0 = Awaited<ReturnType<typeof manifest.ring0>>
 type Pty = ReturnType<Ring0['pty']['spawn']>
 
-type PiCaps = Record<string, never>
+type Log = { trace: (msg: string) => void, debug: (msg: string) => void, info: (msg: string) => void, warn: (msg: string) => void, error: (msg: string) => void }
+
+type PiCaps = {
+	log: Log
+}
 
 type PtySession = {
 	client: string
@@ -100,6 +105,7 @@ class ScopedPi {
 class PiProvider {
 	private readonly ring0: Ring0
 	private readonly dataDir: string
+	private readonly exoEval: BoundEval<PiCaps>
 	private readonly sessions = new Map<string, PtySession>()
 	private readonly inbox: Inbox
 	private capEvalFactory?: (capNames: string[], client: string) => {
@@ -111,12 +117,17 @@ class PiProvider {
 	constructor(init: ProviderInit<PiCaps>) {
 		this.ring0 = init.ring0 as Ring0
 		this.dataDir = init.config.dataDir
+		this.exoEval = init.exoEval
 
 		// Create inbox database
 		const dbDir = this.ring0.join(this.dataDir, 'providers', 'pi')
 		this.ring0.mkdirSync(dbDir, { recursive: true })
 		const db = new (this.ring0 as any).Database(this.ring0.join(dbDir, 'inbox.db'))
 		this.inbox = new Inbox(db, (this.ring0 as any).now)
+	}
+
+	private log(level: 'info' | 'debug' | 'warn' | 'error', msg: string): void {
+		this.exoEval.run(({ log }: any) => log[level](msg), { level, msg })
 	}
 
 	/** Set the capEvalFactory — called by the loader after boot. */
@@ -372,6 +383,7 @@ export declare class AgentInbox {
 
 	deliver(client: string, sessionId: string, source: string, body: string, dedupKey?: string): { id: number } {
 		const agentKey = `${client}:${sessionId}`
+		this.log('info', `deliver to ${agentKey} from ${source}: ${body.slice(0, 100)}`)
 		const result = this.inbox.deliver(agentKey, source, body, dedupKey)
 		this.steerAgent(client, sessionId)
 		return result
@@ -381,10 +393,14 @@ export declare class AgentInbox {
 	private steerAgent(client: string, sessionId: string): void {
 		const agentKey = `${client}:${sessionId}`
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
-		if (!session?.alive) { return }
+		if (!session?.alive) {
+			this.log('debug', `steer skipped: session ${agentKey} not alive`)
+			return
+		}
 
 		const messages = this.inbox.needsSteer(agentKey, 5)
 		if (messages.length === 0) { return }
+		this.log('info', `steering ${agentKey} with ${messages.length} message(s)`)
 
 		// Format steer message
 		const lines = ['New messages in your inbox:', '']

@@ -5,8 +5,10 @@
  * via ~/.pi/agent/auth.json and ANTHROPIC_API_KEY env var.
  */
 
+import type { LogProviderImpl } from '../log'
+
 export default {
-	ring0: async () => {
+	'ring0': async () => {
 		const pty = await import('node-pty')
 		const path = await import('node:path')
 		const os = await import('node:os')
@@ -29,4 +31,5 @@ export default {
 			now: () => Date.now(),
 		}
 	},
+	'@exoagent/providers/log': (log: LogProviderImpl) => log as unknown,
 }
