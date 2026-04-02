@@ -40,7 +40,7 @@ export default async ({ exoEval }: { exoEval: BoundEval<PmCaps> }) => {
 
 	const result = await exoEval.run(
 		({ pi }) => pi.create(opts),
-		{ opts: { client: 'pm', sessionId: 'main', capNames: ['github', 'matrix'], prompt: SYSTEM_PROMPT } },
+		{ opts: { sessionId: 'main', capNames: ['github', 'matrix'], prompt: SYSTEM_PROMPT } },
 	)
 	console.log('[pm] agent ready:', result)
 }

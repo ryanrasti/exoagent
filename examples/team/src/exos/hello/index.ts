@@ -14,7 +14,7 @@ export default async ({ exoEval }: { exoEval: BoundEval<HelloCaps> }) => {
 	console.log('[hello] creating agent session with github caps...')
 	const result = await exoEval.run(
 		({ pi }) => pi.create(opts),
-		{ opts: { client: 'hello', sessionId: 'default', capNames: ['github'] } },
+		{ opts: { sessionId: 'default', capNames: ['github'] } },
 	)
 	console.log('[hello] agent ready:', result)
 }

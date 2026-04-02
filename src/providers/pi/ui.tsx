@@ -1,4 +1,4 @@
-import type { PiProviderImpl } from './index'
+// UI receives PiUiProvider (not ScopedPi) — has client param on all methods
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { Terminal } from '@xterm/xterm'
@@ -7,8 +7,15 @@ import { exoRpc } from '../../ui/lib/exoRpc'
 import { ExoWs } from '../../ui/lib/exoWs'
 import '@xterm/xterm/css/xterm.css'
 
+type PiUi = {
+	list: () => { client: string, sessionId: string, cwd: string, alive: boolean }[]
+	input: (client: string, sessionId: string, data: string) => { ok: true }
+	read: (client: string, sessionId: string) => Promise<string>
+	resize: (client: string, sessionId: string, cols: number, rows: number) => { ok: true }
+}
+
 type PiCaps = {
-	pi: PiProviderImpl
+	pi: PiUi
 }
 
 type SessionInfo = {

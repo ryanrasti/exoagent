@@ -5,6 +5,9 @@
  * Each PTY runs agent-worker.ts which connects back via IPC for exoeval tool calls.
  * UI attaches via long-poll exoRpc (read/input).
  *
+ * clientProvider(name) returns a ScopedPi that can only see/create
+ * agents under that client's namespace.
+ *
  * ring0 provides: pty, resolve, join, homedir, mkdirSync, createServer (net)
  */
 
@@ -31,7 +34,61 @@ type PtySession = {
 	capEval?: (code: string) => unknown
 }
 
-export type PiProviderImpl = InstanceType<typeof PiProvider>
+// ── ScopedPi — what exos receive ──────────────────────────────
+
+export type PiProviderImpl = InstanceType<typeof ScopedPi>
+
+class ScopedPi {
+	private readonly root: PiProvider
+	private readonly client: string
+
+	constructor(root: PiProvider, client: string) {
+		this.root = root
+		this.client = client
+	}
+
+	@tool(z.object({
+		sessionId: z.string(),
+		capNames: z.array(z.string()).optional(),
+		cwd: z.string().optional(),
+		prompt: z.string().optional(),
+	}))
+	create(opts: {
+		sessionId: string
+		capNames?: string[]
+		cwd?: string
+		prompt?: string
+	}): { sessionId: string, cwd: string } | Promise<{ sessionId: string, cwd: string }> {
+		return this.root.createSession(this.client, opts)
+	}
+
+	@tool()
+	list(): { sessionId: string, cwd: string, alive: boolean }[] {
+		return this.root.listSessions(this.client)
+	}
+
+	@tool(z.string(), z.string())
+	input(sessionId: string, data: string): { ok: true } {
+		return this.root.input(this.client, sessionId, data)
+	}
+
+	@tool(z.string())
+	read(sessionId: string): Promise<string> {
+		return this.root.read(this.client, sessionId)
+	}
+
+	@tool(z.string(), z.number(), z.number())
+	resize(sessionId: string, cols: number, rows: number): { ok: true } {
+		return this.root.resize(this.client, sessionId, cols, rows)
+	}
+
+	@tool(z.string())
+	destroy(sessionId: string): { ok: true } {
+		return this.root.destroy(this.client, sessionId)
+	}
+}
+
+// ── PiProvider — root singleton ───────────────────────────────
 
 class PiProvider {
 	private readonly ring0: Ring0
@@ -44,6 +101,11 @@ class PiProvider {
 		this.dataDir = init.config.dataDir
 	}
 
+	/** Set the capEvalFactory — called by the loader after boot. */
+	setCapEvalFactory(factory: (capNames: string[], client: string) => (code: string) => unknown): void {
+		this.capEvalFactory = factory
+	}
+
 	private sessionKey(client: string, sessionId: string): string {
 		return `${client}:${sessionId}`
 	}
@@ -54,25 +116,15 @@ class PiProvider {
 		return cwd
 	}
 
-	@tool(z.object({
-		client: z.string(),
-		sessionId: z.string(),
-		capNames: z.array(z.string()).optional(),
-		cwd: z.string().optional(),
-		prompt: z.string().optional(),
-	}))
-	create(opts: {
-		client: string
-		sessionId: string
-		capNames?: string[]
-		cwd?: string
-		prompt?: string
-	}): { client: string, sessionId: string, cwd: string } | Promise<{ client: string, sessionId: string, cwd: string }> {
-		const { client, sessionId, capNames, prompt } = opts
+	createSession(
+		client: string,
+		opts: { sessionId: string, capNames?: string[], cwd?: string, prompt?: string },
+	): { sessionId: string, cwd: string } | Promise<{ sessionId: string, cwd: string }> {
+		const { sessionId, capNames, prompt } = opts
 		const key = this.sessionKey(client, sessionId)
 		const existing = this.sessions.get(key)
 		if (existing) {
-			return { client, sessionId, cwd: existing.cwd }
+			return { sessionId, cwd: existing.cwd }
 		}
 
 		const cwd = opts.cwd ?? this.ensureCwd(client, sessionId)
@@ -102,7 +154,7 @@ class PiProvider {
 		sessionId: string,
 		cwd: string,
 		prompt?: string,
-	): { client: string, sessionId: string, cwd: string } {
+	): { sessionId: string, cwd: string } {
 		const workerPath = this.ring0.resolve(process.cwd(), 'src/providers/pi/agent-worker.ts')
 		const env: { [key: string]: string | undefined } = { ...process.env, TERM: 'xterm-256color', EXOAGENT_CWD: cwd }
 		if (prompt) { env.EXOAGENT_SYSTEM_PROMPT = prompt }
@@ -114,7 +166,7 @@ class PiProvider {
 			env,
 		})
 		this.registerSession(client, sessionId, cwd, ptyProcess)
-		return { client, sessionId, cwd }
+		return { sessionId, cwd }
 	}
 
 	private async createWithIpc(
@@ -124,13 +176,11 @@ class PiProvider {
 		capsDts: string,
 		capNames: string[],
 		prompt?: string,
-	): Promise<{ client: string, sessionId: string, cwd: string }> {
+	): Promise<{ sessionId: string, cwd: string }> {
 		const ipcPath = this.ring0.join(this.dataDir, 'providers', 'pi', `${client}-${sessionId}.sock`)
-		// Clean up stale socket
 		try { this.ring0.unlinkSync(ipcPath) }
 		catch { /* doesn't exist */ }
 
-		// Create IPC server — handles exoeval tool calls from the agent worker
 		const server = this.ring0.createServer((conn: Socket) => {
 			// eslint-disable-next-line node/prefer-global/buffer
 			conn.on('data', (buf: Buffer) => {
@@ -138,7 +188,6 @@ class PiProvider {
 					if (!line.trim()) { continue }
 					try {
 						const msg = JSON.parse(line) as { id: number, code: string }
-						// The exo that called create() must have set up a capEval on this session
 						const session = this.sessions.get(this.sessionKey(client, sessionId))
 						if (session?.capEval) {
 							const doEval = async () => {
@@ -187,12 +236,11 @@ class PiProvider {
 			catch { /* ignore */ }
 		}
 
-		// Wire up capEval so IPC tool calls can evaluate against provider caps
 		if (this.capEvalFactory) {
 			session.capEval = this.capEvalFactory(capNames, client)
 		}
 
-		return { client, sessionId, cwd }
+		return { sessionId, cwd }
 	}
 
 	private registerSession(client: string, sessionId: string, cwd: string, ptyProcess: Pty): PtySession {
@@ -229,46 +277,29 @@ class PiProvider {
 		return session
 	}
 
-	/** Set the capEvalFactory — called by the loader after boot. */
-	setCapEvalFactory(factory: (capNames: string[], client: string) => (code: string) => unknown): void {
-		this.capEvalFactory = factory
-	}
+	// ── Methods used by ScopedPi ─────────────────────────────
 
-	@tool()
-	list(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {
-		const result: { client: string, sessionId: string, cwd: string, alive: boolean }[] = []
+	listSessions(client: string): { sessionId: string, cwd: string, alive: boolean }[] {
+		const result: { sessionId: string, cwd: string, alive: boolean }[] = []
 		for (const session of this.sessions.values()) {
-			result.push({
-				client: session.client,
-				sessionId: session.sessionId,
-				cwd: session.cwd,
-				alive: session.alive,
-			})
+			if (session.client === client) {
+				result.push({ sessionId: session.sessionId, cwd: session.cwd, alive: session.alive })
+			}
 		}
 		return result
 	}
 
-	@tool(z.string(), z.string(), z.string())
 	input(client: string, sessionId: string, data: string): { ok: true } {
-		const key = this.sessionKey(client, sessionId)
-		const session = this.sessions.get(key)
-		if (!session) {
-			throw new Error(`no session for ${key}`)
-		}
-		if (!session.alive) {
-			throw new Error(`session ${key} has exited`)
-		}
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
+		if (!session.alive) { throw new Error(`session ${client}:${sessionId} has exited`) }
 		session.ptyProcess.write(data)
 		return { ok: true }
 	}
 
-	@tool(z.string(), z.string())
 	read(client: string, sessionId: string): Promise<string> {
-		const key = this.sessionKey(client, sessionId)
-		const session = this.sessions.get(key)
-		if (!session) {
-			throw new Error(`no session for ${key}`)
-		}
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
 
 		if (session.outputBuffer.length > 0) {
 			const data = session.outputBuffer.join('')
@@ -276,49 +307,74 @@ class PiProvider {
 			return Promise.resolve(data)
 		}
 
-		if (!session.alive) {
-			return Promise.resolve('')
-		}
+		if (!session.alive) { return Promise.resolve('') }
 
-		return new Promise<string>((resolve) => {
-			session.waiters.push(resolve)
-		})
+		return new Promise<string>((resolve) => { session.waiters.push(resolve) })
+	}
+
+	resize(client: string, sessionId: string, cols: number, rows: number): { ok: true } {
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
+		if (session.alive) { session.ptyProcess.resize(cols, rows) }
+		return { ok: true }
+	}
+
+	destroy(client: string, sessionId: string): { ok: true } {
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
+		if (session.alive) { session.ptyProcess.kill() }
+		session.ipcCleanup?.()
+		this.sessions.delete(this.sessionKey(client, sessionId))
+		return { ok: true }
+	}
+
+	listAllSessions(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {
+		const result: { client: string, sessionId: string, cwd: string, alive: boolean }[] = []
+		for (const session of this.sessions.values()) {
+			result.push({ client: session.client, sessionId: session.sessionId, cwd: session.cwd, alive: session.alive })
+		}
+		return result
+	}
+
+	// ── Provider interface ───────────────────────────────────
+
+	clientProvider(clientName: string): ScopedPi {
+		return new ScopedPi(this, clientName)
+	}
+
+	/** UI gets root access to list all sessions across clients. */
+	uiProvider(_clients: string[]): PiUiProvider {
+		return new PiUiProvider(this)
+	}
+}
+
+// ── UI provider — lists all sessions ─────────────────────────
+
+class PiUiProvider {
+	private readonly root: PiProvider
+
+	constructor(root: PiProvider) {
+		this.root = root
+	}
+
+	@tool()
+	list(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {
+		return this.root.listAllSessions()
+	}
+
+	@tool(z.string(), z.string(), z.string())
+	input(client: string, sessionId: string, data: string): { ok: true } {
+		return this.root.input(client, sessionId, data)
+	}
+
+	@tool(z.string(), z.string())
+	read(client: string, sessionId: string): Promise<string> {
+		return this.root.read(client, sessionId)
 	}
 
 	@tool(z.string(), z.string(), z.number(), z.number())
 	resize(client: string, sessionId: string, cols: number, rows: number): { ok: true } {
-		const key = this.sessionKey(client, sessionId)
-		const session = this.sessions.get(key)
-		if (!session) {
-			throw new Error(`no session for ${key}`)
-		}
-		if (session.alive) {
-			session.ptyProcess.resize(cols, rows)
-		}
-		return { ok: true }
-	}
-
-	@tool(z.string(), z.string())
-	destroy(client: string, sessionId: string): { ok: true } {
-		const key = this.sessionKey(client, sessionId)
-		const session = this.sessions.get(key)
-		if (!session) {
-			throw new Error(`no session for ${key}`)
-		}
-		if (session.alive) {
-			session.ptyProcess.kill()
-		}
-		session.ipcCleanup?.()
-		this.sessions.delete(key)
-		return { ok: true }
-	}
-
-	clientProvider(_clientName: string): PiProviderImpl {
-		return this
-	}
-
-	uiProvider(_clients: string[]) {
-		return this
+		return this.root.resize(client, sessionId, cols, rows)
 	}
 }
 
