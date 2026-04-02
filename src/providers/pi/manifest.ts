@@ -17,15 +17,15 @@ export default {
 		const Database = (await import('better-sqlite3')).default as new (path: string) => unknown
 		const { BoundEval } = await import('exoagent/bound-eval')
 		return {
-			pty: { spawn: pty.spawn },
-			resolve: path.resolve,
-			join: path.join,
+			pty: { spawn: (cmd: string, args: string[], opts: any) => pty.spawn(cmd, args, opts) },
+			resolve: (...args: any[]) => path.resolve(...args),
+			join: (...args: any[]) => path.join(...args),
 
-			homedir: os.homedir,
-			mkdirSync: fs.mkdirSync,
-			readFileSync: fs.readFileSync as (path: string, encoding: 'utf-8') => string,
-			unlinkSync: fs.unlinkSync,
-			createServer: net.createServer,
+			homedir: () => os.homedir(),
+			mkdirSync: (...args: any[]) => (fs.mkdirSync as any)(...args),
+			readFileSync: (p: string, enc: string) => fs.readFileSync(p, enc as BufferEncoding) as unknown as string,
+			unlinkSync: (p: string) => fs.unlinkSync(p),
+			createServer: (...args: any[]) => net.createServer(...args),
 			Database,
 			BoundEval,
 			now: () => Date.now(),
