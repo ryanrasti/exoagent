@@ -25,10 +25,10 @@ type SessionInfo = {
 	alive: boolean
 }
 
-/** Parse hash route: #/pi/{client}/{sessionId} */
+/** Parse hash route: #/pi/{client}/{sessionId} — client is URI-encoded */
 const parseRoute = (): { client: string, sessionId: string } | null => {
 	const match = window.location.hash.match(/^#\/pi\/([^/]+)\/(.+)$/)
-	return match ? { client: match[1], sessionId: match[2] } : null
+	return match ? { client: decodeURIComponent(match[1]), sessionId: decodeURIComponent(match[2]) } : null
 }
 
 export default function PiPanel() {
@@ -96,7 +96,7 @@ export default function PiPanel() {
 						key={`${s.client}:${s.sessionId}`}
 						type="button"
 						onClick={() => {
-							window.location.hash = `#/pi/${s.client}/${s.sessionId}`
+							window.location.hash = `#/pi/${encodeURIComponent(s.client)}/${encodeURIComponent(s.sessionId)}`
 							setRoute({ client: s.client, sessionId: s.sessionId })
 						}}
 						className="bg-neutral-800 border border-neutral-700 rounded-lg p-4 text-left hover:border-neutral-600 transition-colors cursor-pointer w-full"
