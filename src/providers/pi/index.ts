@@ -122,7 +122,7 @@ class PiProvider {
 		// Create inbox database
 		const dbDir = this.ring0.join(this.dataDir, 'providers', 'pi')
 		this.ring0.mkdirSync(dbDir, { recursive: true })
-		const db = new (this.ring0 as any).Database(this.ring0.join(dbDir, 'inbox.db'))
+		const db = (this.ring0 as any).Database(this.ring0.join(dbDir, 'inbox.db'))
 		this.inbox = new Inbox(db, (this.ring0 as any).now)
 	}
 

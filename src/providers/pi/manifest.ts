@@ -14,7 +14,8 @@ export default {
 		const os = await import('node:os')
 		const fs = await import('node:fs')
 		const net = await import('node:net')
-		const Database = (await import('better-sqlite3')).default as new (path: string) => unknown
+		const RawDatabase = (await import('better-sqlite3')).default
+		const Database = (path: string) => new RawDatabase(path) as unknown
 		const { BoundEval } = await import('exoagent/bound-eval')
 		return {
 			pty: { spawn: (cmd: string, args: string[], opts: any) => pty.spawn(cmd, args, opts) },
