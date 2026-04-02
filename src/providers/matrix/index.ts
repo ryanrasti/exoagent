@@ -32,6 +32,8 @@ type MatrixRing0 = {
 	writeFileSync: (path: string, data: string) => void
 	mkdirSync: (path: string, opts?: { recursive?: boolean }) => void
 	resolve: (...paths: string[]) => string
+	restoreCryptoStore: (path: string) => Promise<void>
+	saveCryptoStore: (path: string) => Promise<void>
 }
 
 type MatrixMessage = {
@@ -113,17 +115,19 @@ class MatrixProvider {
 		return this.client!
 	}
 
-	private get keysPath(): string {
+	private get cryptoStorePath(): string {
 		const dir = this.ring0.resolve(this.dataDir, 'matrix')
 		this.ring0.mkdirSync(dir, { recursive: true })
-		return this.ring0.resolve(dir, 'room-keys.json')
+		return this.ring0.resolve(dir, 'crypto-store.json')
 	}
 
 	private async initClient(): Promise<void> {
 		const { homeserverUrl, accessToken } = this.getConfig()
 		const { createClient, MemoryStore } = this.ring0
 
-		// Get device ID from server (use a temp SDK client to avoid globalThis.fetch in SES)
+		// Restore crypto store before init (device keys, Olm/Megolm sessions)
+		await this.ring0.restoreCryptoStore(this.cryptoStorePath)
+
 		const tempClient = createClient({ baseUrl: homeserverUrl, accessToken })
 		const whoami = await tempClient.whoami() as { user_id: string, device_id: string }
 
@@ -139,25 +143,14 @@ class MatrixProvider {
 
 		await this.client.initRustCrypto({ cryptoDatabasePrefix: storePrefix })
 
-		// Restore room keys from previous session
-		try {
-			const keysJson = this.ring0.readFileSync(this.keysPath, 'utf-8')
-			const crypto = this.client.getCrypto()
-			if (crypto) {
-				await crypto.importRoomKeysAsJson(keysJson)
-			}
-		}
-		catch { /* no saved keys yet */ }
-
 		await this.client.startClient({ initialSyncLimit: 1 })
 
-		// Wait for first sync
 		await new Promise<void>((resolve) => {
 			this.client!.once('sync' as any, () => resolve())
 		})
 
-		// Export room keys after initial sync
-		await this.exportKeys()
+		// Persist crypto store after initial sync
+		await this.ring0.saveCryptoStore(this.cryptoStorePath)
 
 		this.botUserId = whoami.user_id
 
@@ -254,19 +247,8 @@ class MatrixProvider {
 		const client = await this.ensureClient()
 		const res = await client.sendTextMessage(roomId, body)
 		// Persist room keys after sending (new Megolm session may have been created)
-		await this.exportKeys()
+		await this.ring0.saveCryptoStore(this.cryptoStorePath)
 		return { event_id: res.event_id }
-	}
-
-	private async exportKeys(): Promise<void> {
-		try {
-			const crypto = this.client?.getCrypto()
-			if (crypto) {
-				const keys = await crypto.exportRoomKeysAsJson()
-				this.ring0.writeFileSync(this.keysPath, keys)
-			}
-		}
-		catch { /* best effort */ }
 	}
 
 	/** Get recent messages from a room (decrypted). */

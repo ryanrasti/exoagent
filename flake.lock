@@ -18,6 +18,22 @@
         "type": "github"
       }
     },
+    "matrix-sdk-crypto-nodejs-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1773152159,
+        "narHash": "sha256-vM9+Zw1QdEljUJ6Fe8SXF5XHHmizxRjWK3B0+RD8hgw=",
+        "owner": "matrix-org",
+        "repo": "matrix-rust-sdk-crypto-nodejs",
+        "rev": "9199cc3acf6ed777826b5965df15d1a455392cc3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "matrix-org",
+        "repo": "matrix-rust-sdk-crypto-nodejs",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1766651565,
@@ -37,6 +53,7 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "matrix-sdk-crypto-nodejs-src": "matrix-sdk-crypto-nodejs-src",
         "nixpkgs": "nixpkgs"
       }
     },

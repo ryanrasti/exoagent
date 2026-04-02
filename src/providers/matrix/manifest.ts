@@ -3,13 +3,14 @@ import type { ScopedConfig } from '../config'
 /**
  * Matrix provider manifest.
  *
- * ring0: matrix-js-sdk client factory + fs (needs fetch, WebAssembly, IndexedDB).
+ * ring0: matrix-js-sdk client factory + fs + crypto store persistence.
  * config: for storing homeserver URL, access token, space ID.
  */
 export default {
 	'ring0': async () => {
 		// @ts-expect-error — fake-indexeddb/auto types not resolved via package.json exports
 		await import('fake-indexeddb/auto')
+		const { indexedDB } = await import('fake-indexeddb')
 
 		// Silence Rust crypto tracing (DEBUG/INFO spam)
 		const { Tracing, LoggerLevel } = await import('@matrix-org/matrix-sdk-crypto-wasm')
@@ -17,13 +18,9 @@ export default {
 		tracing.turnOn()
 
 		const sdk = await import('matrix-js-sdk')
-		// Silence the global SDK logger (used by room.js, scheduler.js, event.js etc.)
-		// The SDK uses loglevel: the root logger + child loggers (MatrixRTCSession etc.)
-		// Setting the root level to SILENT prevents child loggers from inheriting DEBUG.
 		const { logger } = await import('matrix-js-sdk/lib/logger')
 		// @ts-expect-error — setLevel exists on the loglevel-backed logger
 		logger.setLevel('silent')
-		// Also silence any future child loggers by patching getChild
 		const origGetChild = logger.getChild as (...args: unknown[]) => unknown
 		logger.getChild = (namespace: string) => {
 			const child = origGetChild.call(logger, namespace) as any
@@ -31,12 +28,70 @@ export default {
 			return child
 		}
 
-		// Silent logger for the client instance (FetchHttpApi, sync, etc.)
 		const noop = () => {}
 		const silentLogger = { getChild: () => silentLogger, trace: noop, debug: noop, info: noop, warn: noop, error: noop, log: noop } as any
 
 		const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
 		const { resolve } = await import('node:path')
+
+		// Dump all fake-indexeddb databases to JSON (readonly tx = consistent snapshot)
+		const dumpIDB = async (): Promise<string> => {
+			const dbs = await indexedDB.databases()
+			const dumps: any[] = []
+			for (const { name, version } of dbs) {
+				if (!name || !version) { continue }
+				const db: IDBDatabase = await new Promise((r, j) => {
+					const req = indexedDB.open(name, version)
+					req.onsuccess = () => r(req.result)
+					req.onerror = () => j(req.error)
+				})
+				const storeNames = Array.from(db.objectStoreNames)
+				const dump: any = { name, version, storeNames, stores: {} }
+				if (storeNames.length > 0) {
+					const tx = db.transaction(storeNames, 'readonly')
+					for (const sn of storeNames) {
+						const records: any[] = []
+						await new Promise<void>((r) => {
+							const cur = tx.objectStore(sn).openCursor()
+							cur.onsuccess = () => {
+								const c = cur.result
+								if (c) { records.push({ key: c.key, value: c.value }); c.continue() }
+								else { r() }
+							}
+						})
+						dump.stores[sn] = records
+					}
+				}
+				db.close()
+				dumps.push(dump)
+			}
+			return JSON.stringify(dumps)
+		}
+
+		// Restore fake-indexeddb state from JSON dump
+		const restoreIDB = async (json: string): Promise<void> => {
+			for (const dump of JSON.parse(json)) {
+				const db: IDBDatabase = await new Promise((r, j) => {
+					const req = indexedDB.open(dump.name, dump.version)
+					req.onupgradeneeded = () => {
+						for (const sn of dump.storeNames) {
+							if (!req.result.objectStoreNames.contains(sn)) { req.result.createObjectStore(sn) }
+						}
+					}
+					req.onsuccess = () => r(req.result)
+					req.onerror = () => j(req.error)
+				})
+				const storeNames = Object.keys(dump.stores).filter(s => db.objectStoreNames.contains(s))
+				if (storeNames.length > 0) {
+					const tx = db.transaction(storeNames, 'readwrite')
+					for (const sn of storeNames) {
+						for (const { key, value } of dump.stores[sn]) { tx.objectStore(sn).put(value, key) }
+					}
+					await new Promise<void>((r, j) => { tx.oncomplete = () => r(); tx.onerror = () => j(tx.error) })
+				}
+				db.close()
+			}
+		}
 
 		return {
 			createClient: (opts: any) => sdk.createClient({ ...opts, logger: silentLogger }),
@@ -45,6 +100,14 @@ export default {
 			writeFileSync,
 			mkdirSync,
 			resolve,
+			restoreCryptoStore: async (path: string) => {
+				try { await restoreIDB(readFileSync(path, 'utf-8') as string) }
+				catch { /* no saved state */ }
+			},
+			saveCryptoStore: async (path: string) => {
+				try { writeFileSync(path, await dumpIDB()) }
+				catch { /* best effort */ }
+			},
 		}
 	},
 	'@exoagent/providers/config': (config: ScopedConfig) => config,
