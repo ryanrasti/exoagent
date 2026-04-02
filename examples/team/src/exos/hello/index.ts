@@ -13,8 +13,8 @@ type HelloCaps = {
 export default async ({ exoEval }: { exoEval: BoundEval<HelloCaps> }) => {
 	console.log('[hello] creating agent session with github caps...')
 	const result = await exoEval.run(
-		({ pi }) => pi.create('hello', 'default', capNames),
-		{ capNames: ['github'] },
+		({ pi }) => pi.create(opts),
+		{ opts: { client: 'hello', sessionId: 'default', capNames: ['github'] } },
 	)
 	console.log('[hello] agent ready:', result)
 }

@@ -54,24 +54,30 @@ class PiProvider {
 		return cwd
 	}
 
-	@tool(z.string(), z.string(), z.array(z.string()).optional(), z.string().optional(), z.string().optional())
-	create(
-		client: string,
-		sessionId: string,
-		capNames?: string[],
-		cwdOverride?: string,
-		prompt?: string,
-	): { client: string, sessionId: string, cwd: string } | Promise<{ client: string, sessionId: string, cwd: string }> {
+	@tool(z.object({
+		client: z.string(),
+		sessionId: z.string(),
+		capNames: z.array(z.string()).optional(),
+		cwd: z.string().optional(),
+		prompt: z.string().optional(),
+	}))
+	create(opts: {
+		client: string
+		sessionId: string
+		capNames?: string[]
+		cwd?: string
+		prompt?: string
+	}): { client: string, sessionId: string, cwd: string } | Promise<{ client: string, sessionId: string, cwd: string }> {
+		const { client, sessionId, capNames, prompt } = opts
 		const key = this.sessionKey(client, sessionId)
 		const existing = this.sessions.get(key)
 		if (existing) {
 			return { client, sessionId, cwd: existing.cwd }
 		}
 
-		const cwd = cwdOverride ?? this.ensureCwd(client, sessionId)
+		const cwd = opts.cwd ?? this.ensureCwd(client, sessionId)
 		this.ring0.mkdirSync(cwd, { recursive: true })
 
-		// If cap names are provided, load their .d.ts and set up IPC for exoeval tool calls
 		if (capNames && capNames.length > 0) {
 			const dtsDir = this.ring0.resolve(process.cwd(), 'dist/types/providers')
 			const dtsParts: string[] = []
