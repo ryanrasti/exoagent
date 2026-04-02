@@ -83,9 +83,11 @@ const main = async () => {
 	// Built-in tools will be re-enabled when agents run inside scoped VMs.
 	const tools = customTools.length > 0 ? [] : undefined
 
-	const resourceLoader = systemPrompt
-		? new DefaultResourceLoader({ cwd, systemPrompt })
-		: undefined
+	let resourceLoader: InstanceType<typeof DefaultResourceLoader> | undefined
+	if (systemPrompt) {
+		resourceLoader = new DefaultResourceLoader({ cwd, systemPrompt })
+		await resourceLoader.reload()
+	}
 
 	const { session } = await createAgentSession({ cwd, customTools, tools, resourceLoader })
 	const interactive = new InteractiveMode(session)
