@@ -6,7 +6,7 @@
  * - Provider UIs served from a generic HTML template (no per-provider boilerplate)
  */
 
-import type { IncomingMessage } from 'node:http'
+import type { IncomingMessage, Server } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { LoadedProvider } from './loader'
 import { readFileSync } from 'node:fs'
@@ -207,7 +207,7 @@ export const createApp = (
 export const startServer = (
 	providers: { [name: string]: LoadedProvider },
 	options: ServerOptions = {},
-) => {
+): Server => {
 	const { port = 3000 } = options
 	const app = createApp(providers, options)
 
@@ -262,5 +262,5 @@ export const startServer = (
 		})
 	})
 
-	return app
+	return server as unknown as Server
 }

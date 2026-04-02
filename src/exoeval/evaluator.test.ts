@@ -54,6 +54,11 @@ describe('exoEval', () => {
 		expect(exoEval('typeof "x"')).toBe('string')
 	})
 
+	it('unaryExpression (void)', () => {
+		expect(exoEval('void 0')).toBe(undefined)
+		expect(exoEval('void "anything"')).toBe(undefined)
+	})
+
 	it('arrowFunctionExpression', () => {
 		const fn = exoEval('() => 5') as () => number
 		expect(fn()).toBe(5)
@@ -801,7 +806,6 @@ describe('exoEval', () => {
 	describe('Dangerous expressions are blocked', () => {
 		const blocked = [
 			['delete operator', 'const o = {a:1}; delete o.a'],
-			['void operator', 'void 0'],
 			['this expression', 'this'],
 			['assignment expression', 'const o = {a:1}; o.a = 2'],
 			['update expression', 'const o = {a:1}; o.a++'],

@@ -315,6 +315,8 @@ export class Evaluator<Expr> {
 				return this.ctx.of(-operand)
 			case 'typeof':
 				return this.ctx.of(typeof operand)
+			case 'void':
+				return this.ctx.of(undefined)
 			default:
 				this.inv.parse(false, `unsupported unary operator: ${node.operator}`, node)
 		}
