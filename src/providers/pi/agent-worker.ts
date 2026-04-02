@@ -84,7 +84,7 @@ const main = async () => {
 	const tools = customTools.length > 0 ? [] : undefined
 
 	const resourceLoader = systemPrompt
-		? new DefaultResourceLoader({ cwd, systemPromptOverride: () => systemPrompt })
+		? new DefaultResourceLoader({ cwd, systemPrompt })
 		: undefined
 
 	const { session } = await createAgentSession({ cwd, customTools, tools, resourceLoader })
