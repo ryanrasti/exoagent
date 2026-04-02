@@ -155,3 +155,18 @@ describe('BoundEval class', () => {
 		expect(full.run(({ github }: any) => github.createIssue('o', 't'))).toEqual({ number: 42 })
 	})
 })
+
+describe('BoundEval with function arguments', () => {
+	it('can pass function from .run() to @tool method', () => {
+		class EventSource {
+			callbacks: Array<(x: number) => number> = []
+			@tool(z.any())
+			onEvent(cb: (x: number) => number) { this.callbacks.push(cb) }
+		}
+		const es = new EventSource()
+		const be = new BoundEval<{ es: EventSource }>({ es })
+		be.run(({ es }) => es.onEvent(x => x + 1))
+		expect(es.callbacks.length).toBe(1)
+		expect(es.callbacks[0](5)).toBe(6)
+	})
+})

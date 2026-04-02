@@ -405,7 +405,7 @@ export declare class AgentInbox {
 		// Format steer message
 		const lines = ['New messages in your inbox:', '']
 		for (const msg of messages) {
-			const ago = Math.round((Date.now() - msg.created_at) / 1000)
+			const ago = Math.round(((this.ring0 as any).now() - msg.created_at) / 1000)
 			const agoStr = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`
 			const bodyPreview = msg.body.length > 200 ? `${msg.body.slice(0, 200)}...` : msg.body
 			lines.push(`  [${msg.id}] [${msg.source}] (${agoStr}):`)

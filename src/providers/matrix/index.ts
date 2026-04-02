@@ -159,48 +159,46 @@ class MatrixProvider {
 		// Export room keys after initial sync
 		await this.exportKeys()
 
-		// Listen for new messages in workspace rooms
 		this.botUserId = whoami.user_id
-		const { spaceId } = this.getConfig()
-		let spaceRoomIds: Set<string> | null = null
 
-		this.client.on('Room.timeline' as any, (event: any) => {
+		// Get joined rooms for filtering
+		const joinedRooms = this.client.getRooms().map(r => r.roomId)
+		console.error(`[matrix] sync complete, joined ${joinedRooms.length} rooms`)
+
+		// Listen on both Event.decrypted (for E2EE rooms) and Room.timeline (for unencrypted)
+		const handleMessage = (event: any) => {
 			if (this.messageCallbacks.length === 0) { return }
 			if (event.getType() !== 'm.room.message') { return }
-			if (event.getContent()?.msgtype !== 'm.text') { return }
-			if (event.getSender() === this.botUserId) { return } // ignore own messages
+			const content = event.getContent()
+			if (event.getSender() === this.botUserId) { return }
 
-			const roomId = event.getRoomId()
-
-			// Lazy-load space room IDs (cache after first check)
-			if (!spaceRoomIds) {
-				try {
-					const hierarchy = this.client!.getRoomHierarchy(spaceId, 50) as any
-					// getRoomHierarchy might be async — handle both
-					if (hierarchy?.then) {
-						hierarchy.then((data: any) => {
-							spaceRoomIds = new Set(data.rooms?.map((r: any) => r.room_id) ?? [])
-						})
-						return // skip this event, will catch next ones
-					}
-					spaceRoomIds = new Set(hierarchy.rooms?.map((r: any) => r.room_id) ?? [])
-				}
-				catch { return }
-			}
-
-			if (!spaceRoomIds.has(roomId)) { return } // not in workspace
+			// Accept m.text or m.bad.encrypted (decryption failed — still deliver)
+			const body = content?.msgtype === 'm.text'
+				? (content.body ?? '')
+				: content?.msgtype === 'm.bad.encrypted'
+					? '[unable to decrypt]'
+					: null
+			if (body === null) { return }
 
 			const msg = {
 				event_id: event.getId(),
-				room_id: roomId,
+				room_id: event.getRoomId(),
 				sender: event.getSender(),
-				body: event.getContent().body ?? '',
+				body,
 			}
 
+			console.error(`[matrix] message from ${msg.sender}: ${msg.body.slice(0, 50)}`)
 			for (const cb of this.messageCallbacks) {
 				try { cb(msg) }
-				catch { /* don't let callback errors kill the listener */ }
+				catch (e) { console.error(`[matrix] callback error:`, e) }
 			}
+		}
+		this.client.on('Event.decrypted' as any, handleMessage)
+		this.client.on('Room.timeline' as any, (event: any, _room: any, toStartOfTimeline: boolean) => {
+			if (toStartOfTimeline) { return }
+			// Only handle unencrypted messages here (encrypted ones go through Event.decrypted)
+			if (event.isEncrypted()) { return }
+			handleMessage(event)
 		})
 	}
 
@@ -308,9 +306,10 @@ class MatrixProvider {
 	 */
 	@tool(z.any())
 	onMessage(callback: MessageCallback): void {
+		console.error('[matrix] onMessage called, this exists:', !!this, 'callbacks:', this?.messageCallbacks?.length)
 		this.messageCallbacks.push(callback)
 		// Ensure the client is running so sync events fire
-		this.ensureClient().catch(() => {})
+		this.ensureClient().catch((e) => { console.error('[matrix] ensureClient failed:', e) })
 	}
 
 	clientProvider(_clientName: string): MatrixProviderImpl {

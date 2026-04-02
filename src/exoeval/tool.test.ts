@@ -269,3 +269,19 @@ describe('@tool type checking', () => {
 		}
 	})
 })
+
+describe('tool with function argument', () => {
+	it('can pass arrow function from exoeval to @tool method', () => {
+		class EventSource {
+			callbacks: Array<(x: number) => number> = []
+			@tool(z.any())
+			onEvent(cb: (x: number) => number) {
+				this.callbacks.push(cb)
+			}
+		}
+		const es = new EventSource()
+		exoEval('es.onEvent((x) => x + 1)', { es })
+		expect(es.callbacks.length).toBe(1)
+		expect(es.callbacks[0](5)).toBe(6)
+	})
+})
