@@ -1,21 +1,8 @@
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
-import { get } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-
-const httpGetJson = (url: string): Promise<unknown> =>
-	new Promise((resolve, reject) => {
-		get(url, (res) => {
-			let body = ''
-			res.on('data', d => body += d)
-			res.on('end', () => {
-				if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return }
-				resolve(JSON.parse(body))
-			})
-		}).on('error', reject)
-	})
 
 describe('ExoAgent smoke test', () => {
 	const workDir = mkdtempSync(join(tmpdir(), 'exoagent-smoke-'))
@@ -54,7 +41,9 @@ describe('ExoAgent smoke test', () => {
 		for (let i = 0; i < 20; i++) {
 			await new Promise(r => setTimeout(r, 250))
 			try {
-				const json = await httpGetJson(`http://127.0.0.1:${port}/api/providers`) as { providers: ProviderInfo[] }
+				const res = await fetch(`http://127.0.0.1:${port}/api/providers`)
+				if (!res.ok) { continue }
+				const json = await res.json() as { providers: ProviderInfo[] }
 				const list = json.providers
 				const sqlite = list.find(p => p.shortName === 'sqlite')
 				if (sqlite?.status === 'ready') {
