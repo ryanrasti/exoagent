@@ -12,6 +12,8 @@ export default {
 		const os = await import('node:os')
 		const fs = await import('node:fs')
 		const net = await import('node:net')
+		const Database = (await import('better-sqlite3')).default as new (path: string) => unknown
+		const { BoundEval } = await import('exoagent/bound-eval')
 		return {
 			pty: { spawn: pty.spawn },
 			resolve: path.resolve,
@@ -22,6 +24,8 @@ export default {
 			readFileSync: fs.readFileSync as (path: string, encoding: 'utf-8') => string,
 			unlinkSync: fs.unlinkSync,
 			createServer: net.createServer,
+			Database,
+			BoundEval,
 		}
 	},
 }

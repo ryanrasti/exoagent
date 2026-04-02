@@ -16,6 +16,7 @@ import type { ProviderInit } from '../../provider'
 import type manifest from './manifest'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
+import { Inbox } from './inbox'
 
 type Ring0 = Awaited<ReturnType<typeof manifest.ring0>>
 type Pty = ReturnType<Ring0['pty']['spawn']>
@@ -86,6 +87,12 @@ class ScopedPi {
 	destroy(sessionId: string): { ok: true } {
 		return this.root.destroy(this.client, sessionId)
 	}
+
+	/** Deliver a message to an agent's inbox. */
+	@tool(z.string(), z.string(), z.string())
+	deliver(sessionId: string, source: string, body: string): { id: string } {
+		return this.root.deliver(this.client, sessionId, source, body)
+	}
 }
 
 // ── PiProvider — root singleton ───────────────────────────────
@@ -94,15 +101,30 @@ class PiProvider {
 	private readonly ring0: Ring0
 	private readonly dataDir: string
 	private readonly sessions = new Map<string, PtySession>()
-	private capEvalFactory?: (capNames: string[], client: string) => (code: string) => unknown
+	private readonly inbox: Inbox
+	private capEvalFactory?: (capNames: string[], client: string) => {
+		boundEval: { union: (other: any) => any, run: (fn: any, capture?: any) => unknown }
+		RealFunction: FunctionConstructor
+		BoundEvalFrom: (bindings: { [key: string]: unknown }) => any
+	}
 
 	constructor(init: ProviderInit<PiCaps>) {
 		this.ring0 = init.ring0 as Ring0
 		this.dataDir = init.config.dataDir
+
+		// Create inbox database
+		const dbDir = this.ring0.join(this.dataDir, 'providers', 'pi')
+		this.ring0.mkdirSync(dbDir, { recursive: true })
+		const db = new (this.ring0 as any).Database(this.ring0.join(dbDir, 'inbox.db'))
+		this.inbox = new Inbox(db)
 	}
 
 	/** Set the capEvalFactory — called by the loader after boot. */
-	setCapEvalFactory(factory: (capNames: string[], client: string) => (code: string) => unknown): void {
+	setCapEvalFactory(factory: (capNames: string[], client: string) => {
+		boundEval: { union: (other: any) => any, run: (fn: any, capture?: any) => unknown }
+		RealFunction: FunctionConstructor
+		BoundEvalFrom: (bindings: { [key: string]: unknown }) => any
+	}): void {
 		this.capEvalFactory = factory
 	}
 
@@ -142,6 +164,16 @@ class PiProvider {
 					dtsParts.push(`// --- ${name} --- (no .d.ts found)`)
 				}
 			}
+			// Add inbox types (built-in cap)
+			dtsParts.push(`// --- inbox (built-in) ---
+export type InboxMessage = { id: string; source: string; body: string; created_at: number }
+export declare class AgentInbox {
+  peek(): InboxMessage | null
+  pending(limit?: number): InboxMessage[]
+  count(): number
+  ack(messageId: string): { ok: true }
+  snooze(messageId: string, seconds: number): { ok: true }
+}`)
 			const capsDts = dtsParts.join('\n\n')
 			return this.createWithIpc(client, sessionId, cwd, capsDts, capNames, prompt)
 		}
@@ -236,8 +268,15 @@ class PiProvider {
 			catch { /* ignore */ }
 		}
 
+		// Build capEval: provider caps from factory + inbox as built-in
+		const agentKey = `${client}/${sessionId}`
+		const agentInbox = this.inbox.agentInbox(agentKey)
+
 		if (this.capEvalFactory) {
-			session.capEval = this.capEvalFactory(capNames, client)
+			const { boundEval: providerBe, RealFunction, BoundEvalFrom } = this.capEvalFactory(capNames, client)
+			const inboxBe = BoundEvalFrom({ inbox: agentInbox })
+			const fullBe = providerBe.union(inboxBe)
+			session.capEval = (code: string) => fullBe.run(new RealFunction(`return ${code}`)() as any)
 		}
 
 		return { sessionId, cwd }
@@ -326,6 +365,11 @@ class PiProvider {
 		session.ipcCleanup?.()
 		this.sessions.delete(this.sessionKey(client, sessionId))
 		return { ok: true }
+	}
+
+	deliver(client: string, sessionId: string, source: string, body: string): { id: string } {
+		const agentKey = `${client}/${sessionId}`
+		return this.inbox.deliver(agentKey, source, body)
 	}
 
 	listAllSessions(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {

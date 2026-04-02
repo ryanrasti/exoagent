@@ -186,7 +186,7 @@ export class ProviderLoader {
 				// (must happen before exos boot, which are later in DAG order)
 				if (def.name === '@exoagent/providers/pi') {
 					const piInst = instance as {
-						setCapEvalFactory?: (factory: (capNames: string[], client: string) => (code: string) => unknown) => void
+						setCapEvalFactory?: (factory: (capNames: string[], client: string) => { boundEval: BoundEval, RealFunction: FunctionConstructor, BoundEvalFrom: (bindings: { [key: string]: unknown }) => BoundEval }) => void
 					}
 					if (piInst.setCapEvalFactory) {
 						piInst.setCapEvalFactory((capNames: string[], client: string) => {
@@ -198,8 +198,7 @@ export class ProviderLoader {
 									bindings[name] = inst.clientProvider(client)
 								}
 							}
-							const boundEval = new BoundEval(bindings)
-							return (code: string) => boundEval.run(new RealFunction(`return ${code}`)() as any)
+							return { boundEval: new BoundEval(bindings), RealFunction, BoundEvalFrom: (b: { [key: string]: unknown }) => new BoundEval(b) }
 						})
 					}
 				}

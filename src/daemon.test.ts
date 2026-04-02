@@ -51,7 +51,7 @@ describe('ExoAgent smoke test', () => {
 		// Core providers should be ready (exos may fail in test env)
 		const coreProviders = providers.filter(p => p.shortName !== 'hello' && p.shortName !== 'pm')
 		for (const p of coreProviders) {
-			expect(p.status, `${p.shortName} should be ready`).toBe('ready')
+			expect(p.status, `${p.shortName} should be ready: ${(p as any).error || ''}`).toBe('ready')
 		}
 	}, 15000)
 })

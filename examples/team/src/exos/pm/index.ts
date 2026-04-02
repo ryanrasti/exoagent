@@ -11,12 +11,10 @@
  */
 
 import type { BoundEval } from 'exoagent/bound-eval'
-import type { InboxProviderImpl } from 'exoagent/providers/inbox'
 import type { PiProviderImpl } from 'exoagent/providers/pi'
 
 type PmCaps = {
 	pi: PiProviderImpl
-	inbox: InboxProviderImpl
 }
 
 const SYSTEM_PROMPT = `You are Exo PM, the project manager for the ExoAgent project.
