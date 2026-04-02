@@ -43,6 +43,10 @@ export class Inbox {
 			)
 		`)
 		this.db.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_agent ON inbox(agent_key, acked, steered_at, snoozed_until)`)
+
+		// Migration: add steered_at if missing (pre-existing DBs)
+		try { this.db.exec(`ALTER TABLE inbox ADD COLUMN steered_at INTEGER`) }
+		catch { /* column already exists */ }
 	}
 
 	/** Deliver a message to an agent's inbox (steered_at = null → needs steering). */
