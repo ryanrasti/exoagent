@@ -182,7 +182,7 @@ export class ProviderLoader {
 				p.bootMs = Math.round(performance.now() - start)
 				console.log(`  ✓ ${def.name} (${p.bootMs}ms)`)
 
-				// Wire up pi's capEvalFactory as soon as pi loads
+				// Wire up pi's capEvalFactory and steerPending as soon as pi loads
 				// (must happen before exos boot, which are later in DAG order)
 				if (def.name === '@exoagent/providers/pi') {
 					const piInst = instance as {

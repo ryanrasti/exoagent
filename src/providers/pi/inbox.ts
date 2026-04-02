@@ -1,12 +1,17 @@
 /**
  * Inbox — durable message queue for pi agents.
  *
- * Backed by SQLite directly (not via exoEval). Each agent has its own
- * queue keyed by `client/sessionId`.
+ * Backed by SQLite. Each agent has its own queue keyed by `client/sessionId`.
+ *
+ * Message lifecycle:
+ *   new       → steered_at IS NULL, not yet written to agent PTY
+ *   steered   → steered_at set, waiting for agent to ack
+ *   acked     → done
+ *   snoozed   → snoozed_until set, steered_at cleared → becomes "new" after timer
  *
  * Two interfaces:
- * - AgentInbox: the receive side (peek/ack/snooze/pending) — given to the agent as a cap
- * - deliver(): the send side — called by pi.deliver() or event source callbacks
+ * - Inbox: the send/admin side (deliver, needsSteer, markSteered)
+ * - AgentInbox: the receive side (peek/ack/snooze/pending) — given to agent as a cap
  */
 
 import type Database from 'better-sqlite3'
@@ -33,13 +38,14 @@ export class Inbox {
 				body TEXT NOT NULL,
 				created_at INTEGER NOT NULL,
 				acked INTEGER NOT NULL DEFAULT 0,
+				steered_at INTEGER,
 				snoozed_until INTEGER
 			)
 		`)
-		this.db.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_agent ON inbox(agent_key, acked, snoozed_until)`)
+		this.db.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_agent ON inbox(agent_key, acked, steered_at, snoozed_until)`)
 	}
 
-	/** Deliver a message to an agent's inbox. */
+	/** Deliver a message to an agent's inbox (steered_at = null → needs steering). */
 	deliver(agentKey: string, source: string, body: string): { id: string } {
 		const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 		this.db.prepare(
@@ -48,17 +54,43 @@ export class Inbox {
 		return { id }
 	}
 
+	/**
+	 * Get messages that need steering for an agent:
+	 * - Not acked, not yet steered (steered_at IS NULL)
+	 * - Or snoozed and timer expired (snoozed_until <= now, steered_at cleared)
+	 */
+	needsSteer(agentKey: string, limit?: number): InboxMessage[] {
+		const n = limit ?? 5
+		return this.db.prepare(
+			`SELECT id, source, body, created_at FROM inbox
+			 WHERE agent_key = ? AND acked = 0 AND steered_at IS NULL
+			   AND (snoozed_until IS NULL OR snoozed_until <= ?)
+			 ORDER BY created_at ASC LIMIT ?`,
+		).all(agentKey, Date.now(), n) as InboxMessage[]
+	}
+
+	/** Mark messages as steered (written to agent PTY). */
+	markSteered(messageIds: string[]): void {
+		const now = Date.now()
+		const stmt = this.db.prepare('UPDATE inbox SET steered_at = ? WHERE id = ?')
+		for (const id of messageIds) {
+			stmt.run(now, id)
+		}
+	}
+
+	/** Get all agent keys that have unsteered messages. */
+	agentsNeedingSteering(): string[] {
+		const rows = this.db.prepare(
+			`SELECT DISTINCT agent_key FROM inbox
+			 WHERE acked = 0 AND steered_at IS NULL
+			   AND (snoozed_until IS NULL OR snoozed_until <= ?)`,
+		).all(Date.now()) as { agent_key: string }[]
+		return rows.map(r => r.agent_key)
+	}
+
 	/** Get the agent-facing inbox for a specific agent. */
 	agentInbox(agentKey: string): AgentInbox {
 		return new AgentInbox(this.db, agentKey)
-	}
-
-	/** Count pending messages for an agent. */
-	countPending(agentKey: string): number {
-		const row = this.db.prepare(
-			'SELECT COUNT(*) as cnt FROM inbox WHERE agent_key = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?)',
-		).get(agentKey, Date.now()) as { cnt: number }
-		return row.cnt
 	}
 }
 
@@ -76,7 +108,10 @@ export class AgentInbox {
 	@tool()
 	peek(): InboxMessage | null {
 		const row = this.db.prepare(
-			'SELECT id, source, body, created_at FROM inbox WHERE agent_key = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?) ORDER BY created_at ASC LIMIT 1',
+			`SELECT id, source, body, created_at FROM inbox
+			 WHERE agent_key = ? AND acked = 0
+			   AND (snoozed_until IS NULL OR snoozed_until <= ?)
+			 ORDER BY created_at ASC LIMIT 1`,
 		).get(this.agentKey, Date.now()) as InboxMessage | undefined
 		return row ?? null
 	}
@@ -86,7 +121,10 @@ export class AgentInbox {
 	pending(limit?: number): InboxMessage[] {
 		const n = limit ?? 10
 		return this.db.prepare(
-			'SELECT id, source, body, created_at FROM inbox WHERE agent_key = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?) ORDER BY created_at ASC LIMIT ?',
+			`SELECT id, source, body, created_at FROM inbox
+			 WHERE agent_key = ? AND acked = 0
+			   AND (snoozed_until IS NULL OR snoozed_until <= ?)
+			 ORDER BY created_at ASC LIMIT ?`,
 		).all(this.agentKey, Date.now(), n) as InboxMessage[]
 	}
 
@@ -94,7 +132,9 @@ export class AgentInbox {
 	@tool()
 	count(): number {
 		const row = this.db.prepare(
-			'SELECT COUNT(*) as cnt FROM inbox WHERE agent_key = ? AND acked = 0 AND (snoozed_until IS NULL OR snoozed_until <= ?)',
+			`SELECT COUNT(*) as cnt FROM inbox
+			 WHERE agent_key = ? AND acked = 0
+			   AND (snoozed_until IS NULL OR snoozed_until <= ?)`,
 		).get(this.agentKey, Date.now()) as { cnt: number }
 		return row.cnt
 	}
@@ -106,11 +146,13 @@ export class AgentInbox {
 		return { ok: true }
 	}
 
-	/** Delay redelivery of a message. */
+	/** Delay redelivery — clears steered_at so it gets re-steered after timer. */
 	@tool(z.string(), z.number())
 	snooze(messageId: string, seconds: number): { ok: true } {
 		const snoozedUntil = Date.now() + (seconds * 1000)
-		this.db.prepare('UPDATE inbox SET snoozed_until = ? WHERE id = ? AND agent_key = ?').run(snoozedUntil, messageId, this.agentKey)
+		this.db.prepare(
+			'UPDATE inbox SET snoozed_until = ?, steered_at = NULL WHERE id = ? AND agent_key = ?',
+		).run(snoozedUntil, messageId, this.agentKey)
 		return { ok: true }
 	}
 }

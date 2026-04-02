@@ -15,6 +15,12 @@ Before committing or after a milestone, run `npm run check` (build + typecheck +
 - Prefer `const fn = () => {}` over `function fn() {}` for top-level and local functions.
 - Use regular method syntax in classes (`foo() {}` not `foo = () => {}`).
 
+## Architecture Rules
+
+- **Loader is generic.** No provider-specific code in the loader. If a provider
+  needs post-boot hooks, it handles them internally (e.g., pi steers pending
+  inbox messages when a session is created, not via a loader callback).
+
 ## Open Design Questions
 
 1. **Module namespacing vs UI routing.** Modules are namespaced by origin

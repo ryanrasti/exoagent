@@ -279,6 +279,9 @@ export declare class AgentInbox {
 			session.capEval = (code: string) => fullBe.run(new RealFunction(`return ${code}`)() as any)
 		}
 
+		// Steer agent with any pending inbox messages from previous runs
+		this.steerAgent(client, sessionId)
+
 		return { sessionId, cwd }
 	}
 
@@ -369,7 +372,47 @@ export declare class AgentInbox {
 
 	deliver(client: string, sessionId: string, source: string, body: string): { id: string } {
 		const agentKey = `${client}/${sessionId}`
-		return this.inbox.deliver(agentKey, source, body)
+		const result = this.inbox.deliver(agentKey, source, body)
+		this.steerAgent(client, sessionId)
+		return result
+	}
+
+	/** Format pending messages and write to agent's PTY as user input. */
+	private steerAgent(client: string, sessionId: string): void {
+		const agentKey = `${client}/${sessionId}`
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session?.alive) { return }
+
+		const messages = this.inbox.needsSteer(agentKey, 5)
+		if (messages.length === 0) { return }
+
+		// Format steer message
+		const lines = ['New messages in your inbox:', '']
+		for (const msg of messages) {
+			const ago = Math.round((Date.now() - msg.created_at) / 1000)
+			const agoStr = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`
+			const bodyPreview = msg.body.length > 200 ? `${msg.body.slice(0, 200)}...` : msg.body
+			lines.push(`  [${msg.id}] [${msg.source}] (${agoStr}):`)
+			lines.push(`  ${bodyPreview}`)
+			lines.push('')
+		}
+		lines.push('Use inbox.ack(id) when done with each message.')
+
+		// Write to PTY as user input
+		session.ptyProcess.write(`${lines.join('\n')}\n`)
+
+		// Mark as steered
+		this.inbox.markSteered(messages.map(m => m.id))
+	}
+
+	/** Steer all agents with undelivered messages. Called on boot. */
+	steerPending(): void {
+		for (const agentKey of this.inbox.agentsNeedingSteering()) {
+			const [client, sessionId] = agentKey.split('/')
+			if (client && sessionId) {
+				this.steerAgent(client, sessionId)
+			}
+		}
 	}
 
 	listAllSessions(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {
