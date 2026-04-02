@@ -242,10 +242,12 @@ Heartbeat re-steers if messages remain unacked.
 
 - **SES / exoeval / ring0 integration** — audit exactly how these 3 interact
   and the right mechanics (e.g., `harden`) for passing caps. Currently ring0
-  results are hardened before passing to compartments, but need to verify:
-  prototype chain isolation, whether compartment globals vs function args
-  differ in taming, and that exoeval's AST-walking sandbox doesn't leak
-  authority through cap object prototypes.
+  results are NOT hardened (stateful objects like pino loggers, matrix SDK
+  clients, SQLite connections break when frozen). Security boundary is the
+  compartment itself, not harden. Need to verify: prototype chain isolation,
+  whether compartment globals vs function args differ in taming, and that
+  exoeval's AST-walking sandbox doesn't leak authority through cap object
+  prototypes.
 
 ## Deferred
 

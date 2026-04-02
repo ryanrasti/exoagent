@@ -122,7 +122,10 @@ export class ProviderLoader {
 				// Resolve ring0 if needed
 				if (def.parsed.ring0Source) {
 					const fn = new RealFunction(`return (${def.parsed.ring0Source})()`) as () => Promise<unknown>
-					def.parsed.ring0Result = harden(await fn())
+					// ring0 results are NOT hardened — they contain stateful objects
+					// (pino loggers, matrix SDK clients, SQLite connections) that
+					// break when frozen. Security boundary is the compartment, not harden.
+					def.parsed.ring0Result = await fn()
 				}
 
 				// Check that all deps are ready
@@ -219,7 +222,7 @@ export class ProviderLoader {
 		for (const def of defs) {
 			if (def.parsed.ring0Source) {
 				const fn = new RealFunction(`return (${def.parsed.ring0Source})()`) as () => Promise<unknown>
-				def.parsed.ring0Result = harden(await fn())
+				def.parsed.ring0Result = await fn()
 			}
 		}
 

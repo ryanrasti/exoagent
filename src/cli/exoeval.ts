@@ -89,7 +89,7 @@ const main = async () => {
 	for (const def of sorted) {
 		if (def.parsed.ring0Source) {
 			const fn = new RealFunction(`return (${def.parsed.ring0Source})()`) as () => Promise<unknown>
-			def.parsed.ring0Result = harden(await fn())
+			def.parsed.ring0Result = await fn()
 		}
 	}
 
