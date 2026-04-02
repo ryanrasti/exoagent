@@ -46,13 +46,21 @@ export default {
 					req.onerror = () => j(req.error)
 				})
 				const storeNames = Array.from(db.objectStoreNames)
-				const dump: any = { name, version, storeNames, stores: {} }
+				const dump: any = { name, version, storeNames, stores: {}, storeConfigs: {} }
 				if (storeNames.length > 0) {
 					const tx = db.transaction(storeNames, 'readonly')
 					for (const sn of storeNames) {
+						const store = tx.objectStore(sn)
+						// Capture store config (keyPath, autoIncrement, indexes)
+						const indexes: any[] = []
+						for (const idxName of Array.from(store.indexNames)) {
+							const idx = store.index(idxName)
+							indexes.push({ name: idx.name, keyPath: idx.keyPath, unique: idx.unique, multiEntry: idx.multiEntry })
+						}
+						dump.storeConfigs[sn] = { keyPath: store.keyPath, autoIncrement: store.autoIncrement, indexes }
 						const records: any[] = []
 						await new Promise<void>((r) => {
-							const cur = tx.objectStore(sn).openCursor()
+							const cur = store.openCursor()
 							cur.onsuccess = () => {
 								const c = cur.result
 								if (c) { records.push({ key: c.key, value: c.value }); c.continue() }
@@ -69,13 +77,25 @@ export default {
 		}
 
 		// Restore fake-indexeddb state from JSON dump
+		// Restore: open DB at version 1 to trigger onupgradeneeded and create
+		// all stores. The WASM module will later open at its expected version
+		// and run migrations, but the data will already be there.
 		const restoreIDB = async (json: string): Promise<void> => {
 			for (const dump of JSON.parse(json)) {
 				const db: IDBDatabase = await new Promise((r, j) => {
 					const req = indexedDB.open(dump.name, dump.version)
 					req.onupgradeneeded = () => {
+						const db = req.result
 						for (const sn of dump.storeNames) {
-							if (!req.result.objectStoreNames.contains(sn)) { req.result.createObjectStore(sn) }
+							if (db.objectStoreNames.contains(sn)) { continue }
+							const cfg = dump.storeConfigs?.[sn] ?? {}
+							const opts: IDBObjectStoreParameters = {}
+							if (cfg.keyPath != null) { opts.keyPath = cfg.keyPath }
+							if (cfg.autoIncrement) { opts.autoIncrement = true }
+							const store = db.createObjectStore(sn, opts)
+							for (const idx of cfg.indexes ?? []) {
+								store.createIndex(idx.name, idx.keyPath, { unique: idx.unique, multiEntry: idx.multiEntry })
+							}
 						}
 					}
 					req.onsuccess = () => r(req.result)

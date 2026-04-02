@@ -125,9 +125,6 @@ class MatrixProvider {
 		const { homeserverUrl, accessToken } = this.getConfig()
 		const { createClient, MemoryStore } = this.ring0
 
-		// Restore crypto store before init (device keys, Olm/Megolm sessions)
-		await this.ring0.restoreCryptoStore(this.cryptoStorePath)
-
 		const tempClient = createClient({ baseUrl: homeserverUrl, accessToken })
 		const whoami = await tempClient.whoami() as { user_id: string, device_id: string }
 
@@ -141,6 +138,11 @@ class MatrixProvider {
 			store: new MemoryStore(),
 		})
 
+		// Restore crypto store data BEFORE initRustCrypto.
+		// The restore creates IndexedDB stores with correct version.
+		// initRustCrypto then opens the DB, finds it at the right version,
+		// and reads the existing data (device keys, sessions, etc.)
+		await this.ring0.restoreCryptoStore(this.cryptoStorePath)
 		await this.client.initRustCrypto({ cryptoDatabasePrefix: storePrefix })
 
 		await this.client.startClient({ initialSyncLimit: 1 })
