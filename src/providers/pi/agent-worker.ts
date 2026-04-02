@@ -21,6 +21,7 @@ const systemPrompt = process.env.EXOAGENT_SYSTEM_PROMPT
 
 const main = async () => {
 	const customTools: ToolDefinition[] = []
+	let agentSession: Awaited<ReturnType<typeof createAgentSession>>['session'] | null = null
 
 	// If we have caps, create the exoeval tool
 	if (ipcPath && capsDts) {
@@ -33,12 +34,20 @@ const main = async () => {
 			for (const line of buf.toString().split('\n')) {
 				if (!line.trim()) { continue }
 				try {
-					const msg = JSON.parse(line) as { id: number, result?: unknown, error?: string }
-					const p = pending.get(msg.id)
-					if (p) {
-						pending.delete(msg.id)
-						if (msg.error) { p.reject(new Error(msg.error)) }
-						else { p.resolve(msg.result) }
+					const msg = JSON.parse(line) as { id?: number, type?: string, message?: string, result?: unknown, error?: string }
+					// Steer message from daemon
+					if (msg.type === 'steer' && msg.message && agentSession) {
+						agentSession.sendUserMessage(msg.message, { deliverAs: 'steer' })
+						continue
+					}
+					// Exoeval response
+					if (msg.id !== undefined) {
+						const p = pending.get(msg.id)
+						if (p) {
+							pending.delete(msg.id)
+							if (msg.error) { p.reject(new Error(msg.error)) }
+							else { p.resolve(msg.result) }
+						}
 					}
 				}
 				catch { /* ignore malformed */ }
@@ -90,6 +99,8 @@ const main = async () => {
 	}
 
 	const { session } = await createAgentSession({ cwd, customTools, tools, resourceLoader })
+	agentSession = session
+
 	const interactive = new InteractiveMode(session)
 	await interactive.run()
 }

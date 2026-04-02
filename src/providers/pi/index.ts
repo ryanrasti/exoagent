@@ -37,6 +37,7 @@ type PtySession = {
 	waiters: Array<(data: string) => void>
 	alive: boolean
 	ipcCleanup?: () => void
+	ipcConn?: Socket
 	capEval?: (code: string) => unknown
 }
 
@@ -225,6 +226,10 @@ export declare class AgentInbox {
 		catch { /* doesn't exist */ }
 
 		const server = this.ring0.createServer((conn: Socket) => {
+			// Store connection for sending steer messages to the worker
+			const sess = this.sessions.get(this.sessionKey(client, sessionId))
+			if (sess) { sess.ipcConn = conn }
+
 			// eslint-disable-next-line node/prefer-global/buffer
 			conn.on('data', (buf: Buffer) => {
 				for (const line of buf.toString().split('\n')) {
@@ -415,7 +420,10 @@ export declare class AgentInbox {
 		lines.push('Use inbox.ack(id) when done with each message.')
 
 		// Write to PTY as user input
-		session.ptyProcess.write(`${lines.join('\n')}\n`)
+		// Send steer via IPC — agent-worker calls session.sendUserMessage()
+		if (session.ipcConn) {
+			session.ipcConn.write(`${JSON.stringify({ type: 'steer', message: lines.join('\n') })}\n`)
+		}
 
 		// Mark as steered
 		this.inbox.markSteered(messages.map(m => m.id))
