@@ -49,12 +49,16 @@ type MatrixRoom = {
 
 export type MatrixProviderImpl = InstanceType<typeof MatrixProvider>
 
+type MessageCallback = (msg: { event_id: string, room_id: string, sender: string, body: string }) => void
+
 class MatrixProvider {
 	private readonly exoEval: BoundEval<MatrixCaps>
 	private readonly ring0: MatrixRing0
 	private readonly dataDir: string
 	private client: MatrixClient | null = null
 	private initPromise: Promise<void> | null = null
+	private messageCallbacks: MessageCallback[] = []
+	private botUserId: string | null = null
 
 	constructor(exoEval: BoundEval<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
 		this.exoEval = exoEval
@@ -154,6 +158,50 @@ class MatrixProvider {
 
 		// Export room keys after initial sync
 		await this.exportKeys()
+
+		// Listen for new messages in workspace rooms
+		this.botUserId = whoami.user_id
+		const { spaceId } = this.getConfig()
+		let spaceRoomIds: Set<string> | null = null
+
+		this.client.on('Room.timeline' as any, (event: any) => {
+			if (this.messageCallbacks.length === 0) { return }
+			if (event.getType() !== 'm.room.message') { return }
+			if (event.getContent()?.msgtype !== 'm.text') { return }
+			if (event.getSender() === this.botUserId) { return } // ignore own messages
+
+			const roomId = event.getRoomId()
+
+			// Lazy-load space room IDs (cache after first check)
+			if (!spaceRoomIds) {
+				try {
+					const hierarchy = this.client!.getRoomHierarchy(spaceId, 50) as any
+					// getRoomHierarchy might be async — handle both
+					if (hierarchy?.then) {
+						hierarchy.then((data: any) => {
+							spaceRoomIds = new Set(data.rooms?.map((r: any) => r.room_id) ?? [])
+						})
+						return // skip this event, will catch next ones
+					}
+					spaceRoomIds = new Set(hierarchy.rooms?.map((r: any) => r.room_id) ?? [])
+				}
+				catch { return }
+			}
+
+			if (!spaceRoomIds.has(roomId)) { return } // not in workspace
+
+			const msg = {
+				event_id: event.getId(),
+				room_id: roomId,
+				sender: event.getSender(),
+				body: event.getContent().body ?? '',
+			}
+
+			for (const cb of this.messageCallbacks) {
+				try { cb(msg) }
+				catch { /* don't let callback errors kill the listener */ }
+			}
+		})
 	}
 
 	/** List rooms in the workspace space. */
@@ -251,6 +299,18 @@ class MatrixProvider {
 		const client = await this.ensureClient()
 		const res = await client.whoami()
 		return { user_id: res.user_id }
+	}
+
+	/**
+	 * Register a callback for new messages in workspace rooms.
+	 * Ignores messages from the bot itself.
+	 * Callback receives { event_id, room_id, sender, body }.
+	 */
+	@tool(z.any())
+	onMessage(callback: MessageCallback): void {
+		this.messageCallbacks.push(callback)
+		// Ensure the client is running so sync events fire
+		this.ensureClient().catch(() => {})
 	}
 
 	clientProvider(_clientName: string): MatrixProviderImpl {

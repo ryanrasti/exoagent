@@ -11,10 +11,12 @@
  */
 
 import type { BoundEval } from 'exoagent/bound-eval'
+import type { MatrixProviderImpl } from 'exoagent/providers/matrix'
 import type { PiProviderImpl } from 'exoagent/providers/pi'
 
 type PmCaps = {
 	pi: PiProviderImpl
+	matrix: MatrixProviderImpl
 }
 
 const SYSTEM_PROMPT = `You are Exo PM, the project manager for the ExoAgent project.
@@ -41,4 +43,12 @@ export default async ({ exoEval }: { exoEval: BoundEval<PmCaps> }) => {
 		{ opts: { sessionId: 'main', capNames: ['github', 'matrix'], prompt: SYSTEM_PROMPT } },
 	)
 	console.log('[pm] agent ready:', result)
+
+	// Wire Matrix messages → agent inbox
+	exoEval.run(({ matrix, pi }) =>
+		matrix.onMessage((msg) => {
+			pi.deliver('main', 'matrix', `${msg.sender} in ${msg.room_id}: ${msg.body}`)
+		}),
+	)
+	console.log('[pm] matrix → inbox wired')
 }
