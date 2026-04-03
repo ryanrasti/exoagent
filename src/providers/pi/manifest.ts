@@ -15,6 +15,7 @@ export default {
 		const fs = await import('node:fs')
 		const net = await import('node:net')
 		const RawDatabase = (await import('better-sqlite3')).default
+		const { Terminal: HeadlessTerminal } = await import('@xterm/headless')
 		const Database = (path: string) => new RawDatabase(path) as unknown
 		const { BoundEval } = await import('exoagent/bound-eval')
 		return {
@@ -30,6 +31,7 @@ export default {
 			Database,
 			BoundEval,
 			now: () => Date.now(),
+			HeadlessTerminal,
 		}
 	},
 	'@exoagent/providers/log': (log: LogProviderImpl) => log as unknown,

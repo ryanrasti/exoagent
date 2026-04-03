@@ -10,9 +10,8 @@ import '@xterm/xterm/css/xterm.css'
 type PiUi = {
 	list: () => { client: string, sessionId: string, cwd: string, alive: boolean }[]
 	input: (client: string, sessionId: string, data: string) => { ok: true }
-	attach: (client: string, sessionId: string, readerId: string) => { status: string, reader?: string }
-	steal: (client: string, sessionId: string, readerId: string) => { status: string }
-	read: (client: string, sessionId: string, readerId: string) => Promise<string>
+	screenContent: (client: string, sessionId: string) => string
+	read: (client: string, sessionId: string) => Promise<string>
 	resize: (client: string, sessionId: string, cols: number, rows: number) => { ok: true }
 }
 
@@ -32,9 +31,6 @@ const parseRoute = (): { client: string, sessionId: string } | null => {
 	const match = window.location.hash.match(/^#\/pi\/([^/]+)\/(.+)$/)
 	return match ? { client: decodeURIComponent(match[1]), sessionId: decodeURIComponent(match[2]) } : null
 }
-
-// Stable reader ID per browser tab
-const READER_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 export default function PiPanel() {
 	const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -127,20 +123,7 @@ export default function PiPanel() {
 const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId: string, onBack: () => void }) => {
 	const termRef = useRef<HTMLDivElement>(null)
 	const disposedRef = useRef(false)
-	const [status, setStatus] = useState<'connecting' | 'connected' | 'exited' | 'taken'>('connecting')
-
-	const handleSteal = async () => {
-		const ws = new ExoWs('pi')
-		const readerId = READER_ID
-		try {
-			await ws.call<PiCaps>(
-				({ pi }) => pi.steal(client, sessionId, readerId),
-				{ client, sessionId, readerId },
-			)
-		}
-		finally { ws.dispose() }
-		window.location.reload()
-	}
+	const [status, setStatus] = useState<'connecting' | 'connected' | 'exited'>('connecting')
 
 	useEffect(() => {
 		disposedRef.current = false
@@ -149,23 +132,8 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 		let ro: ResizeObserver | null = null
 		const ws = new ExoWs('pi')
 
-		const readerId = READER_ID
-
 		const setup = async () => {
 			if (disposedRef.current || !termRef.current) { return }
-
-			// Try to attach as reader
-			try {
-				const result = await ws.call<PiCaps>(
-					({ pi }) => pi.attach(client, sessionId, readerId),
-					{ client, sessionId, readerId },
-				) as { status: string }
-				if (result.status === 'taken') {
-					setStatus('taken')
-					return
-				}
-			}
-			catch { /* continue */ }
 
 			term = new Terminal({
 				cursorBlink: true,
@@ -207,7 +175,20 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				}
 			})
 
-			// Send resize to force a full redraw
+			// Load current screen content from headless terminal buffer
+			try {
+				const content = await ws.call<PiCaps>(
+					({ pi }) => pi.screenContent(client, sessionId),
+					{ client, sessionId },
+				)
+				if (typeof content === 'string' && content.length > 0) {
+					term.write(content)
+					setStatus('connected')
+				}
+			}
+			catch { /* no screen content yet */ }
+
+			// Send resize
 			const { cols, rows } = term
 			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
 
@@ -219,12 +200,13 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				ws.fire<PiCaps>(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
 			})
 
+			// Long-poll for new output — all connected tabs receive broadcasts
 			const poll = async () => {
 				while (!disposedRef.current) {
 					try {
 						const data = await ws.call<PiCaps>(
-							({ pi }) => pi.read(client, sessionId, readerId),
-							{ client, sessionId, readerId },
+							({ pi }) => pi.read(client, sessionId),
+							{ client, sessionId },
 						)
 						if (disposedRef.current || !term) { break }
 						if (typeof data === 'string' && data.length > 0) {
@@ -274,34 +256,15 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 						? 'bg-green-900 text-green-300'
 						: status === 'connecting'
 							? 'bg-yellow-900 text-yellow-300'
-							: status === 'taken'
-								? 'bg-orange-900 text-orange-300'
-								: 'bg-red-900 text-red-300'
+							: 'bg-red-900 text-red-300'
 				}`}
 				>
 					{status}
 				</span>
 			</div>
-			{status === 'taken'
-				? (
-					<div className="flex-1 flex items-center justify-center">
-						<div className="text-center">
-							<p className="text-gray-400 mb-4">Session is open in another tab</p>
-							<button
-								type="button"
-								onClick={handleSteal}
-								className="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white rounded font-medium transition-colors border-none cursor-pointer text-sm"
-							>
-								steal session
-							</button>
-						</div>
-					</div>
-				)
-				: (
-					<div className="relative flex-1 min-h-0 overflow-hidden">
-						<div ref={termRef} className="absolute inset-0 overflow-hidden" />
-					</div>
-				)}
+			<div className="relative flex-1 min-h-0 overflow-hidden">
+				<div ref={termRef} className="absolute inset-0 overflow-hidden" />
+			</div>
 		</div>
 	)
 }

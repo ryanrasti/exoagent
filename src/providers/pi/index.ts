@@ -33,13 +33,12 @@ type PtySession = {
 	sessionId: string
 	cwd: string
 	ptyProcess: Pty
-	outputBuffer: string[]
+	screenBuffer: any // HeadlessTerminal instance
 	waiters: Array<(data: string) => void>
 	alive: boolean
 	ipcCleanup?: () => void
 	ipcConn?: Socket
 	capEval?: (code: string) => unknown
-	attachedReader: string | null // reader ID that owns the read stream
 }
 
 // ── ScopedPi — what exos receive ──────────────────────────────
@@ -303,25 +302,28 @@ export declare class AgentInbox {
 	}
 
 	private registerSession(client: string, sessionId: string, cwd: string, ptyProcess: Pty): PtySession {
+		// Create headless terminal as screen buffer — all PTY output goes here.
+		// Clients get the current screen on connect, then live updates via waiters.
+		const screenBuffer = new (this.ring0 as any).HeadlessTerminal({ cols: 120, rows: 40 })
+
 		const session: PtySession = {
 			client,
 			sessionId,
 			cwd,
 			ptyProcess,
-			outputBuffer: [],
+			screenBuffer,
 			waiters: [],
 			alive: true,
-			attachedReader: null,
 		}
 
 		ptyProcess.onData((data: string) => {
-			if (session.waiters.length > 0) {
-				const waiter = session.waiters.shift()!
+			// Write to headless terminal (maintains screen state)
+			screenBuffer.write(data)
+			// Notify any waiting readers
+			for (const waiter of session.waiters) {
 				waiter(data)
 			}
-			else {
-				session.outputBuffer.push(data)
-			}
+			session.waiters.length = 0
 		})
 
 		ptyProcess.onExit(() => {
@@ -357,43 +359,24 @@ export declare class AgentInbox {
 		return { ok: true }
 	}
 
-	/** Attach a reader to a session. Returns 'ok' or 'attached:<readerId>' if already taken. */
-	attach(client: string, sessionId: string, readerId: string): { status: 'ok' } | { status: 'taken', reader: string } {
+	/** Get the current screen content as serialized text (for initial render on connect). */
+	screenContent(client: string, sessionId: string): string {
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
 		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
-		if (session.attachedReader && session.attachedReader !== readerId) {
-			return { status: 'taken', reader: session.attachedReader }
+		const buf = session.screenBuffer.buffer
+		const lines: string[] = []
+		for (let i = 0; i < buf.length; i++) {
+			const line = buf.getLine(i)
+			if (line) { lines.push(line.translateToString(true)) }
 		}
-		session.attachedReader = readerId
-		// Clear buffer so the new reader gets a fresh start (resize will trigger redraw)
-		session.outputBuffer.length = 0
-		return { status: 'ok' }
+		// Trim trailing empty lines
+		while (lines.length > 0 && lines.at(-1)?.trim() === '') { lines.pop() }
+		return lines.join('\r\n')
 	}
 
-	/** Steal a session from another reader. Disconnects the previous reader. */
-	steal(client: string, sessionId: string, readerId: string): { status: 'ok' } {
+	read(client: string, sessionId: string): Promise<string> {
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
 		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
-		// Kick old reader by resolving their waiters with empty string
-		for (const waiter of session.waiters) { waiter('') }
-		session.waiters.length = 0
-		session.attachedReader = readerId
-		session.outputBuffer.length = 0
-		return { status: 'ok' }
-	}
-
-	read(client: string, sessionId: string, readerId?: string): Promise<string> {
-		const session = this.sessions.get(this.sessionKey(client, sessionId))
-		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
-		if (readerId && session.attachedReader && session.attachedReader !== readerId) {
-			return Promise.resolve('') // not the attached reader — disconnect
-		}
-
-		if (session.outputBuffer.length > 0) {
-			const data = session.outputBuffer.join('')
-			session.outputBuffer.length = 0
-			return Promise.resolve(data)
-		}
 
 		if (!session.alive) { return Promise.resolve('') }
 
@@ -403,7 +386,10 @@ export declare class AgentInbox {
 	resize(client: string, sessionId: string, cols: number, rows: number): { ok: true } {
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
 		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
-		if (session.alive) { session.ptyProcess.resize(cols, rows) }
+		if (session.alive) {
+			session.ptyProcess.resize(cols, rows)
+			session.screenBuffer.resize(cols, rows)
+		}
 		return { ok: true }
 	}
 
@@ -510,19 +496,14 @@ class PiUiProvider {
 		return this.root.input(client, sessionId, data)
 	}
 
-	@tool(z.string(), z.string(), z.string())
-	attach(client: string, sessionId: string, readerId: string): { status: string, reader?: string } {
-		return this.root.attach(client, sessionId, readerId)
+	@tool(z.string(), z.string())
+	screenContent(client: string, sessionId: string): string {
+		return this.root.screenContent(client, sessionId)
 	}
 
-	@tool(z.string(), z.string(), z.string())
-	steal(client: string, sessionId: string, readerId: string): { status: string } {
-		return this.root.steal(client, sessionId, readerId)
-	}
-
-	@tool(z.string(), z.string(), z.string())
-	read(client: string, sessionId: string, readerId: string): Promise<string> {
-		return this.root.read(client, sessionId, readerId)
+	@tool(z.string(), z.string())
+	read(client: string, sessionId: string): Promise<string> {
+		return this.root.read(client, sessionId)
 	}
 
 	@tool(z.string(), z.string(), z.number(), z.number())
