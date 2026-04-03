@@ -17,6 +17,18 @@ export default {
 		const RawDatabase = (await import('better-sqlite3')).default
 
 		const Database = (path: string) => new RawDatabase(path) as unknown
+		const { default: XtermHeadless } = await import('@xterm/headless') as any
+		const { SerializeAddon } = await import('@xterm/addon-serialize')
+		const createScreen = (cols: number, rows: number) => {
+			const t = new XtermHeadless.Terminal({ cols, rows })
+			const s = new SerializeAddon()
+			t.loadAddon(s)
+			return {
+				write: (data: string) => t.write(data),
+				resize: (c: number, r: number) => t.resize(c, r),
+				serialize: () => s.serialize(),
+			}
+		}
 		const { BoundEval } = await import('exoagent/bound-eval')
 		return {
 			pty: { spawn: (cmd: string, args: string[], opts: any) => pty.spawn(cmd, args, opts) },
@@ -31,6 +43,7 @@ export default {
 			Database,
 			BoundEval,
 			now: () => Date.now(),
+			createScreen,
 		}
 	},
 	'@exoagent/providers/log': (log: LogProviderImpl) => log as unknown,
