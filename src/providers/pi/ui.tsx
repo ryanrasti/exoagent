@@ -174,10 +174,14 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				}
 			})
 
-			// Force resize to trigger full redraw from the app (like tmux SIGWINCH)
+			// Resize to trigger full redraw from the app (SIGWINCH).
+			// Two resizes: first to a different size, then back — ensures
+			// the PTY actually fires SIGWINCH even if size hasn't changed.
 			const { cols, rows } = term
 			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
-			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
+			setTimeout(() => {
+				ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
+			}, 100)
 
 			term.onResize(({ cols: c, rows: r }) => {
 				ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, c, r), { client, sessionId, c, r })
