@@ -174,10 +174,9 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				}
 			})
 
-			// Resize to trigger full redraw from the app (SIGWINCH).
-			// Two resizes: first to a different size, then back.
+			// Send current size (no forced redraw — per-reader queues
+			// ensure we get all future output from this point)
 			const { cols, rows } = term
-			await ws.call<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
 			await ws.call<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
 
 			term.onResize(({ cols: c, rows: r }) => {
