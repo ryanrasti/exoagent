@@ -20,14 +20,14 @@ type Pty = ReturnType<Ring0['pty']['spawn']>
 type Log = { info: (msg: string) => void, debug: (msg: string) => void, warn: (msg: string) => void, error: (msg: string) => void }
 type PiCaps = { log: Log }
 
-type Screen = { write: (data: string) => void, resize: (cols: number, rows: number) => void, serialize: () => string }
+const MAX_SCROLLBACK = 5000
 
 type Session = {
 	client: string
 	sessionId: string
 	cwd: string
 	pty: Pty
-	screen: Screen
+	scrollback: string[]
 	waiters: Array<(data: string) => void>
 	alive: boolean
 	cleanup?: () => void
@@ -290,12 +290,14 @@ export declare class AgentInbox {
 	// ── Session operations ───────────────────────────────────
 
 	private registerSession(client: string, sessionId: string, cwd: string, pty: Pty): Session {
-		const screen = (this.ring0 as any).createScreen(120, 40) as Screen
-		const session: Session = { client, sessionId, cwd, pty, screen, waiters: [], alive: true }
+		const session: Session = { client, sessionId, cwd, pty, scrollback: [], waiters: [], alive: true }
 
 		const k = this.key(client, sessionId)
 		pty.onData((data: string) => {
-			screen.write(data)
+			session.scrollback.push(data)
+			if (session.scrollback.length > MAX_SCROLLBACK) {
+				session.scrollback.splice(0, session.scrollback.length - MAX_SCROLLBACK)
+			}
 			// Broadcast to UI readers
 			this.uiProviderInstance?.broadcast(k, data)
 			// Also resolve any direct waiters (ScopedPi.read)
@@ -349,10 +351,7 @@ export declare class AgentInbox {
 
 	resize(client: string, sessionId: string, cols: number, rows: number): { ok: true } {
 		const s = this.getSession(client, sessionId)
-		if (s.alive) {
-			s.pty.resize(cols, rows)
-			s.screen.resize(cols, rows)
-		}
+		if (s.alive) { s.pty.resize(cols, rows) }
 		return { ok: true }
 	}
 
@@ -513,15 +512,15 @@ class PiWsConnection {
 	read(client: string, sessionId: string): Promise<string> {
 		const k = `${client}:${sessionId}`
 
-		// First read for this session: send current screen snapshot
+		// First read for this session: replay scrollback
 		if (this.reader.sessionKey !== k) {
 			this.reader.sessionKey = k
 			try {
 				const s = this.root.getSession(client, sessionId)
-				const snapshot = s.screen.serialize()
-				if (snapshot) {
-					return Promise.resolve(snapshot)
+				if (s.scrollback.length > 0) {
+					return Promise.resolve(s.scrollback.join(''))
 				}
+				// Empty scrollback — fall through to wait for first output
 			}
 			catch { return Promise.resolve('') }
 		}
