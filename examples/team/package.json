@@ -4,13 +4,31 @@
   "private": true,
   "scripts": {
     "build": "tsx build.ts",
-    "dev": "tsx build.ts --watch"
+    "dev": "tsx build.ts --watch",
+    "test": "vitest --run",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run build && npm run typecheck && npm run test"
   },
   "dependencies": {
-    "exoagent": "workspace:*"
+    "exoagent": "workspace:*",
+    "diff": "^7.0.0",
+    "chokidar": "^4.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@types/diff": "^7.0.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "esbuild": "^0.25.0",
-    "tsx": "^4.19.0"
+    "jsdom": "^26.0.0",
+    "tsx": "^4.19.0",
+    "vitest": "~4.1.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   }
 }

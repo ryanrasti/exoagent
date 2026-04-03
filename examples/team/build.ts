@@ -33,7 +33,7 @@ const buildModule = async (mod: { name: string, entry: string, out: string }) =>
 		bundle: true,
 		format: 'esm',
 		target: 'es2022',
-		external: ['node:*', 'better-sqlite3', 'node-pty', '@mariozechner/pi-coding-agent'],
+		external: ['node:*', 'better-sqlite3', 'node-pty', '@mariozechner/pi-coding-agent', 'chokidar'],
 		logLevel: 'info',
 	}
 

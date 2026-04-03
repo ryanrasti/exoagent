@@ -7,3 +7,5 @@ worker-configuration.d.ts
 .direnv
 .exoagent
 .exobox
+test-results
+playwright-report

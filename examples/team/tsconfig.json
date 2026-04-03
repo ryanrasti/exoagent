@@ -1,13 +1,21 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "experimentalDecorators": true,
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    "target": "es2024",
+    "lib": ["es2024", "DOM"],
+    "jsx": "react-jsx",
+    "module": "es2022",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "strict": true,
+    "strictNullChecks": true,
     "noEmit": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "experimentalDecorators": true,
+    "types": ["node"]
   },
-  "include": ["**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

@@ -23,6 +23,7 @@ else {
 		config: () => import('../providers/config/ui'),
 		pi: () => import('../providers/pi/ui'),
 		matrix: () => import('../providers/matrix/ui'),
+		review: () => import('../../examples/team/src/providers/review/ui'),
 	}
 
 	const loader = panels[providerName]
