@@ -28,12 +28,6 @@ type MatrixCaps = {
 type MatrixRing0 = {
 	createClient: typeof CreateClientFn
 	MemoryStore: typeof MemoryStoreCls
-	readFileSync: (path: string, encoding: string) => string
-	writeFileSync: (path: string, data: string) => void
-	mkdirSync: (path: string, opts?: { recursive?: boolean }) => void
-	resolve: (...paths: string[]) => string
-	restoreCryptoStore: (path: string) => Promise<void>
-	saveCryptoStore: (path: string) => Promise<void>
 }
 
 type MatrixMessage = {
@@ -56,16 +50,14 @@ type MessageCallback = (msg: { event_id: string, room_id: string, sender: string
 class MatrixProvider {
 	private readonly exoEval: BoundEval<MatrixCaps>
 	private readonly ring0: MatrixRing0
-	private readonly dataDir: string
 	private client: MatrixClient | null = null
 	private initPromise: Promise<void> | null = null
 	private messageCallbacks: MessageCallback[] = []
 	private botUserId: string | null = null
 
-	constructor(exoEval: BoundEval<MatrixCaps>, ring0: MatrixRing0, dataDir: string) {
+	constructor(exoEval: BoundEval<MatrixCaps>, ring0: MatrixRing0) {
 		this.exoEval = exoEval
 		this.ring0 = ring0
-		this.dataDir = dataDir
 
 		this.exoEval.run(({ config }) =>
 			config.setSchema({
@@ -115,20 +107,12 @@ class MatrixProvider {
 		return this.client!
 	}
 
-	private get cryptoStorePath(): string {
-		const dir = this.ring0.resolve(this.dataDir, 'matrix')
-		this.ring0.mkdirSync(dir, { recursive: true })
-		return this.ring0.resolve(dir, 'crypto-store.json')
-	}
-
 	private async initClient(): Promise<void> {
 		const { homeserverUrl, accessToken } = this.getConfig()
 		const { createClient, MemoryStore } = this.ring0
 
 		const tempClient = createClient({ baseUrl: homeserverUrl, accessToken })
 		const whoami = await tempClient.whoami() as { user_id: string, device_id: string }
-
-		const storePrefix = `exoagent-${whoami.user_id}`
 
 		this.client = createClient({
 			baseUrl: homeserverUrl,
@@ -138,21 +122,13 @@ class MatrixProvider {
 			store: new MemoryStore(),
 		})
 
-		// Restore crypto store data BEFORE initRustCrypto.
-		// The restore creates IndexedDB stores with correct version.
-		// initRustCrypto then opens the DB, finds it at the right version,
-		// and reads the existing data (device keys, sessions, etc.)
-		await this.ring0.restoreCryptoStore(this.cryptoStorePath)
-		await this.client.initRustCrypto({ cryptoDatabasePrefix: storePrefix })
+		// No E2EE — see manifest.ts comment for why
 
 		await this.client.startClient({ initialSyncLimit: 1 })
 
 		await new Promise<void>((resolve) => {
 			this.client!.once('sync' as any, () => resolve())
 		})
-
-		// Persist crypto store after initial sync
-		await this.ring0.saveCryptoStore(this.cryptoStorePath)
 
 		this.botUserId = whoami.user_id
 
@@ -248,8 +224,6 @@ class MatrixProvider {
 	async sendMessage(roomId: string, body: string): Promise<{ event_id: string }> {
 		const client = await this.ensureClient()
 		const res = await client.sendTextMessage(roomId, body)
-		// Persist room keys after sending (new Megolm session may have been created)
-		await this.ring0.saveCryptoStore(this.cryptoStorePath)
 		return { event_id: res.event_id }
 	}
 
@@ -305,5 +279,5 @@ class MatrixProvider {
 	}
 }
 
-export default ({ exoEval, ring0, config }: ProviderInit<MatrixCaps>) =>
-	new MatrixProvider(exoEval, ring0 as MatrixRing0, config.dataDir)
+export default ({ exoEval, ring0 }: ProviderInit<MatrixCaps>) =>
+	new MatrixProvider(exoEval, ring0 as MatrixRing0)
