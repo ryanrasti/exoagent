@@ -39,6 +39,7 @@ type PtySession = {
 	ipcCleanup?: () => void
 	ipcConn?: Socket
 	capEval?: (code: string) => unknown
+	attachedReader: string | null // reader ID that owns the read stream
 }
 
 // ── ScopedPi — what exos receive ──────────────────────────────
@@ -310,6 +311,7 @@ export declare class AgentInbox {
 			outputBuffer: [],
 			waiters: [],
 			alive: true,
+			attachedReader: null,
 		}
 
 		ptyProcess.onData((data: string) => {
@@ -355,9 +357,37 @@ export declare class AgentInbox {
 		return { ok: true }
 	}
 
-	read(client: string, sessionId: string): Promise<string> {
+	/** Attach a reader to a session. Returns 'ok' or 'attached:<readerId>' if already taken. */
+	attach(client: string, sessionId: string, readerId: string): { status: 'ok' } | { status: 'taken', reader: string } {
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
 		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
+		if (session.attachedReader && session.attachedReader !== readerId) {
+			return { status: 'taken', reader: session.attachedReader }
+		}
+		session.attachedReader = readerId
+		// Clear buffer so the new reader gets a fresh start (resize will trigger redraw)
+		session.outputBuffer.length = 0
+		return { status: 'ok' }
+	}
+
+	/** Steal a session from another reader. Disconnects the previous reader. */
+	steal(client: string, sessionId: string, readerId: string): { status: 'ok' } {
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
+		// Kick old reader by resolving their waiters with empty string
+		for (const waiter of session.waiters) { waiter('') }
+		session.waiters.length = 0
+		session.attachedReader = readerId
+		session.outputBuffer.length = 0
+		return { status: 'ok' }
+	}
+
+	read(client: string, sessionId: string, readerId?: string): Promise<string> {
+		const session = this.sessions.get(this.sessionKey(client, sessionId))
+		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
+		if (readerId && session.attachedReader && session.attachedReader !== readerId) {
+			return Promise.resolve('') // not the attached reader — disconnect
+		}
 
 		if (session.outputBuffer.length > 0) {
 			const data = session.outputBuffer.join('')
@@ -480,9 +510,19 @@ class PiUiProvider {
 		return this.root.input(client, sessionId, data)
 	}
 
-	@tool(z.string(), z.string())
-	read(client: string, sessionId: string): Promise<string> {
-		return this.root.read(client, sessionId)
+	@tool(z.string(), z.string(), z.string())
+	attach(client: string, sessionId: string, readerId: string): { status: string, reader?: string } {
+		return this.root.attach(client, sessionId, readerId)
+	}
+
+	@tool(z.string(), z.string(), z.string())
+	steal(client: string, sessionId: string, readerId: string): { status: string } {
+		return this.root.steal(client, sessionId, readerId)
+	}
+
+	@tool(z.string(), z.string(), z.string())
+	read(client: string, sessionId: string, readerId: string): Promise<string> {
+		return this.root.read(client, sessionId, readerId)
 	}
 
 	@tool(z.string(), z.string(), z.number(), z.number())

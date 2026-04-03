@@ -10,7 +10,9 @@ import '@xterm/xterm/css/xterm.css'
 type PiUi = {
 	list: () => { client: string, sessionId: string, cwd: string, alive: boolean }[]
 	input: (client: string, sessionId: string, data: string) => { ok: true }
-	read: (client: string, sessionId: string) => Promise<string>
+	attach: (client: string, sessionId: string, readerId: string) => { status: string, reader?: string }
+	steal: (client: string, sessionId: string, readerId: string) => { status: string }
+	read: (client: string, sessionId: string, readerId: string) => Promise<string>
 	resize: (client: string, sessionId: string, cols: number, rows: number) => { ok: true }
 }
 
@@ -30,6 +32,9 @@ const parseRoute = (): { client: string, sessionId: string } | null => {
 	const match = window.location.hash.match(/^#\/pi\/([^/]+)\/(.+)$/)
 	return match ? { client: decodeURIComponent(match[1]), sessionId: decodeURIComponent(match[2]) } : null
 }
+
+// Stable reader ID per browser tab
+const READER_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 export default function PiPanel() {
 	const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -122,7 +127,20 @@ export default function PiPanel() {
 const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId: string, onBack: () => void }) => {
 	const termRef = useRef<HTMLDivElement>(null)
 	const disposedRef = useRef(false)
-	const [status, setStatus] = useState<'connecting' | 'connected' | 'exited'>('connecting')
+	const [status, setStatus] = useState<'connecting' | 'connected' | 'exited' | 'taken'>('connecting')
+
+	const handleSteal = async () => {
+		const ws = new ExoWs('pi')
+		const readerId = READER_ID
+		try {
+			await ws.call<PiCaps>(
+				({ pi }) => pi.steal(client, sessionId, readerId),
+				{ client, sessionId, readerId },
+			)
+		}
+		finally { ws.dispose() }
+		window.location.reload()
+	}
 
 	useEffect(() => {
 		disposedRef.current = false
@@ -131,8 +149,24 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 		let ro: ResizeObserver | null = null
 		const ws = new ExoWs('pi')
 
-		const setup = () => {
+		const readerId = READER_ID
+
+		const setup = async () => {
 			if (disposedRef.current || !termRef.current) { return }
+
+			// Try to attach as reader
+			try {
+				const result = await ws.call<PiCaps>(
+					({ pi }) => pi.attach(client, sessionId, readerId),
+					{ client, sessionId, readerId },
+				) as { status: string }
+				if (result.status === 'taken') {
+					setStatus('taken')
+					return
+				}
+			}
+			catch { /* continue */ }
+
 			term = new Terminal({
 				cursorBlink: true,
 				fontSize: 13,
@@ -153,7 +187,6 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 			term.unicode.activeVersion = '11'
 			term.open(termRef.current)
 
-			// Fit when container resizes (initial layout + window resize)
 			let fitting = false
 			let fitTimer: ReturnType<typeof setTimeout> | null = null
 			ro = new ResizeObserver(() => {
@@ -167,7 +200,6 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 			})
 			ro.observe(termRef.current)
 
-			// Copy-on-select: automatically copy highlighted text to clipboard
 			term.onSelectionChange(() => {
 				const selection = term?.getSelection()
 				if (selection) {
@@ -175,28 +207,24 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				}
 			})
 
-			// Send initial resize
+			// Send resize to force a full redraw
 			const { cols, rows } = term
-			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
 			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
 
-			// Handle resize via xterm's own onResize event
 			term.onResize(({ cols: c, rows: r }) => {
 				ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, c, r), { client, sessionId, c, r })
 			})
 
-			// Input: fire-and-forget over WebSocket
 			term.onData((data: string) => {
 				ws.fire<PiCaps>(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
 			})
 
-			// Output: long-poll via WebSocket call()
 			const poll = async () => {
 				while (!disposedRef.current) {
 					try {
 						const data = await ws.call<PiCaps>(
-							({ pi }) => pi.read(client, sessionId),
-							{ client, sessionId },
+							({ pi }) => pi.read(client, sessionId, readerId),
+							{ client, sessionId, readerId },
 						)
 						if (disposedRef.current || !term) { break }
 						if (typeof data === 'string' && data.length > 0) {
@@ -204,14 +232,12 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 							term.write(data)
 						}
 						else if (data === '') {
-							// read() returns empty string when session exits
 							setStatus('exited')
 							break
 						}
 					}
 					catch {
 						if (!disposedRef.current) {
-							// Connection error — retry after a brief delay
 							await new Promise(r => setTimeout(r, 1000))
 						}
 					}
@@ -248,15 +274,34 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 						? 'bg-green-900 text-green-300'
 						: status === 'connecting'
 							? 'bg-yellow-900 text-yellow-300'
-							: 'bg-red-900 text-red-300'
+							: status === 'taken'
+								? 'bg-orange-900 text-orange-300'
+								: 'bg-red-900 text-red-300'
 				}`}
 				>
 					{status}
 				</span>
 			</div>
-			<div className="relative flex-1 min-h-0 overflow-hidden">
-				<div ref={termRef} className="absolute inset-0 overflow-hidden" />
-			</div>
+			{status === 'taken'
+				? (
+					<div className="flex-1 flex items-center justify-center">
+						<div className="text-center">
+							<p className="text-gray-400 mb-4">Session is open in another tab</p>
+							<button
+								type="button"
+								onClick={handleSteal}
+								className="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white rounded font-medium transition-colors border-none cursor-pointer text-sm"
+							>
+								steal session
+							</button>
+						</div>
+					</div>
+				)
+				: (
+					<div className="relative flex-1 min-h-0 overflow-hidden">
+						<div ref={termRef} className="absolute inset-0 overflow-hidden" />
+					</div>
+				)}
 		</div>
 	)
 }
