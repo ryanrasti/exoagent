@@ -242,10 +242,22 @@ export const startServer = (
 		}
 
 		wss.handleUpgrade(req, socket, head, (ws) => {
+			const ui = provider.uiInstance as any
+
+			// Per-connection scope: if provider supports forConnection(), use it.
+			// The returned object becomes the eval scope for this WS.
+			const conn = typeof ui.forConnection === 'function'
+				? ui.forConnection()
+				: ui
+
+			ws.on('close', () => {
+				if (typeof conn.close === 'function') { conn.close() }
+			})
+
 			ws.on('message', async (raw) => {
 				try {
 					const msg = JSON.parse(raw.toString()) as { id?: number, code: string }
-					const result = exoEval(msg.code, { [subdomain]: provider.uiInstance })
+					const result = exoEval(msg.code, { [subdomain]: conn })
 					const resolved = result instanceof Promise ? await result : result
 					if (msg.id !== undefined) {
 						ws.send(JSON.stringify({ id: msg.id, result: resolved ?? null }))

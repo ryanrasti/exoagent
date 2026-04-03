@@ -289,7 +289,11 @@ export declare class AgentInbox {
 	private registerSession(client: string, sessionId: string, cwd: string, pty: Pty): Session {
 		const session: Session = { client, sessionId, cwd, pty, waiters: [], alive: true }
 
+		const k = this.key(client, sessionId)
 		pty.onData((data: string) => {
+			// Broadcast to UI readers
+			this.uiProviderInstance?.broadcast(k, data)
+			// Also resolve any direct waiters (ScopedPi.read)
 			const w = session.waiters
 			session.waiters = []
 			for (const resolve of w) { resolve(data) }
@@ -297,6 +301,8 @@ export declare class AgentInbox {
 
 		pty.onExit(() => {
 			session.alive = false
+			session.cleanup?.()
+			this.uiProviderInstance?.broadcastExit(k)
 			const w = session.waiters
 			session.waiters = []
 			for (const resolve of w) { resolve('') }
@@ -306,7 +312,7 @@ export declare class AgentInbox {
 		return session
 	}
 
-	private getSession(client: string, sessionId: string): Session {
+	getSession(client: string, sessionId: string): Session {
 		const s = this.sessions.get(this.key(client, sessionId))
 		if (!s) { throw new Error(`no session for ${client}:${sessionId}`) }
 		return s
@@ -404,17 +410,86 @@ export declare class AgentInbox {
 		return new ScopedPi(this, clientName)
 	}
 
+	private uiProviderInstance: PiUiProvider | null = null
+
 	uiProvider(_clients: string[]): PiUiProvider {
-		return new PiUiProvider(this)
+		if (!this.uiProviderInstance) {
+			this.uiProviderInstance = new PiUiProvider(this)
+		}
+		return this.uiProviderInstance
 	}
 }
 
 // ── UI provider ──────────────────────────────────────────────
 
+type Reader = {
+	queue: string[]
+	waiter: ((data: string) => void) | null
+	sessionKey: string | null // which session this reader is subscribed to
+}
+
 class PiUiProvider {
 	private readonly root: PiProvider
+	private readonly readers = new Map<string, Reader>()
+	private nextId = 0
 
 	constructor(root: PiProvider) { this.root = root }
+
+	/** Called by server on WS connect. Returns per-connection scoped object. */
+	forConnection(): PiWsConnection {
+		const id = String(this.nextId++)
+		const reader: Reader = { queue: [], waiter: null, sessionKey: null }
+		this.readers.set(id, reader)
+		return new PiWsConnection(this.root, this, id, reader)
+	}
+
+	/** Called by PiProvider when PTY produces output for a session. */
+	broadcast(sessionKey: string, data: string): void {
+		for (const reader of this.readers.values()) {
+			if (reader.sessionKey !== sessionKey) { continue }
+			if (reader.waiter) {
+				const w = reader.waiter
+				reader.waiter = null
+				w(data)
+			}
+			else {
+				reader.queue.push(data)
+			}
+		}
+	}
+
+	/** Notify readers that a session exited. */
+	broadcastExit(sessionKey: string): void {
+		for (const reader of this.readers.values()) {
+			if (reader.sessionKey !== sessionKey) { continue }
+			if (reader.waiter) {
+				const w = reader.waiter
+				reader.waiter = null
+				w('')
+			}
+		}
+	}
+
+	removeReader(id: string): void {
+		const r = this.readers.get(id)
+		if (r?.waiter) { r.waiter('') }
+		this.readers.delete(id)
+	}
+}
+
+/** Per-WS-connection object — has its own reader queue. */
+class PiWsConnection {
+	private readonly root: PiProvider
+	private readonly ui: PiUiProvider
+	private readonly readerId: string
+	private readonly reader: Reader
+
+	constructor(root: PiProvider, ui: PiUiProvider, readerId: string, reader: Reader) {
+		this.root = root
+		this.ui = ui
+		this.readerId = readerId
+		this.reader = reader
+	}
 
 	@tool()
 	list(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {
@@ -428,12 +503,33 @@ class PiUiProvider {
 
 	@tool(z.string(), z.string())
 	read(client: string, sessionId: string): Promise<string> {
-		return this.root.read(client, sessionId)
+		// Subscribe this reader to the session
+		this.reader.sessionKey = `${client}:${sessionId}`
+
+		// If queued data, return immediately
+		if (this.reader.queue.length > 0) {
+			const data = this.reader.queue.join('')
+			this.reader.queue.length = 0
+			return Promise.resolve(data)
+		}
+
+		// Check if session is dead
+		try {
+			const s = this.root.getSession(client, sessionId)
+			if (!s.alive) { return Promise.resolve('') }
+		}
+		catch { return Promise.resolve('') }
+
+		return new Promise((resolve) => { this.reader.waiter = resolve })
 	}
 
 	@tool(z.string(), z.string(), z.number(), z.number())
 	resize(client: string, sessionId: string, cols: number, rows: number): { ok: true } {
 		return this.root.resize(client, sessionId, cols, rows)
+	}
+
+	close(): void {
+		this.ui.removeReader(this.readerId)
 	}
 }
 

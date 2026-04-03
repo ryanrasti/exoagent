@@ -249,6 +249,11 @@ Heartbeat re-steers if messages remain unacked.
   exoeval's AST-walking sandbox doesn't leak authority through cap object
   prototypes.
 
+- **exoeval & return values** - exoeval originally meant to run in isolation,
+  not inside. Return values can be anything -- meaning exoEval(({cap}) => cap)
+  returns the raw capability object, and "private" fields, non-tool methods, etc
+  can all be called on it.
+
 ## Deferred
 
 - **Git submodule tracking** — runtime repo tracks agent workdirs as submodules
