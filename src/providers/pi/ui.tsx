@@ -182,6 +182,8 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 					{ client, sessionId },
 				)
 				if (typeof content === 'string' && content.length > 0) {
+					// Reset terminal state then write snapshot
+					term.reset()
 					term.write(content)
 					setStatus('connected')
 				}
