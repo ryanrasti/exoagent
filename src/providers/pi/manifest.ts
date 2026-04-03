@@ -15,7 +15,8 @@ export default {
 		const fs = await import('node:fs')
 		const net = await import('node:net')
 		const RawDatabase = (await import('better-sqlite3')).default
-		const { Terminal: HeadlessTerminal } = await import('@xterm/headless')
+		const { default: XtermHeadless } = await import('@xterm/headless') as any
+		const HeadlessTerminal = (cols: number, rows: number) => new XtermHeadless.Terminal({ cols, rows })
 		const Database = (path: string) => new RawDatabase(path) as unknown
 		const { BoundEval } = await import('exoagent/bound-eval')
 		return {

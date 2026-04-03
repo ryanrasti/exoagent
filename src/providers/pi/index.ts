@@ -304,7 +304,7 @@ export declare class AgentInbox {
 	private registerSession(client: string, sessionId: string, cwd: string, ptyProcess: Pty): PtySession {
 		// Create headless terminal as screen buffer — all PTY output goes here.
 		// Clients get the current screen on connect, then live updates via waiters.
-		const screenBuffer = new (this.ring0 as any).HeadlessTerminal({ cols: 120, rows: 40 })
+		const screenBuffer = (this.ring0 as any).HeadlessTerminal(120, 40)
 
 		const session: PtySession = {
 			client,
