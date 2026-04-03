@@ -25,10 +25,13 @@ type Session = {
 	sessionId: string
 	cwd: string
 	pty: Pty
+	scrollback: string[] // last N chunks of raw PTY output for replay
 	waiters: Array<(data: string) => void>
 	alive: boolean
 	cleanup?: () => void
 }
+
+const MAX_SCROLLBACK = 5000
 
 // ── ScopedPi — what exos receive ──────────────────────────────
 
@@ -287,10 +290,14 @@ export declare class AgentInbox {
 	// ── Session operations ───────────────────────────────────
 
 	private registerSession(client: string, sessionId: string, cwd: string, pty: Pty): Session {
-		const session: Session = { client, sessionId, cwd, pty, waiters: [], alive: true }
+		const session: Session = { client, sessionId, cwd, pty, scrollback: [], waiters: [], alive: true }
 
 		const k = this.key(client, sessionId)
 		pty.onData((data: string) => {
+			session.scrollback.push(data)
+			if (session.scrollback.length > MAX_SCROLLBACK) {
+				session.scrollback.splice(0, session.scrollback.length - MAX_SCROLLBACK)
+			}
 			// Broadcast to UI readers
 			this.uiProviderInstance?.broadcast(k, data)
 			// Also resolve any direct waiters (ScopedPi.read)
@@ -503,8 +510,19 @@ class PiWsConnection {
 
 	@tool(z.string(), z.string())
 	read(client: string, sessionId: string): Promise<string> {
-		// Subscribe this reader to the session
-		this.reader.sessionKey = `${client}:${sessionId}`
+		const k = `${client}:${sessionId}`
+
+		// First read for this session: replay scrollback
+		if (this.reader.sessionKey !== k) {
+			this.reader.sessionKey = k
+			try {
+				const s = this.root.getSession(client, sessionId)
+				if (s.scrollback.length > 0) {
+					return Promise.resolve(s.scrollback.join(''))
+				}
+			}
+			catch { return Promise.resolve('') }
+		}
 
 		// If queued data, return immediately
 		if (this.reader.queue.length > 0) {
