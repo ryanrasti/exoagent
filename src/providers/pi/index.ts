@@ -33,8 +33,7 @@ type PtySession = {
 	sessionId: string
 	cwd: string
 	ptyProcess: Pty
-	screenBuffer: any // HeadlessTerminal instance
-	rawLog: string[] // raw PTY output for replay on connect
+	screenBuffer: any // HeadlessTerminal instance with serialize()
 	waiters: Array<(data: string) => void>
 	alive: boolean
 	ipcCleanup?: () => void
@@ -313,18 +312,12 @@ export declare class AgentInbox {
 			cwd,
 			ptyProcess,
 			screenBuffer,
-			rawLog: [],
 			waiters: [],
 			alive: true,
 		}
 
 		ptyProcess.onData((data: string) => {
 			screenBuffer.write(data)
-			session.rawLog.push(data)
-			// Cap raw log to ~1MB to prevent unbounded growth
-			if (session.rawLog.length > 10000) {
-				session.rawLog.splice(0, session.rawLog.length - 5000)
-			}
 			for (const waiter of session.waiters) {
 				waiter(data)
 			}
@@ -364,11 +357,11 @@ export declare class AgentInbox {
 		return { ok: true }
 	}
 
-	/** Get raw PTY output for replay on connect (preserves escape sequences). */
+	/** Get current screen state (serialized with ANSI codes) for initial render. */
 	screenContent(client: string, sessionId: string): string {
 		const session = this.sessions.get(this.sessionKey(client, sessionId))
 		if (!session) { throw new Error(`no session for ${client}:${sessionId}`) }
-		return session.rawLog.join('')
+		return session.screenBuffer.serialize()
 	}
 
 	read(client: string, sessionId: string): Promise<string> {
