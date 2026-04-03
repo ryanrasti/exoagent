@@ -175,20 +175,17 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 			})
 
 			// Resize to trigger full redraw from the app (SIGWINCH).
-			// Two resizes: first to a different size, then back — ensures
-			// the PTY actually fires SIGWINCH even if size hasn't changed.
+			// Two resizes: first to a different size, then back.
 			const { cols, rows } = term
-			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
-			setTimeout(() => {
-				ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
-			}, 100)
+			await ws.call<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
+			await ws.call<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
 
 			term.onResize(({ cols: c, rows: r }) => {
-				ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, c, r), { client, sessionId, c, r })
+				ws.call<PiCaps>(({ pi }) => pi.resize(client, sessionId, c, r), { client, sessionId, c, r })
 			})
 
 			term.onData((data: string) => {
-				ws.fire<PiCaps>(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
+				ws.call<PiCaps>(({ pi }) => pi.input(client, sessionId, data), { client, sessionId, data })
 			})
 
 			// Long-poll for new output — all connected tabs receive broadcasts
