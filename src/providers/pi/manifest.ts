@@ -15,15 +15,7 @@ export default {
 		const fs = await import('node:fs')
 		const net = await import('node:net')
 		const RawDatabase = (await import('better-sqlite3')).default
-		const { default: XtermHeadless } = await import('@xterm/headless') as any
-		const { SerializeAddon } = await import('@xterm/addon-serialize')
-		const HeadlessTerminal = (cols: number, rows: number) => {
-			const t = new XtermHeadless.Terminal({ cols, rows })
-			const s = new SerializeAddon()
-			t.loadAddon(s)
-			t.serialize = () => s.serialize()
-			return t
-		}
+
 		const Database = (path: string) => new RawDatabase(path) as unknown
 		const { BoundEval } = await import('exoagent/bound-eval')
 		return {
@@ -39,7 +31,6 @@ export default {
 			Database,
 			BoundEval,
 			now: () => Date.now(),
-			HeadlessTerminal,
 		}
 	},
 	'@exoagent/providers/log': (log: LogProviderImpl) => log as unknown,

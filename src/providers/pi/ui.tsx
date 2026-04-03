@@ -10,7 +10,6 @@ import '@xterm/xterm/css/xterm.css'
 type PiUi = {
 	list: () => { client: string, sessionId: string, cwd: string, alive: boolean }[]
 	input: (client: string, sessionId: string, data: string) => { ok: true }
-	screenContent: (client: string, sessionId: string) => string
 	read: (client: string, sessionId: string) => Promise<string>
 	resize: (client: string, sessionId: string, cols: number, rows: number) => { ok: true }
 }
@@ -175,23 +174,9 @@ const TerminalView = ({ client, sessionId, onBack }: { client: string, sessionId
 				}
 			})
 
-			// Load current screen content from headless terminal buffer
-			try {
-				const content = await ws.call<PiCaps>(
-					({ pi }) => pi.screenContent(client, sessionId),
-					{ client, sessionId },
-				)
-				if (typeof content === 'string' && content.length > 0) {
-					// Reset terminal state then write snapshot
-					term.reset()
-					term.write(content)
-					setStatus('connected')
-				}
-			}
-			catch { /* no screen content yet */ }
-
-			// Send resize
+			// Force resize to trigger full redraw from the app (like tmux SIGWINCH)
 			const { cols, rows } = term
+			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols: cols - 1, rows })
 			ws.fire<PiCaps>(({ pi }) => pi.resize(client, sessionId, cols, rows), { client, sessionId, cols, rows })
 
 			term.onResize(({ cols: c, rows: r }) => {

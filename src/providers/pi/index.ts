@@ -14,11 +14,21 @@ import type manifest from './manifest'
 import z from 'zod'
 import { tool } from '../../exoeval/tool'
 import { Inbox } from './inbox'
-import { PtySession } from './pty-session'
 
 type Ring0 = Awaited<ReturnType<typeof manifest.ring0>>
+type Pty = ReturnType<Ring0['pty']['spawn']>
 type Log = { info: (msg: string) => void, debug: (msg: string) => void, warn: (msg: string) => void, error: (msg: string) => void }
 type PiCaps = { log: Log }
+
+type Session = {
+	client: string
+	sessionId: string
+	cwd: string
+	pty: Pty
+	waiters: Array<(data: string) => void>
+	alive: boolean
+	cleanup?: () => void
+}
 
 // ── ScopedPi — what exos receive ──────────────────────────────
 
@@ -85,7 +95,7 @@ class PiProvider {
 	private readonly ring0: Ring0
 	private readonly dataDir: string
 	private readonly exoEval: BoundEval<PiCaps>
-	private readonly sessions = new Map<string, PtySession>()
+	private readonly sessions = new Map<string, Session>()
 	private readonly ipcConns = new Map<string, Socket>()
 	private readonly capEvals = new Map<string, (code: string) => unknown>()
 	private readonly inbox: Inbox
@@ -144,7 +154,7 @@ class PiProvider {
 		return cwd
 	}
 
-	private spawnPty(cwd: string, env: { [key: string]: string | undefined }): PtySession['pty'] {
+	private spawnPty(cwd: string, env: { [key: string]: string | undefined }): Pty {
 		const workerPath = this.ring0.resolve(process.cwd(), 'src/providers/pi/agent-worker.ts')
 		return this.ring0.pty.spawn('npx', ['tsx', workerPath], {
 			name: 'xterm-256color',
@@ -169,9 +179,7 @@ class PiProvider {
 		if (prompt) { env.EXOAGENT_SYSTEM_PROMPT = prompt }
 
 		const pty = this.spawnPty(cwd, env)
-		const screen = (this.ring0 as any).HeadlessTerminal(120, 40)
-		const session = new PtySession({ client, sessionId, cwd, pty, screen })
-		this.sessions.set(this.key(client, sessionId), session)
+		this.registerSession(client, sessionId, cwd, pty)
 		return { sessionId, cwd }
 	}
 
@@ -251,20 +259,13 @@ export declare class AgentInbox {
 			...(prompt ? { EXOAGENT_SYSTEM_PROMPT: prompt } : {}),
 		}
 		const pty = this.spawnPty(cwd, env)
-		const screen = (this.ring0 as any).HeadlessTerminal(120, 40)
-		const session = new PtySession({ client, sessionId, cwd, pty, screen })
-		this.sessions.set(k, session)
+		const session = this.registerSession(client, sessionId, cwd, pty)
 
-		// Cleanup on exit
-		session.kill = (() => {
-			const origKill = session.kill.bind(session)
-			return () => {
-				origKill()
-				server.close()
-				try { this.ring0.unlinkSync(ipcPath) }
-				catch { /* */ }
-			}
-		})()
+		session.cleanup = () => {
+			server.close()
+			try { this.ring0.unlinkSync(ipcPath) }
+			catch { /* */ }
+		}
 
 		// Wire up capEval: provider caps + inbox
 		const agentKey = `${client}:${sessionId}`
@@ -285,7 +286,27 @@ export declare class AgentInbox {
 
 	// ── Session operations ───────────────────────────────────
 
-	private getSession(client: string, sessionId: string): PtySession {
+	private registerSession(client: string, sessionId: string, cwd: string, pty: Pty): Session {
+		const session: Session = { client, sessionId, cwd, pty, waiters: [], alive: true }
+
+		pty.onData((data: string) => {
+			const w = session.waiters
+			session.waiters = []
+			for (const resolve of w) { resolve(data) }
+		})
+
+		pty.onExit(() => {
+			session.alive = false
+			const w = session.waiters
+			session.waiters = []
+			for (const resolve of w) { resolve('') }
+		})
+
+		this.sessions.set(this.key(client, sessionId), session)
+		return session
+	}
+
+	private getSession(client: string, sessionId: string): Session {
 		const s = this.sessions.get(this.key(client, sessionId))
 		if (!s) { throw new Error(`no session for ${client}:${sessionId}`) }
 		return s
@@ -300,30 +321,31 @@ export declare class AgentInbox {
 	}
 
 	listAllSessions(): { client: string, sessionId: string, cwd: string, alive: boolean }[] {
-		return Array.from(this.sessions.values(), s => s.info())
+		return Array.from(this.sessions.values(), s => ({ client: s.client, sessionId: s.sessionId, cwd: s.cwd, alive: s.alive }))
 	}
 
 	input(client: string, sessionId: string, data: string): { ok: true } {
-		this.getSession(client, sessionId).write(data)
+		const s = this.getSession(client, sessionId)
+		if (s.alive) { s.pty.write(data) }
 		return { ok: true }
 	}
 
-	screenContent(client: string, sessionId: string): string {
-		return this.getSession(client, sessionId).serialize()
-	}
-
 	read(client: string, sessionId: string): Promise<string> {
-		return this.getSession(client, sessionId).read()
+		const s = this.getSession(client, sessionId)
+		if (!s.alive) { return Promise.resolve('') }
+		return new Promise(resolve => s.waiters.push(resolve))
 	}
 
 	resize(client: string, sessionId: string, cols: number, rows: number): { ok: true } {
-		this.getSession(client, sessionId).resize(cols, rows)
+		const s = this.getSession(client, sessionId)
+		if (s.alive) { s.pty.resize(cols, rows) }
 		return { ok: true }
 	}
 
 	destroy(client: string, sessionId: string): { ok: true } {
 		const s = this.getSession(client, sessionId)
-		s.kill()
+		if (s.alive) { s.pty.kill() }
+		s.cleanup?.()
 		this.sessions.delete(this.key(client, sessionId))
 		return { ok: true }
 	}
@@ -402,11 +424,6 @@ class PiUiProvider {
 	@tool(z.string(), z.string(), z.string())
 	input(client: string, sessionId: string, data: string): { ok: true } {
 		return this.root.input(client, sessionId, data)
-	}
-
-	@tool(z.string(), z.string())
-	screenContent(client: string, sessionId: string): string {
-		return this.root.screenContent(client, sessionId)
 	}
 
 	@tool(z.string(), z.string())
